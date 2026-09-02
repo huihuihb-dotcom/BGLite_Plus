@@ -1830,8 +1830,11 @@ local function CleanYYNumber(raw)
     return nil
 end
 
-local function FormatYYHyperlink(yyNum)
-    return "|cff00BFFF|Hgarrmission:BGLiteChannelLink:" .. yyNum .. "|h[YY " .. yyNum .. "]|h|r"
+local function FormatYYHyperlink(yyNum, tag)
+    tag = (tag and tag ~= "") and tag or "YY"
+    -- 核心防破坏屏障：在 tag 与数字之间插入 |r|cff00BFFF 管道颜色切换符
+    -- 视觉上完全连贯无缝显示为 [DD 123456]，但可物理阻断任何第三方插件基于关键字+空格+数字的粗暴正则识别
+    return "|cff00BFFF|Hgarrmission:BGVoice_" .. tag .. "_" .. yyNum .. "|h[" .. tag .. "|r|cff00BFFF " .. yyNum .. "]|h|r"
 end
 
 local function YYMessageFilter(self, event, msg, sender, ...)
@@ -1844,30 +1847,30 @@ local function YYMessageFilter(self, event, msg, sender, ...)
     end
 
     -- 如果消息中已经包含我们的语音链接或者已经带有超链接，避免重复或二次破坏
-    if msg:find("garrmission:BGLiteChannelLink:") or msg:find("garrmission:BGLiteCopyYY:") then
+    if msg:find("garrmission:BGVoice_") or msg:find("garrmission:BGLite") or msg:find("garrmission:BiaoGeYY:") then
         return false, msg, sender, ...
     end
 
     local modified = false
 
-    local patterns = {
-        "[yY][yY]%s*[:：=＝%-%s]*([0-9]+)",
-        "歪歪%s*[:：=＝%-%s]*([0-9]+)",
-        "[dD][dD]%s*[:：=＝%-%s]*([0-9]+)",
-        "[kK][oO][oO][kK]%s*[:：=＝%-%s]*([0-9]+)",
-        "[vV][xX]%s*[:：=＝%-%s]*([0-9]+)",
-        "频道%s*[:：=＝%-%s]*([0-9]+)",
-        "语音%s*[:：=＝%-%s]*([0-9]+)",
+    local patternConfigs = {
+        { pat = "[yY][yY]%s*[:：=＝%-%s]*([0-9]+)", tag = "YY" },
+        { pat = "歪歪%s*[:：=＝%-%s]*([0-9]+)", tag = "YY" },
+        { pat = "[dD][dD]%s*[:：=＝%-%s]*([0-9]+)", tag = "DD" },
+        { pat = "[kK][oO][oO][kK]%s*[:：=＝%-%s]*([0-9]+)", tag = "KOOK" },
+        { pat = "[vV][xX]%s*[:：=＝%-%s]*([0-9]+)", tag = "VX" },
+        { pat = "频道%s*[:：=＝%-%s]*([0-9]+)", tag = "频道" },
+        { pat = "语音%s*[:：=＝%-%s]*([0-9]+)", tag = "语音" },
     }
 
-    for _, pat in ipairs(patterns) do
+    for _, cfg in ipairs(patternConfigs) do
         local startIdx = 1
         while true do
-            local s, e, cap = msg:find(pat, startIdx)
+            local s, e, cap = msg:find(cfg.pat, startIdx)
             if not s then break end
             local cleanNum = CleanYYNumber(cap)
             if cleanNum then
-                -- 检查并吸收外部可能自带的中括号或中文括号，避免出现 [[YY ...]] 嵌套
+                -- 检查并吸收外部可能自带的中括号或中文括号，避免出现 [[DD ...]] 嵌套
                 if s > 1 and msg:sub(s - 1, s - 1) == "[" and msg:sub(e + 1, e + 1) == "]" then
                     s = s - 1
                     e = e + 1
@@ -1882,7 +1885,7 @@ local function YYMessageFilter(self, event, msg, sender, ...)
                     e = e + 3
                 end
 
-                local link = FormatYYHyperlink(cleanNum)
+                local link = FormatYYHyperlink(cleanNum, cfg.tag)
                 msg = msg:sub(1, s - 1) .. link .. msg:sub(e + 1)
                 startIdx = s + #link
                 modified = true
@@ -1921,9 +1924,10 @@ for _, evt in ipairs(yyChatEvents) do
     ChatFrame_AddMessageEventFilter(evt, YYMessageFilter)
 end
 
--- 全局一键复制弹窗 (YY Copy Modal)
+-- 全局一键复制弹窗 (YY / DD / Voice Copy Modal)
 local copyModal = nil
-local function ShowYYCopyModal(yyNumber)
+local function ShowYYCopyModal(yyNumber, tag)
+    tag = (tag and tag ~= "") and tag or "YY"
     if not copyModal then
         copyModal = CreateFrame("Frame", "BG_YYCopyModalFrame", UIParent, "BackdropTemplate")
         copyModal:SetSize(280, 100)
@@ -1942,7 +1946,8 @@ local function ShowYYCopyModal(yyNumber)
         local title = copyModal:CreateFontString(nil, "OVERLAY")
         title:SetFont(BIAOGE_TEXT_FONT, 13, "OUTLINE")
         title:SetPoint("TOP", 0, -12)
-        title:SetText(BG.STC_g1(L["YY / 语音频道号 (已全选)"]))
+        title:SetText(BG.STC_g1(tag .. " / 语音频道号 (已全选)"))
+        copyModal.title = title
 
         local tip = copyModal:CreateFontString(nil, "OVERLAY")
         tip:SetFont(BIAOGE_TEXT_FONT, 11, "OUTLINE")
@@ -1977,6 +1982,9 @@ local function ShowYYCopyModal(yyNumber)
         closeBtn:SetScript("OnClick", function() copyModal:Hide() end)
     end
 
+    if copyModal.title then
+        copyModal.title:SetText(BG.STC_g1(tag .. " / 语音频道号 (已全选)"))
+    end
     copyModal.editBox:SetText(yyNumber)
     copyModal:Show()
     copyModal.editBox:SetFocus()
@@ -1987,8 +1995,15 @@ end
 -- Hook SetItemRef 处理超链接点击
 hooksecurefunc("SetItemRef", function(link, text, button)
     if not link then return end
-    local yyNum = link:match("^garrmission:BGLiteChannelLink:(%d+)") or link:match("^garrmission:BGLiteCopyYY:(%d+)") or link:match("^BGLiteCopyYY:(%d+)")
+    local channelTag, yyNum = link:match("^garrmission:BGVoice_(%a+)_(%d+)")
+    if not yyNum then
+        yyNum, channelTag = link:match("^garrmission:BGLiteChannelLink:(%d+):?(.*)")
+    end
+    if not yyNum then
+        yyNum = link:match("^garrmission:BGLiteCopyYY:(%d+)") or link:match("^BGLiteCopyYY:(%d+)")
+    end
     if yyNum then
+        local tag = (channelTag and channelTag ~= "") and channelTag or "YY"
         if IsShiftKeyDown() then
             -- SHIFT 点击：填入聊天输入框
             if ChatEdit_GetActiveWindow() then
@@ -2002,11 +2017,11 @@ hooksecurefunc("SetItemRef", function(link, text, button)
         elseif IsAltKeyDown() then
             -- ALT 点击：在团队/小队广播
             local channel = (IsInRaid and IsInRaid()) and "RAID" or (IsInGroup and IsInGroup() and "PARTY" or "SAY")
-            SendChatMessage(format(L["请进YY语音频道：%s"], yyNum), channel)
-            RaidTool.Log(format("已在频道广播 YY: %s", yyNum))
+            SendChatMessage(format("请进%s语音频道：%s", tag, yyNum), channel)
+            RaidTool.Log(format("已在频道广播 %s: %s", tag, yyNum))
         else
             -- 普通左键点击：呼出全选复制浮窗
-            ShowYYCopyModal(yyNum)
+            ShowYYCopyModal(yyNum, tag)
         end
     end
 end)
