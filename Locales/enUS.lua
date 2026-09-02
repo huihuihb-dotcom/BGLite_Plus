@@ -3115,8 +3115,13 @@ do -- Group welcome messages
     L["关键词自动发YY"] = "Auto-send YY by keyword"
     L["启用关键词自动发YY"] = "Enable YY keyword reply"
     L["当我是团长时生效"] = "Enable while I am the leader"
-    L["当我是助理时生效"] = "Enable while I am an assistant"
     L["当团队频道有人打字\"YY\"(不分大小写)时，自动发送你的YY号。"] = "Automatically send your YY number when someone types \"YY\" in group chat."
+    L["仅团长/助理"] = "Leader/Assistant Only"
+    L["仅团长/助理生效"] = "Active only for leader/assistant"
+    L["勾选后，只有当自己是团长或团队助理(A)时，才会自动发送进组密语或团队通知，避免进入他人团队时产生误发。"] = "When checked, welcome whispers and raid notifications will only be sent if you are the group leader or an assistant (A)."
+    L["* 当前已启用[仅限团长/助理]，仅在拥有管理权限时发送。"] = "* Active only for leader/assistant is enabled."
+    L["当有新玩家加入队伍或团队时，自动向其发送设定的密语（支持 {name} 自动替换）。"] = "Automatically whisper newly joined players (supports {name} placeholder)."
+    L["当有新玩家加入队伍或团队时，自动在团队/小队频道发送进组欢迎公告。"] = "Automatically send a welcome message in group/raid chat when new members join."
 end
 
 do -- Raid cooldown receiver

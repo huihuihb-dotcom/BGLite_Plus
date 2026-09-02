@@ -34,6 +34,7 @@ function ns.InitRaidToolDB()
 
     -- 新成员进组通知配置
     if db.autoWhisperNewMember == nil then db.autoWhisperNewMember = false end
+    if db.notifyOnlyLeader == nil then db.notifyOnlyLeader = true end
     if db.whisperNewMemberText == nil then db.whisperNewMemberText = "欢迎进组！请上YY：123456，进组打1" end
     if db.whisperHistory == nil then
         db.whisperHistory = {
@@ -169,6 +170,13 @@ local function CanIInvite()
     return false
 end
 
+local function IsLeaderOrAssistant()
+    if not IsInGroup() then return false end
+    if UnitIsGroupLeader("player") then return true end
+    if IsInRaid() and UnitIsGroupAssistant("player") then return true end
+    return false
+end
+
 local recentlyInvited = {}
 
 local function DoInvite(sender)
@@ -269,19 +277,25 @@ local function SendNewMemberNotification(targetName)
     local myName = CleanPlayerName(UnitName("player") or "")
     if cleanName == "" or cleanName == myName then return end
 
+    local db = BiaoGe and BiaoGe.RaidTool
+    if not db then return end
+
+    -- 若开启了仅限团长/助理，且当前不是团长或助理，则直接拦截
+    if db.notifyOnlyLeader and not IsLeaderOrAssistant() then
+        return
+    end
+
     local now = GetTime()
     if recentlyNotified[cleanName] and (now - recentlyNotified[cleanName] < 8) then
         return
     end
     recentlyNotified[cleanName] = now
 
-    local db = BiaoGe and BiaoGe.RaidTool
-    if not db then return end
-
     -- 延时 1.0 秒，确保客户端与服务器小队/团队成员路由完全就绪
     C_Timer.After(1.0, function()
-        -- 再次校验：确保该玩家当前仍在队伍中
+        -- 再次校验：确保该玩家当前仍在队伍中，且自身仍为团长/助理
         if not IsPlayerInGroup(cleanName) then return end
+        if db.notifyOnlyLeader and not IsLeaderOrAssistant() then return end
 
         -- 1. 自动密语
         if db.autoWhisperNewMember and db.whisperNewMemberText and db.whisperNewMemberText ~= "" then
@@ -322,6 +336,14 @@ notifyFrame:SetScript("OnEvent", function(self, event, ...)
     if event == "PLAYER_ENTERING_WORLD" then
         isFirstRosterScan = true
         wipe(knownRosterMembers)
+        return
+    end
+
+    local db = BiaoGe and BiaoGe.RaidTool
+    if not db or (not db.autoWhisperNewMember and not db.autoRaidAnnounceNew) then
+        return
+    end
+    if db.notifyOnlyLeader and not IsLeaderOrAssistant() then
         return
     end
 
@@ -863,6 +885,28 @@ function RaidTool.CreateUI(parent)
     notifTitle:SetPoint("TOPLEFT", 14, leftY)
     notifTitle:SetText(BG.STC_g1(L["新进成员自动通知 (进组触发)"]))
 
+    local cbNotifyOnlyLeader = CreateFrame("CheckButton", nil, leftPanel, "UICheckButtonTemplate")
+    cbNotifyOnlyLeader:SetSize(18, 18)
+    cbNotifyOnlyLeader:SetPoint("TOPLEFT", 215, leftY + 1)
+    cbNotifyOnlyLeader.text = cbNotifyOnlyLeader:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
+    cbNotifyOnlyLeader.text:SetPoint("LEFT", cbNotifyOnlyLeader, "RIGHT", 3, 0)
+    cbNotifyOnlyLeader.text:SetFont(BIAOGE_TEXT_FONT, 11, "OUTLINE")
+    cbNotifyOnlyLeader.text:SetText(L["仅团长/助理"])
+    cbNotifyOnlyLeader:SetChecked(BiaoGe.RaidTool.notifyOnlyLeader)
+    cbNotifyOnlyLeader:SetHitRectInsets(-2, -cbNotifyOnlyLeader.text:GetStringWidth() - 4, -2, -2)
+    cbNotifyOnlyLeader:SetScript("OnClick", function(self)
+        BiaoGe.RaidTool.notifyOnlyLeader = self:GetChecked()
+        BG.PlaySound(1)
+    end)
+    cbNotifyOnlyLeader:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_TOPLEFT", 0, 0)
+        GameTooltip:ClearLines()
+        GameTooltip:AddLine(L["仅团长/助理生效"], 1, 1, 1, true)
+        GameTooltip:AddLine(L["勾选后，只有当自己是团长或团队助理(A)时，才会自动发送进组密语或团队通知，避免进入他人团队时产生误发。"], 1, 0.82, 0, true)
+        GameTooltip:Show()
+    end)
+    cbNotifyOnlyLeader:SetScript("OnLeave", GameTooltip_Hide)
+
     leftY = leftY - 20
 
     -- 统一预设管理弹窗构造器 (支持选取、实时删除)
@@ -982,6 +1026,17 @@ function RaidTool.CreateUI(parent)
         BiaoGe.RaidTool.autoWhisperNewMember = self:GetChecked()
         BG.PlaySound(1)
     end)
+    cbWhisper:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_TOPLEFT", 0, 0)
+        GameTooltip:ClearLines()
+        GameTooltip:AddLine(L["自动密语新进队成员"], 1, 1, 1, true)
+        GameTooltip:AddLine(L["当有新玩家加入队伍或团队时，自动向其发送设定的密语（支持 {name} 自动替换）。"], 1, 0.82, 0, true)
+        if BiaoGe.RaidTool.notifyOnlyLeader then
+            GameTooltip:AddLine(L["* 当前已启用[仅限团长/助理]，仅在拥有管理权限时发送。"], 0.3, 1, 0.3, true)
+        end
+        GameTooltip:Show()
+    end)
+    cbWhisper:SetScript("OnLeave", GameTooltip_Hide)
 
     leftY = leftY - 20
 
@@ -1051,6 +1106,17 @@ function RaidTool.CreateUI(parent)
         BiaoGe.RaidTool.autoRaidAnnounceNew = self:GetChecked()
         BG.PlaySound(1)
     end)
+    cbRaidAnn:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_TOPLEFT", 0, 0)
+        GameTooltip:ClearLines()
+        GameTooltip:AddLine(L["自动在团队/小队频道发言"], 1, 1, 1, true)
+        GameTooltip:AddLine(L["当有新玩家加入队伍或团队时，自动在团队/小队频道发送进组欢迎公告。"], 1, 0.82, 0, true)
+        if BiaoGe.RaidTool.notifyOnlyLeader then
+            GameTooltip:AddLine(L["* 当前已启用[仅限团长/助理]，仅在拥有管理权限时发送。"], 0.3, 1, 0.3, true)
+        end
+        GameTooltip:Show()
+    end)
+    cbRaidAnn:SetScript("OnLeave", GameTooltip_Hide)
 
     leftY = leftY - 20
 
