@@ -58,6 +58,20 @@ function ns.InitRaidToolDB()
     if rdb.keepPosInGroup == nil then rdb.keepPosInGroup = true end
     if rdb.profiles == nil then
         rdb.profiles = {}
+    else
+        -- 清理旧版本遗留下来的数字索引与非法数据
+        for k, v in pairs(rdb.profiles) do
+            if type(k) == "number" or type(v) ~= "table" then
+                rdb.profiles[k] = nil
+            end
+        end
+    end
+    -- 一次性彻底重置清洗开发测试阶段遗留的脏预设数据
+    if BG.Once then
+        BG.Once("RaidGroups_ResetLegacyDirtyProfiles_260902", 26090201, function()
+            rdb.profiles = {}
+            rdb.selectedProfile = nil
+        end)
     end
 end
 
@@ -1426,6 +1440,12 @@ function RaidTool.CreateUI(parent)
     end
 
     btnSyncRoster:SetScript("OnClick", function()
+        if BiaoGe.RaidGroups then
+            BiaoGe.RaidGroups.selectedProfile = nil
+        end
+        if RefreshProfileTabs then
+            RefreshProfileTabs()
+        end
         RaidTool.SyncCurrentRaidRoster(true)
     end)
 
@@ -1460,15 +1480,81 @@ function RaidTool.CreateUI(parent)
     local tabButtons = {}
     local RefreshProfileTabs = nil
 
+    local function LoadProfile(pName)
+        if not pName then return end
+        local pData = BiaoGe.RaidGroups and BiaoGe.RaidGroups.profiles and BiaoGe.RaidGroups.profiles[pName]
+        if not pData or type(pData) ~= "table" then return end
+        BiaoGe.RaidGroups.selectedProfile = pName
+        wipe(currentRosterList)
+        wipe(currentRosterClasses)
+        for i = 1, 40 do
+            local slotData = pData[i]
+            if type(slotData) == "table" then
+                currentRosterList[i] = slotData.name
+                currentRosterClasses[i] = slotData.class
+            elseif type(slotData) == "string" and slotData ~= "" then
+                currentRosterList[i] = slotData
+                if UnitName(slotData) then
+                    currentRosterClasses[i] = select(2, UnitClass(slotData))
+                end
+            end
+            UpdateSlotVisual(i)
+        end
+        UpdateGroupBoxesVisibility()
+        if RefreshProfileTabs then RefreshProfileTabs() end
+    end
+
+    local function SaveProfile(name)
+        if not name or name == "" then return end
+        BiaoGe.RaidGroups = BiaoGe.RaidGroups or {}
+        BiaoGe.RaidGroups.profiles = BiaoGe.RaidGroups.profiles or {}
+        BiaoGe.RaidGroups.profiles[name] = {}
+        for i = 1, 40 do
+            if currentRosterList[i] and currentRosterList[i] ~= "" then
+                BiaoGe.RaidGroups.profiles[name][i] = {
+                    name = currentRosterList[i],
+                    class = currentRosterClasses[i],
+                }
+            end
+        end
+        BiaoGe.RaidGroups.selectedProfile = name
+        if RefreshProfileTabs then RefreshProfileTabs() end
+        RaidTool.Log(format("已成功保存预设方案 [%s]！", name))
+        BG.PlaySound(1)
+    end
+
+    local function HandleTabClick(self, button)
+        if button == "RightButton" then
+            -- 删除预设
+            BiaoGe.RaidGroups.profiles[self.profileName] = nil
+            if BiaoGe.RaidGroups.selectedProfile == self.profileName then
+                BiaoGe.RaidGroups.selectedProfile = nil
+            end
+            RaidTool.Log(format("已删除预设方案 [%s]。", self.profileName))
+            if RefreshProfileTabs then RefreshProfileTabs() end
+            BG.PlaySound(1)
+        elseif IsAltKeyDown() then
+            -- 覆盖保存
+            SaveProfile(self.profileName)
+        else
+            -- 加载预设
+            LoadProfile(self.profileName)
+            RaidTool.Log(format("已载入预设方案 [%s]。", self.profileName))
+            BG.PlaySound(1)
+        end
+    end
+
     RefreshProfileTabs = function()
         for _, btn in ipairs(tabButtons) do
             btn:Hide()
         end
 
-        local profiles = BiaoGe.RaidGroups.profiles or {}
+        local profiles = BiaoGe.RaidGroups and BiaoGe.RaidGroups.profiles or {}
         local names = {}
-        for pName, _ in pairs(profiles) do
-            tinsert(names, pName)
+        for pName, pData in pairs(profiles) do
+            if type(pName) == "string" and pName ~= "" and type(pData) == "table" then
+                tinsert(names, pName)
+            end
         end
         table.sort(names)
 
@@ -1506,6 +1592,7 @@ function RaidTool.CreateUI(parent)
                     btn.text:SetPoint("CENTER", 0, 0)
 
                     btn:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+                    btn:SetScript("OnClick", HandleTabClick)
 
                     tabButtons[idx] = btn
                 end
@@ -1562,48 +1649,6 @@ function RaidTool.CreateUI(parent)
                     GameTooltip:Hide()
                 end)
 
-                btn:SetScript("OnClick", function(self, button)
-                    if button == "RightButton" then
-                        -- 删除预设
-                        BiaoGe.RaidGroups.profiles[self.profileName] = nil
-                        if BiaoGe.RaidGroups.selectedProfile == self.profileName then
-                            BiaoGe.RaidGroups.selectedProfile = nil
-                        end
-                        RaidTool.Log(format("已删除预设方案 [%s]。", self.profileName))
-                        RefreshProfileTabs()
-                        BG.PlaySound(1)
-                    elseif IsAltKeyDown() then
-                        -- 覆盖保存
-                        BiaoGe.RaidGroups.profiles[self.profileName] = {}
-                        for i = 1, 40 do
-                            BiaoGe.RaidGroups.profiles[self.profileName][i] = currentRosterList[i]
-                        end
-                        BiaoGe.RaidGroups.selectedProfile = self.profileName
-                        RaidTool.Log(format("已将当前网格覆盖保存到预设 [%s]！", self.profileName))
-                        RefreshProfileTabs()
-                        BG.PlaySound(1)
-                    else
-                        -- 加载预设
-                        BiaoGe.RaidGroups.selectedProfile = self.profileName
-                        local pData = BiaoGe.RaidGroups.profiles[self.profileName]
-                        if pData and type(pData) == "table" then
-                            wipe(currentRosterList)
-                            wipe(currentRosterClasses)
-                            for i = 1, 40 do
-                                currentRosterList[i] = pData[i]
-                                if pData[i] and pData[i] ~= "" and UnitName(pData[i]) then
-                                    currentRosterClasses[i] = select(2, UnitClass(pData[i]))
-                                end
-                                UpdateSlotVisual(i)
-                            end
-                            UpdateGroupBoxesVisibility()
-                        end
-                        RaidTool.Log(format("已载入预设方案 [%s]。", self.profileName))
-                        RefreshProfileTabs()
-                        BG.PlaySound(1)
-                    end
-                end)
-
                 btn:Show()
             end
         end
@@ -1619,7 +1664,9 @@ function RaidTool.CreateUI(parent)
         OnShow = function(self)
             local editBox = _G[self:GetName() .. "EditBox"]
             if editBox then
-                editBox:SetText("")
+                local defName = BiaoGe.RaidGroups and BiaoGe.RaidGroups.selectedProfile or ""
+                editBox:SetText(defName)
+                editBox:HighlightText()
                 editBox:SetFocus()
             end
         end,
@@ -1627,33 +1674,16 @@ function RaidTool.CreateUI(parent)
             local editBox = _G[self:GetName() .. "EditBox"]
             local name = editBox and editBox:GetText():trim()
             if name and name ~= "" then
-                BiaoGe.RaidGroups.profiles[name] = {}
-                for i = 1, 40 do
-                    BiaoGe.RaidGroups.profiles[name][i] = currentRosterList[i]
-                end
-                BiaoGe.RaidGroups.selectedProfile = name
-                RefreshProfileTabs()
-                RaidTool.Log(format("已成功保存预设方案 [%s]！", name))
-                BG.PlaySound(1)
+                SaveProfile(name)
             end
         end,
         EditBoxOnEnterPressed = function(self)
             local parent = self:GetParent()
-            local name = self:GetText():trim()
-            if name and name ~= "" then
-                BiaoGe.RaidGroups.profiles[name] = {}
-                for i = 1, 40 do
-                    BiaoGe.RaidGroups.profiles[name][i] = currentRosterList[i]
-                end
-                BiaoGe.RaidGroups.selectedProfile = name
-                RefreshProfileTabs()
-                RaidTool.Log(format("已成功保存预设方案 [%s]！", name))
-                BG.PlaySound(1)
-            end
-            parent:Hide()
+            StaticPopup_OnClick(parent, 1)
         end,
         EditBoxOnEscapePressed = function(self)
-            self:GetParent():Hide()
+            local parent = self:GetParent()
+            StaticPopup_OnClick(parent, 2)
         end,
         timeout = 0,
         whileDead = true,
@@ -1684,12 +1714,41 @@ function RaidTool.CreateUI(parent)
     rosterAutoUpdateFrame:SetScript("OnEvent", function(self, event)
         if mainFrame:IsShown() and not RosterState.isProcessing then
             RaidTool.SyncCurrentRaidRoster(false)
+            if BiaoGe.RaidGroups then
+                BiaoGe.RaidGroups.selectedProfile = nil
+            end
+            if RefreshProfileTabs then
+                RefreshProfileTabs()
+            end
         end
     end)
 
     mainFrame:HookScript("OnShow", function()
-        RaidTool.SyncCurrentRaidRoster(false)
         RefreshProfileTabs()
+        if (IsInRaid and IsInRaid()) or (IsInGroup and IsInGroup()) or (GetNumGroupMembers and GetNumGroupMembers() > 0) then
+            -- 组队/团队状态下，打开面板自动同步当前真实阵容
+            RaidTool.SyncCurrentRaidRoster(false)
+            if BiaoGe.RaidGroups then
+                BiaoGe.RaidGroups.selectedProfile = nil
+            end
+            if RefreshProfileTabs then
+                RefreshProfileTabs()
+            end
+        else
+            -- 单人未组队状态下，如果有保存的预设方案，优先读出预设展示
+            local profiles = BiaoGe.RaidGroups and BiaoGe.RaidGroups.profiles or {}
+            local sel = BiaoGe.RaidGroups and BiaoGe.RaidGroups.selectedProfile
+            if sel and profiles[sel] then
+                LoadProfile(sel)
+            else
+                local firstProfile = next(profiles)
+                if firstProfile then
+                    LoadProfile(firstProfile)
+                else
+                    RaidTool.SyncCurrentRaidRoster(false)
+                end
+            end
+        end
     end)
 end
 
