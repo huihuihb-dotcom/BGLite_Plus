@@ -290,8 +290,14 @@ local function InitDefaultOptions()
     if BiaoGe.options["roleOverviewOnlyFullLevel"] == nil then
         BiaoGe.options["roleOverviewOnlyFullLevel"] = 1
     end
+    if BiaoGe.options["roleOverviewResOnlyFullLevel"] == nil then
+        BiaoGe.options["roleOverviewResOnlyFullLevel"] = 0
+    end
     if BiaoGe.options["roleOverviewClassSort"] == nil then
         BiaoGe.options["roleOverviewClassSort"] = "level"
+    end
+    if BiaoGe.options["roleOverviewSort1"] == nil then
+        BiaoGe.options["roleOverviewSort1"] = "iLevel-class-player"
     end
     if BiaoGe.options["roleOverviewShowBuffCD"] == nil then
         BiaoGe.options["roleOverviewShowBuffCD"] = 1

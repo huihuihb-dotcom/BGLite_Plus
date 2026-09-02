@@ -308,15 +308,25 @@ local function CreateItem(t_paizi, i, v, isNewUI)
         f:SetScript("OnLeave", OnLeave)
     end)
 end
-local trinketSlots = { "13", "14" }
-local function CreateTrinkets(t_paizi, equip, isNewUI)
-    t_paizi:SetWidth(itemWidth * 2 + 2)
-    for i, slot in ipairs(trinketSlots) do
+local defaultEquipSlots = {
+    weapons = { "16", "17", "18" },
+    trinkets = { "13", "14" },
+    rings = { "11", "12" },
+    tier = { "1", "3", "5", "10", "7" },
+    neck_back = { "2", "15" },
+}
+local function CreateEquipIcons(t_paizi, equip, slots, isNewUI)
+    slots = slots or defaultEquipSlots.trinkets
+    local count = #slots
+    t_paizi:SetWidth(itemWidth * count + count)
+    local displayIndex = 0
+    for _, slot in ipairs(slots) do
         local info = equip and equip[slot]
         if info and info.link then
+            displayIndex = displayIndex + 1
             local f = CreateFrame("Frame", nil, BG.FBCDFrame, "BackdropTemplate")
             f:SetSize(itemWidth, itemWidth)
-            f:SetPoint("LEFT", t_paizi, "LEFT", (i - 1) * (itemWidth + 1), isNewUI and 0 or 1)
+            f:SetPoint("LEFT", t_paizi, "LEFT", (displayIndex - 1) * (itemWidth + 1), isNewUI and 0 or 1)
             f:EnableMouse(true)
             f.link = info.link
 
@@ -335,6 +345,7 @@ local function CreateTrinkets(t_paizi, equip, isNewUI)
         end
     end
 end
+local CreateTrinkets = CreateEquipIcons
 local function SetEquipFrameFuc(bt, isAccounts, realmID, player, colorplayer, level, class, iLevel)
     if BG.ShowEquipFrame then
         local r, g, b = GetClassColor(class)
@@ -621,7 +632,9 @@ do
                 if not isAccounts or not includeLocal or not (BiaoGe[MONEY] and BiaoGe[MONEY][realmID] and BiaoGe[MONEY][realmID][player]) then
                     local playerInfo = db.playerInfo and db.playerInfo[realmID] and db.playerInfo[realmID][player]
                     local level = playerInfo and playerInfo.level
-                    if (level and level >= ((BiaoGe.options and BiaoGe.options["roleOverviewNotShowLevel"]) or 0)) then
+                    local onlyFull = (BiaoGe.options and BiaoGe.options.roleOverviewResOnlyFullLevel == 1)
+                    if level and (not onlyFull or level >= (BG.fullLevel_RoleOverview or 0))
+                        and (level >= ((BiaoGe.options and BiaoGe.options["roleOverviewNotShowLevel"]) or 0)) then
                         local class = playerInfo and playerInfo.class
                         local talent = playerInfo and playerInfo.talent
                         local iLevel = (playerInfo and playerInfo.iLevel) or (db.PlayerItemsLevel and db.PlayerItemsLevel[realmID] and db.PlayerItemsLevel[realmID][player]) or 0
@@ -1018,7 +1031,7 @@ function BG.SetFBCD(self, position, click, refresh)
     if BG.SKILLall_table then
         for i, v in ipairs(BG.SKILLall_table) do
             for id, yes in pairs(BiaoGe.SKILLchoice) do
-                if v.id == id then
+                if v.id == id and (yes == 1 or yes == true) then
                     tinsert(MONEYchoice_table, v)
                 end
             end
@@ -1028,7 +1041,7 @@ function BG.SetFBCD(self, position, click, refresh)
     -- 根据你选择的货币，生成table
     for i, v in ipairs(BG.MONEYall_table) do
         for id, yes in pairs(BiaoGe.MONEYchoice) do
-            if v.id == id then
+            if v.id == id and (yes == 1 or yes == true) then
                 tinsert(MONEYchoice_table, v)
             end
         end
@@ -1771,7 +1784,8 @@ function BG.SetFBCD(self, position, click, refresh)
                     t_paizi:SetTextColor(0, 1, 0)
                 elseif vv.type == "equip" then
                     t_paizi:SetText(" ")
-                    CreateTrinkets(t_paizi, v.equip, isNewUI)
+                    local slots = vv.slots or defaultEquipSlots[vv.id] or defaultEquipSlots.trinkets
+                    CreateEquipIcons(t_paizi, v.equip, slots, isNewUI)
                 elseif vv.type == "items" then
                     t_paizi:SetText(" ")
                     if type(info) == "table" then

@@ -1013,15 +1013,56 @@ GameTooltip:SetCurrencyByID(697)
             )
         end
 
+        local weapons = {
+            name = L["武器"],
+            color = "C084FC",
+            type = "equip",
+            id = "weapons",
+            slots = { "16", "17", "18" },
+            tex = 132392,
+            width = 75,
+        }
         local trinkets = {
             name = L["饰品"],
             color = "C084FC",
             type = "equip",
             id = "trinkets",
+            slots = { "13", "14" },
             tex = 237274,
             width = 55,
         }
-        tinsert(BG.MONEYall_table, 2, trinkets)
+        local rings = {
+            name = L["戒指"],
+            color = "C084FC",
+            type = "equip",
+            id = "rings",
+            slots = { "11", "12" },
+            tex = 133400,
+            width = 55,
+        }
+        local tier = {
+            name = L["套装"],
+            color = "C084FC",
+            type = "equip",
+            id = "tier",
+            slots = { "1", "3", "5", "10", "7" },
+            tex = 132766,
+            width = 115,
+        }
+        local neck_back = {
+            name = L["项链/披风"],
+            color = "C084FC",
+            type = "equip",
+            id = "neck_back",
+            slots = { "2", "15" },
+            tex = 133403,
+            width = 55,
+        }
+        tinsert(BG.MONEYall_table, 2, weapons)
+        tinsert(BG.MONEYall_table, 3, trinkets)
+        tinsert(BG.MONEYall_table, 4, rings)
+        tinsert(BG.MONEYall_table, 5, tier)
+        tinsert(BG.MONEYall_table, 6, neck_back)
 
         for i, v in ipairs(BG.MONEYall_table) do
             if not v.type and type(v.id) == "number" then
@@ -1035,20 +1076,26 @@ GameTooltip:SetCurrencyByID(697)
         end
 
         if not BG.IsRetail then
-            local fuc = C_TradeSkillUI.GetTradeSkillDisplayName
+            local function GetSkillDisplayName(skillID, fallback)
+                if C_TradeSkillUI and C_TradeSkillUI.GetTradeSkillDisplayName then
+                    local name = C_TradeSkillUI.GetTradeSkillDisplayName(skillID)
+                    if name and name ~= "" then
+                        return name
+                    end
+                end
+                return fallback
+            end
             local color = "ADFF2F"
-            -- local color = "FF99FF"
-            -- local color = "F48CBA"
 
             BG.SKILLall_table = {
                 { name = "main", id = 0, name2 = L["主专业"], color = color, type = "skill", tex = "", width = 110 }, -- 主专业
-                { name = "fish", id = 356, name2 = fuc(356), color = color, type = "skill", tex = 136245, width = 60 }, -- 钓鱼
-                { name = "cook", id = 185, name2 = fuc(185), color = color, type = "skill", tex = 133971, width = 60 }, -- 烹饪
-                { name = "heal", id = 129, name2 = fuc(129), color = color, type = "skill", tex = 135966, width = 60 }, -- 急救
+                { name = "fish", id = 356, name2 = GetSkillDisplayName(356, L["钓鱼"]), color = color, type = "skill", tex = 136245, width = 60 }, -- 钓鱼
+                { name = "cook", id = 185, name2 = GetSkillDisplayName(185, L["烹饪"]), color = color, type = "skill", tex = 133971, width = 60 }, -- 烹饪
+                { name = "heal", id = 129, name2 = GetSkillDisplayName(129, L["急救"]), color = color, type = "skill", tex = 135966, width = 60 }, -- 急救
             }
             if BG.verOver4 then
                 tinsert(BG.SKILLall_table, 2,
-                    { name = "archaeology", id = 794, name2 = fuc(794), color = color, type = "skill", tex = 441139, width = 60 }) -- 考古
+                    { name = "archaeology", id = 794, name2 = GetSkillDisplayName(794, L["考古学"] or "考古学"), color = color, type = "skill", tex = 441139, width = 60 }) -- 考古
             end
         end
     end

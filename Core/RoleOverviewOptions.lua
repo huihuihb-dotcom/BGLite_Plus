@@ -169,8 +169,8 @@ function ns.InitRoleOverviewOptions()
         L["关闭时：默认仅展示当前服务器角色，按住 Shift 键临时切换为全部服务器。"],
     })
 
-    local btFullLevel = CreateCheckButton("roleOverviewOnlyFullLevel", L["默认仅显示满级角色"], content, 260, yOffset, {
-        L["默认仅显示满级角色"],
+    local btFullLevel = CreateCheckButton("roleOverviewOnlyFullLevel", L["CD展示仅显示满级角色"], content, 260, yOffset, {
+        L["CD展示仅显示满级角色"],
         L["开启时：团本 CD 列表仅展示满级角色（WLK/泰坦80级/TBC70级/60级时代60级）。"],
         L["关闭时：低等级小号也会显示在团本 CD 列表中。"],
     })
@@ -178,23 +178,48 @@ function ns.InitRoleOverviewOptions()
     yOffset = yOffset - 35
 
     -- 基础开关 - 行 2
-    local btTalent = CreateCheckButton("roleOverviewShowTalent", L["显示角色天赋图标"], content, 15, yOffset, {
-        L["显示角色天赋图标"],
-        L["在角色名字左侧显示其主要天赋树图标。"],
-    })
-
-    local btFaction = CreateCheckButton("roleOverviewShowFaction", L["显示角色阵营颜色"], content, 260, yOffset, {
+    local btFaction = CreateCheckButton("roleOverviewShowFaction", L["显示角色阵营颜色"], content, 15, yOffset, {
         L["显示角色阵营颜色"],
         L["联盟显示浅蓝，部落显示浅红。"],
+    })
+
+    local btResFullLevel = CreateCheckButton("roleOverviewResOnlyFullLevel", L["资源面板仅显示满级角色"], content, 260, yOffset, {
+        L["资源面板仅显示满级角色"],
+        L["开启时：货币、专业技能等资源列表仅展示满级角色。"],
+        L["关闭时：低等级小号也会显示在资源列表中。"],
     })
 
     yOffset = yOffset - 35
 
     -- 基础开关 - 行 3
-    local btBuffCD = CreateCheckButton("roleOverviewShowBuffCD", L["显示Buff与CD状态"], content, 15, yOffset, {
+    local btTalent = CreateCheckButton("roleOverviewShowTalent", L["显示角色天赋图标"], content, 15, yOffset, {
+        L["显示角色天赋图标"],
+        L["在角色名字左侧显示其主要天赋树图标。"],
+    })
+
+    local btBuffCD = CreateCheckButton("roleOverviewShowBuffCD", L["显示Buff与CD状态"], content, 260, yOffset, {
         L["显示Buff与CD状态"],
         L["在列表中显示各角色的世界Buff及专业技能冷却状态。"],
     })
+
+    yOffset = yOffset - 35
+
+    -- 基础开关 - 行 4 (左侧：O键查询记录侧边栏，右侧：快捷键绑定)
+    local btSearchList = CreateCheckButton("searchList", L["O键角色查询记录侧边栏"], content, 15, yOffset, {
+        L["O键角色查询记录侧边栏"],
+        L["开启时：在官方好友/查询（O键）面板右侧显示历史查询记录侧边栏与名单导出功能。"],
+        L["关闭时：隐藏侧边栏与导出名单按钮。"],
+    }, function(val)
+        if BG.WhoFrameList then
+            if val == 1 and WhoFrame and WhoFrame:IsVisible() then
+                BG.WhoFrameList:Show()
+                if BG.WhoFrameSendOutButton then BG.WhoFrameSendOutButton:Show() end
+            else
+                BG.WhoFrameList:Hide()
+                if BG.WhoFrameSendOutButton then BG.WhoFrameSendOutButton:Hide() end
+            end
+        end
+    end)
 
     -- 角色总览快捷键直达绑定
     local tBind = content:CreateFontString()
@@ -234,24 +259,80 @@ function ns.InitRoleOverviewOptions()
 
     yOffset = yOffset - 42
 
-    -- 基础开关 - 行 4 (左侧：O键查询记录侧边栏，右侧：角色总览缩放比例)
-    local btSearchList = CreateCheckButton("searchList", L["O键角色查询记录侧边栏"], content, 15, yOffset, {
-        L["O键角色查询记录侧边栏"],
-        L["开启时：在官方好友/查询（O键）面板右侧显示历史查询记录侧边栏与名单导出功能。"],
-        L["关闭时：隐藏侧边栏与导出名单按钮。"],
-    }, function(val)
-        if BG.WhoFrameList then
-            if val == 1 and WhoFrame and WhoFrame:IsVisible() then
-                BG.WhoFrameList:Show()
-                if BG.WhoFrameSendOutButton then BG.WhoFrameSendOutButton:Show() end
-            else
-                BG.WhoFrameList:Hide()
-                if BG.WhoFrameSendOutButton then BG.WhoFrameSendOutButton:Hide() end
+    -- 基础开关 - 行 5 (左侧：角色总览排序方式 + 修改排序，右侧：角色总览缩放比例)
+    local tSort = content:CreateFontString()
+    tSort:SetFont(BIAOGE_TEXT_FONT, 13, "OUTLINE")
+    tSort:SetPoint("TOPLEFT", content, 15, yOffset + 2)
+    tSort:SetText(L["排序方式："])
+
+    local sortTbl = {
+        { key = "iLevel-class-player", text = L["装等-职业-名字"] },
+        { key = "class-iLevel-player", text = L["职业-装等-名字"] },
+        { key = "iLevel-player", text = L["装等-名字"] },
+        { key = "class-player", text = L["职业-名字"] },
+        { key = "player", text = L["名字"] },
+        { key = "custom", text = L["自定义排序"] },
+    }
+
+    local function GetSortText(key)
+        for _, v in ipairs(sortTbl) do
+            if v.key == key then
+                return v.text
             end
         end
-    end)
+        return L["装等-职业-名字"]
+    end
 
-    local sliderScale = CreateSlider("roleOverviewScale", L["角色总览缩放比例"], content, 0.5, 1.5, 0.05, 260, yOffset - 5, L["调整悬浮窗与独立面板的显示缩放比例。"], 180)
+    local sortDropDown = LibBG and LibBG:Create_UIDropDownMenu(nil, content)
+    if sortDropDown then
+        sortDropDown:SetPoint("LEFT", tSort, "RIGHT", -15, -2)
+        LibBG:UIDropDownMenu_SetWidth(sortDropDown, 105)
+        LibBG:UIDropDownMenu_SetAnchor(sortDropDown, 0, 0, "TOP", sortDropDown, "BOTTOM")
+        LibBG:UIDropDownMenu_SetText(sortDropDown, GetSortText(BiaoGe.options.roleOverviewSort1 or "iLevel-class-player"))
+        if BG.dropDownToggle then BG.dropDownToggle(sortDropDown) end
+
+        local btnEditSort = BG.CreateButton(content)
+        btnEditSort:SetSize(68, 22)
+        btnEditSort:SetPoint("LEFT", sortDropDown, "RIGHT", -5, 2)
+        btnEditSort:SetText(L["修改排序"])
+        btnEditSort:SetShown(BiaoGe.options.roleOverviewSort1 == "custom")
+        btnEditSort:SetScript("OnClick", function(self)
+            BG.PlaySound(1)
+            if BG.RoleOverviewSortFrame and BG.RoleOverviewSortFrame:IsVisible() then
+                BG.RoleOverviewSortFrame:Hide()
+            else
+                if BG.CreateRoleOverviewSortFrame then
+                    BG.CreateRoleOverviewSortFrame(self)
+                end
+            end
+        end)
+
+        LibBG:UIDropDownMenu_Initialize(sortDropDown, function(self, level)
+            for _, v in ipairs(sortTbl) do
+                local info = LibBG:UIDropDownMenu_CreateInfo()
+                info.text = v.text
+                info.func = function()
+                    if v.key == "custom" and BG.InitializeRoleOverviewCustomSort then
+                        BG.InitializeRoleOverviewCustomSort()
+                    end
+                    BiaoGe.options.roleOverviewSort1 = v.key
+                    LibBG:UIDropDownMenu_SetText(sortDropDown, v.text)
+                    if v.key ~= "custom" and BG.RoleOverviewSortFrame and BG.RoleOverviewSortFrame:IsVisible() then
+                        BG.RoleOverviewSortFrame:Hide()
+                    end
+                    btnEditSort:SetShown(v.key == "custom")
+                    RefreshRoleOverview()
+                    BG.PlaySound(1)
+                end
+                if (BiaoGe.options.roleOverviewSort1 or "iLevel-class-player") == v.key then
+                    info.checked = true
+                end
+                LibBG:UIDropDownMenu_AddButton(info)
+            end
+        end)
+    end
+
+    local sliderScale = CreateSlider("roleOverviewScale", L["角色总览缩放比例"], content, 0.5, 1.5, 0.05, 335, yOffset - 5, L["调整悬浮窗与独立面板的显示缩放比例。"], 170)
 
     yOffset = yOffset - 55
 
@@ -382,7 +463,138 @@ function ns.InitRoleOverviewOptions()
     -- 动态计算滚动区域高度（团本部分完成后下移 yOffset）
     yOffset = currentY - rowHeight - 15
 
-    -- 6. 分割线
+    -- 6. 专业与生活技能显示自定义队列
+    local allSkillTable = BG.SKILLall_table or {}
+    if #allSkillTable > 0 then
+        local lineSkill = content:CreateLine()
+        lineSkill:SetColorTexture(0.5, 0.5, 0.5, 0.5)
+        lineSkill:SetStartPoint("TOPLEFT", 10, yOffset)
+        lineSkill:SetEndPoint("TOPLEFT", 600, yOffset)
+        lineSkill:SetThickness(1.5)
+
+        yOffset = yOffset - 18
+
+        local skillTitle = content:CreateFontString()
+        skillTitle:SetFont(BIAOGE_TEXT_FONT, 16, "OUTLINE")
+        skillTitle:SetText(BG.STC_g1(L["专业与生活技能显示自定义队列"]))
+        skillTitle:SetPoint("TOPLEFT", content, 15, yOffset)
+
+        local skillSubTitle = content:CreateFontString()
+        skillSubTitle:SetFont(BIAOGE_TEXT_FONT, 12, "OUTLINE")
+        skillSubTitle:SetText(BG.STC_dis(L["（勾选的项将在角色总览中展示，未勾选的将被隐藏）"]))
+        skillSubTitle:SetPoint("LEFT", skillTitle, "RIGHT", 10, 0)
+
+        local skillCheckButtons = {}
+
+        -- 专业全部勾选按钮
+        local btnSkillSelectAll = BG.CreateButton(content)
+        btnSkillSelectAll:SetSize(75, 22)
+        btnSkillSelectAll:SetPoint("TOPLEFT", content, 440, yOffset + 4)
+        btnSkillSelectAll:SetText(L["全部勾选"])
+        btnSkillSelectAll:SetScript("OnClick", function()
+            BiaoGe.SKILLchoice = BiaoGe.SKILLchoice or {}
+            for _, bt in ipairs(skillCheckButtons) do
+                bt:SetChecked(true)
+                BiaoGe.SKILLchoice[bt.skillId] = 1
+            end
+            RefreshRoleOverview()
+            BG.PlaySound(1)
+        end)
+
+        -- 专业恢复默认按钮
+        local btnSkillReset = BG.CreateButton(content)
+        btnSkillReset:SetSize(75, 22)
+        btnSkillReset:SetPoint("LEFT", btnSkillSelectAll, "RIGHT", 8, 0)
+        btnSkillReset:SetText(L["恢复默认"])
+        btnSkillReset:SetScript("OnClick", function()
+            BiaoGe.SKILLchoice = { [0] = true }
+            for _, bt in ipairs(skillCheckButtons) do
+                local isChecked = (BiaoGe.SKILLchoice and (BiaoGe.SKILLchoice[bt.skillId] == 1 or BiaoGe.SKILLchoice[bt.skillId] == true))
+                bt:SetChecked(isChecked)
+            end
+            RefreshRoleOverview()
+            BG.PlaySound(1)
+        end)
+
+        yOffset = yOffset - 35
+
+        local sCols = 4
+        local sColWidth = 140
+        local sRowHeight = 30
+        local sStartX = 15
+
+        local sCurrentX = sStartX
+        local sCurrentY = yOffset
+        local sColIndex = 0
+
+        BiaoGe.SKILLchoice = BiaoGe.SKILLchoice or {}
+
+        for i, v in ipairs(allSkillTable) do
+            local skillId = v.id
+            local displayName = v.name2 or v.name
+            local tex = v.tex
+
+            if v.color then
+                displayName = "|cff" .. v.color .. displayName .. "|r"
+            end
+
+            local iconText = ""
+            if tex and tex ~= "" then
+                iconText = (ns.AddTexture and ns.AddTexture(tex, 0, 16)) or ("|T" .. tex .. ":16:16:0:0|t ")
+            end
+
+            local bt = CreateFrame("CheckButton", nil, content, "UICheckButtonTemplate")
+            bt:SetSize(22, 22)
+            bt:SetPoint("TOPLEFT", content, sCurrentX, sCurrentY)
+
+            local textLabel = bt.text or _G[bt:GetName() .. "Text"]
+            if not textLabel then
+                textLabel = bt:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
+                textLabel:SetPoint("LEFT", bt, "RIGHT", 3, 0)
+                bt.text = textLabel
+            end
+            textLabel:SetFont(BIAOGE_TEXT_FONT, 13, "OUTLINE")
+            textLabel:SetText(iconText .. displayName)
+            textLabel:SetWordWrap(false)
+            bt.skillId = skillId
+
+            local textW = textLabel:GetStringWidth()
+            bt:SetHitRectInsets(-2, -textW - 6, -2, -2)
+
+            local isChecked = (BiaoGe.SKILLchoice[skillId] == 1 or BiaoGe.SKILLchoice[skillId] == true)
+            bt:SetChecked(isChecked)
+
+            bt:SetScript("OnClick", function(self)
+                local checked = self:GetChecked()
+                if checked then
+                    BiaoGe.SKILLchoice[self.skillId] = 1
+                else
+                    BiaoGe.SKILLchoice[self.skillId] = nil
+                end
+                RefreshRoleOverview()
+                BG.PlaySound(1)
+            end)
+
+            bt:SetScript("OnShow", function(self)
+                self:SetChecked(BiaoGe.SKILLchoice and (BiaoGe.SKILLchoice[self.skillId] == 1 or BiaoGe.SKILLchoice[self.skillId] == true))
+            end)
+
+            tinsert(skillCheckButtons, bt)
+
+            sColIndex = sColIndex + 1
+            if sColIndex >= sCols then
+                sColIndex = 0
+                sCurrentX = sStartX
+                sCurrentY = sCurrentY - sRowHeight
+            else
+                sCurrentX = sCurrentX + sColWidth
+            end
+        end
+
+        yOffset = sCurrentY - sRowHeight - 15
+    end
+
+    -- 7. 分割线
     local line2 = content:CreateLine()
     line2:SetColorTexture(0.5, 0.5, 0.5, 0.5)
     line2:SetStartPoint("TOPLEFT", 10, yOffset)
@@ -391,10 +603,10 @@ function ns.InitRoleOverviewOptions()
 
     yOffset = yOffset - 18
 
-    -- 7. 货币显示自定义队列标题与操作按钮
+    -- 8. 货币与装备物品显示自定义队列标题与操作按钮
     local moneyTitle = content:CreateFontString()
     moneyTitle:SetFont(BIAOGE_TEXT_FONT, 16, "OUTLINE")
-    moneyTitle:SetText(BG.STC_g1(L["货币与物品显示自定义队列"]))
+    moneyTitle:SetText(BG.STC_g1(L["货币与装备物品显示自定义队列"]))
     moneyTitle:SetPoint("TOPLEFT", content, 15, yOffset)
 
     local moneySubTitle = content:CreateFontString()
@@ -525,7 +737,7 @@ function ns.InitRoleOverviewOptions()
         bt:SetScript("OnEnter", function(self)
             GameTooltip:SetOwner(self, "ANCHOR_TOPLEFT", 0, 0)
             GameTooltip:ClearLines()
-            local tipPrefix = (self.moneyType and self.moneyType:find("item")) and L["物品："] or ""
+            local tipPrefix = (self.moneyType and self.moneyType:find("item")) and L["物品："] or (self.moneyType == "equip" and L["装备："] or "")
             GameTooltip:SetText("|cff" .. self.moneyColor .. tipPrefix .. (self.rawName or "") .. "|r")
             GameTooltip:Show()
         end)
