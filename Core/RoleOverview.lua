@@ -216,10 +216,11 @@ function BG.RoleOverviewUI()
                 ["money"] = 1,
             }
         elseif BG.IsTitan then
+            BiaoGe.MONEYchoice["xp"] = 1
             BiaoGe.MONEYchoice[3403] = 1
             BiaoGe.MONEYchoice[3406] = 1
-            BiaoGe.MONEYchoice[161] = 1
-            BiaoGe.MONEYchoice[1901] = 1
+            -- BiaoGe.MONEYchoice[161] = 1
+            -- BiaoGe.MONEYchoice[1901] = 1
             BiaoGe.MONEYchoice["items"] = 1
             BiaoGe.MONEYchoice["items_updateItem"] = 1
             BiaoGe.MONEYchoice["money"] = 1
@@ -323,6 +324,13 @@ function BG.RoleOverviewUI()
             BG.Once("FBCDchoice", 260801, function()
                 BiaoGe.FBCDchoice["SWtitan"] = 1
                 BiaoGe.FBCDchoice["ZAtitan"] = 1
+            end)
+            BG.Once("MONEYchoice", 260902, function()
+                if BiaoGe and BiaoGe.MONEYchoice then
+                    BiaoGe.MONEYchoice["xp"] = 1
+                    BiaoGe.MONEYchoice[161] = nil
+                    BiaoGe.MONEYchoice[1901] = nil
+                end
             end)
         elseif BG.IsCTM then
         elseif BG.IsMOP then
@@ -2184,44 +2192,57 @@ GameTooltip:SetCurrencyByID(697)
 
     -- 获取双倍经验
     do
-        -- 创建插件框架
-        local race = select(2, UnitRace("player"))
-        local isPanda = race == "Pandaren"
         local function UpdateXP()
-            local exhaustion = GetXPExhaustion() -- 获取剩余双倍经验值
+            if not (BiaoGe and realmID and player and player ~= "") then return end
+            BiaoGe[MONEY] = BiaoGe[MONEY] or {}
+            BiaoGe[MONEY][realmID] = BiaoGe[MONEY][realmID] or {}
+            BiaoGe[MONEY][realmID][player] = BiaoGe[MONEY][realmID][player] or {}
+
+            local race = select(2, UnitRace("player"))
+            local isPanda = (race == "Pandaren")
+            local exhaustion = GetXPExhaustion and GetXPExhaustion() -- 获取剩余双倍经验值
             local per = 0
-            if exhaustion then
-                local maxXP = UnitXPMax("player")
-                per = exhaustion / maxXP * 100
+            if exhaustion and exhaustion > 0 then
+                local maxXP = UnitXPMax and UnitXPMax("player")
+                if maxXP and maxXP > 0 then
+                    per = (exhaustion / maxXP) * 100
+                end
             end
+            local isResting = (IsResting and IsResting()) or false
+            local serverTime = (GetServerTime and GetServerTime()) or time()
             BiaoGe[MONEY][realmID][player].xp = {
-                per = format("%.1f", per),
-                perNow = format("%d", per),
-                time = GetServerTime(),
-                resting = IsResting(),
+                per = string.format("%.1f", per),
+                perNow = string.format("%d", math.floor(per)),
+                time = serverTime,
+                resting = isResting,
                 isPanda = isPanda,
             }
         end
-        BG.Init2(UpdateXP)
-        BG.RegisterEvent({ "PLAYER_XP_UPDATE", "UPDATE_EXHAUSTION", "PLAYER_LEVEL_UP", "PLAYER_UPDATE_RESTING" }, UpdateXP)
+        if BG.Init2 then
+            BG.Init2(UpdateXP)
+        else
+            C_Timer.After(1, UpdateXP)
+        end
+        if BG.RegisterEvent then
+            BG.RegisterEvent({ "PLAYER_XP_UPDATE", "UPDATE_EXHAUSTION", "PLAYER_LEVEL_UP", "PLAYER_UPDATE_RESTING" }, UpdateXP)
+        end
 
         function BG.UpdateXP()
-            local time = GetServerTime()
+            local nowTime = (GetServerTime and GetServerTime()) or time()
             local function Update(db)
                 if not (db and db[MONEY]) then return end
-                for realmID, v in pairs(db[MONEY]) do
-                    if (type(realmID) == "number" and type(db[MONEY][realmID]) == "table") then
-                        for player, v in pairs(db[MONEY][realmID]) do
-                            if type(v.xp) == "table" then
-                                local num = 4
-                                if v.xp.resting then
-                                    num = 1
-                                end
-                                local panda = 1
-                                if v.xp.isPanda then
-                                    panda = 0.5
-                                end
-                                v.xp.perNow = min(150, format("%d", tonumber(v.xp.per) + (time - v.xp.time) / (60 * 60 * 8 * num * panda) * 5))
+                for rID, rData in pairs(db[MONEY]) do
+                    if (type(rID) == "number" and type(rData) == "table") then
+                        for pName, pData in pairs(rData) do
+                            if type(pData) == "table" and type(pData.xp) == "table" then
+                                local num = pData.xp.resting and 1 or 4
+                                local panda = pData.xp.isPanda and 0.5 or 1
+                                local basePer = tonumber(pData.xp.per) or 0
+                                local lastTime = tonumber(pData.xp.time) or nowTime
+                                local diffTime = math.max(0, nowTime - lastTime)
+                                local gainedPer = (diffTime / (60 * 60 * 8 * num * panda)) * 5
+                                local currentPer = math.min(150, math.floor(basePer + gainedPer))
+                                pData.xp.perNow = tostring(currentPer)
                             end
                         end
                     end

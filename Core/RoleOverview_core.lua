@@ -483,7 +483,8 @@ local function GetCount(db, id, _type)
         if v.isNotKnow then
             count = UNKNOWN
         elseif id == "xp" then
-            count = v.perNow .. "%" -- 经验
+            local p = v.perNow or v.per or 0
+            count = tostring(p) .. "%" -- 经验
         else
             count = tonumber(v.count) or 0
         end
@@ -1785,9 +1786,15 @@ function BG.SetFBCD(self, position, click, refresh)
                     else
                         t_paizi:SetText(UNKNOWN)
                     end
-                elseif id == "xp" and level and level >= BG.fullLevel then
-                    t_paizi:SetText(L["满级"] .. (isNewUI and "" or " " .. AddTexture(vv.tex)))
-                    t_paizi:SetTextColor(0, 1, 0)
+                elseif id == "xp" then
+                    local fullLvl = BG.fullLevel_RoleOverview or BG.fullLevel or (GetMaxPlayerLevel and GetMaxPlayerLevel()) or 80
+                    if level and level >= fullLvl then
+                        t_paizi:SetText(L["满级"] .. (isNewUI and "" or " " .. AddTexture(vv.tex)))
+                        t_paizi:SetTextColor(0, 1, 0)
+                    else
+                        t_paizi:SetText(countString)
+                        t_paizi:SetTextColor(0.6, 1, 0.6)
+                    end
                 else
                     t_paizi:SetText(countString)
                 end

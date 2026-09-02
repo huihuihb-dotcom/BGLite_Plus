@@ -363,7 +363,179 @@ function ns.InitRoleOverviewOptions()
         end
     end
 
-    -- 动态计算滚动区域高度
-    local totalContentHeight = math.abs(currentY) + 60
-    content:SetSize(600, math.max(totalContentHeight, 550))
+    -- 动态计算滚动区域高度（团本部分完成后下移 yOffset）
+    yOffset = currentY - rowHeight - 15
+
+    -- 6. 分割线
+    local line2 = content:CreateLine()
+    line2:SetColorTexture(0.5, 0.5, 0.5, 0.5)
+    line2:SetStartPoint("TOPLEFT", 10, yOffset)
+    line2:SetEndPoint("TOPLEFT", 600, yOffset)
+    line2:SetThickness(1.5)
+
+    yOffset = yOffset - 18
+
+    -- 7. 货币显示自定义队列标题与操作按钮
+    local moneyTitle = content:CreateFontString()
+    moneyTitle:SetFont(BIAOGE_TEXT_FONT, 16, "OUTLINE")
+    moneyTitle:SetText(BG.STC_g1(L["货币与物品显示自定义队列"]))
+    moneyTitle:SetPoint("TOPLEFT", content, 15, yOffset)
+
+    local moneySubTitle = content:CreateFontString()
+    moneySubTitle:SetFont(BIAOGE_TEXT_FONT, 12, "OUTLINE")
+    moneySubTitle:SetText(BG.STC_dis(L["（勾选的项将在角色总览中展示，未勾选的将被隐藏）"]))
+    moneySubTitle:SetPoint("LEFT", moneyTitle, "RIGHT", 10, 0)
+
+    local moneyCheckButtons = {}
+
+    -- 货币全部勾选按钮
+    local btnMoneySelectAll = BG.CreateButton(content)
+    btnMoneySelectAll:SetSize(75, 22)
+    btnMoneySelectAll:SetPoint("TOPLEFT", content, 440, yOffset + 4)
+    btnMoneySelectAll:SetText(L["全部勾选"])
+    btnMoneySelectAll:SetScript("OnClick", function()
+        BiaoGe.MONEYchoice = BiaoGe.MONEYchoice or {}
+        for _, bt in ipairs(moneyCheckButtons) do
+            bt:SetChecked(true)
+            BiaoGe.MONEYchoice[bt.moneyId] = 1
+        end
+        RefreshRoleOverview()
+        BG.PlaySound(1)
+    end)
+
+    -- 货币恢复默认按钮
+    local btnMoneyReset = BG.CreateButton(content)
+    btnMoneyReset:SetSize(75, 22)
+    btnMoneyReset:SetPoint("LEFT", btnMoneySelectAll, "RIGHT", 8, 0)
+    btnMoneyReset:SetText(L["恢复默认"])
+    btnMoneyReset:SetScript("OnClick", function()
+        BiaoGe.MONEYchoice = nil
+        if BG.RoleOverviewUI then
+            BG.RoleOverviewUI()
+        end
+        for _, bt in ipairs(moneyCheckButtons) do
+            local isChecked = (BiaoGe.MONEYchoice and BiaoGe.MONEYchoice[bt.moneyId] == 1)
+            bt:SetChecked(isChecked)
+        end
+        RefreshRoleOverview()
+        BG.PlaySound(1)
+    end)
+
+    yOffset = yOffset - 35
+
+    -- 8. 动态构建所有可用货币复选框网格
+    local allMoneyTable = BG.MONEYall_table or {}
+    local mCols = 3
+    local mColWidth = 190
+    local mRowHeight = 30
+    local mStartX = 15
+
+    local mCurrentX = mStartX
+    local mCurrentY = yOffset
+    local mColIndex = 0
+
+    BiaoGe.MONEYchoice = BiaoGe.MONEYchoice or {}
+
+    for i, v in ipairs(allMoneyTable) do
+        local moneyId = v.id
+        local displayName = v.name
+        local tex = v.tex
+
+        if not displayName or not tex then
+            if not v.type or v.type == "currency" then
+                if C_CurrencyInfo and C_CurrencyInfo.GetCurrencyInfo then
+                    local info = C_CurrencyInfo.GetCurrencyInfo(moneyId)
+                    if info then
+                        displayName = displayName or info.name
+                        tex = tex or info.iconFileID
+                    end
+                end
+            elseif v.type == "item" then
+                local itemName, _, _, _, _, _, _, _, _, itemTexture = GetItemInfo(moneyId)
+                if not itemName and GetItemInfoInstant then
+                    itemName, _, _, _, itemTexture = GetItemInfoInstant(moneyId)
+                end
+                displayName = displayName or itemName
+                tex = tex or itemTexture
+            end
+        end
+
+        displayName = displayName or (L["货币"] .. " " .. tostring(moneyId))
+        if v.color then
+            displayName = "|cff" .. v.color .. displayName .. "|r"
+        end
+
+        local iconText = ""
+        if tex then
+            iconText = (ns.AddTexture and ns.AddTexture(tex, 0, 16)) or ("|T" .. tex .. ":16:16:0:0|t ")
+        end
+
+        local bt = CreateFrame("CheckButton", nil, content, "UICheckButtonTemplate")
+        bt:SetSize(22, 22)
+        bt:SetPoint("TOPLEFT", content, mCurrentX, mCurrentY)
+
+        local textLabel = bt.text or _G[bt:GetName() .. "Text"]
+        if not textLabel then
+            textLabel = bt:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
+            textLabel:SetPoint("LEFT", bt, "RIGHT", 3, 0)
+            bt.text = textLabel
+        end
+        textLabel:SetFont(BIAOGE_TEXT_FONT, 13, "OUTLINE")
+        textLabel:SetText(iconText .. displayName)
+        textLabel:SetWordWrap(false)
+        bt.moneyId = moneyId
+        bt.rawName = v.name or displayName
+        bt.moneyType = v.type
+        bt.moneyColor = v.color or "FFFFFF"
+
+        -- 设定精准命中区域
+        local textW = textLabel:GetStringWidth()
+        bt:SetHitRectInsets(-2, -textW - 6, -2, -2)
+
+        local isChecked = (BiaoGe.MONEYchoice[moneyId] == 1)
+        bt:SetChecked(isChecked)
+
+        bt:SetScript("OnClick", function(self)
+            local checked = self:GetChecked()
+            if checked then
+                BiaoGe.MONEYchoice[self.moneyId] = 1
+            else
+                BiaoGe.MONEYchoice[self.moneyId] = nil
+            end
+            RefreshRoleOverview()
+            BG.PlaySound(1)
+        end)
+
+        bt:SetScript("OnEnter", function(self)
+            GameTooltip:SetOwner(self, "ANCHOR_TOPLEFT", 0, 0)
+            GameTooltip:ClearLines()
+            local tipPrefix = (self.moneyType and self.moneyType:find("item")) and L["物品："] or ""
+            GameTooltip:SetText("|cff" .. self.moneyColor .. tipPrefix .. (self.rawName or "") .. "|r")
+            GameTooltip:Show()
+        end)
+
+        bt:SetScript("OnLeave", function(self)
+            GameTooltip:Hide()
+        end)
+
+        bt:SetScript("OnShow", function(self)
+            self:SetChecked(BiaoGe.MONEYchoice and BiaoGe.MONEYchoice[self.moneyId] == 1)
+        end)
+
+        tinsert(moneyCheckButtons, bt)
+
+        mColIndex = mColIndex + 1
+        if mColIndex >= mCols then
+            mColIndex = 0
+            mCurrentX = mStartX
+            mCurrentY = mCurrentY - mRowHeight
+        else
+            mCurrentX = mCurrentX + mColWidth
+        end
+    end
+
+    -- 动态计算整体滚动区域高度
+    local totalContentHeight = math.abs(mCurrentY) + 60
+    content:SetSize(600, math.max(totalContentHeight, 600))
 end
+

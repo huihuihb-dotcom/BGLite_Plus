@@ -151,8 +151,9 @@ ns.HopeMaxi = (BG and BG.IsRetail and 7) or 7
 if BG then
     if not BG.fullLevel_RoleOverview then
         local maxLvl = GetMaxPlayerLevel and GetMaxPlayerLevel()
-        BG.fullLevel_RoleOverview = maxLvl or (BG.IsVanilla and 60) or (BG.IsTBC and 70) or (BG.IsWLK and 80) or (BG.IsCTM and 85) or 60
+        BG.fullLevel_RoleOverview = maxLvl or (BG.IsVanilla and 60) or (BG.IsTBC and 70) or (BG.IsWLK and 80) or (BG.IsCTM and 85) or (BG.IsMOP and 90) or 80
     end
+    BG.fullLevel = BG.fullLevel or BG.fullLevel_RoleOverview
     BG.HideHistoryMoney = BG.HideHistoryMoney or function() end
     BG.FilterClassItemDB = BG.FilterClassItemDB or {}
     BG.FilterClassItem_Default = BG.FilterClassItem_Default or {}
