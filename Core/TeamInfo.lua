@@ -384,8 +384,21 @@ end
 -- 3: STATE_ARCHIVE (单人查账/历史存档态)
 function TeamInfo.GetCardState()
     InitDataPersistence()
-    local inGroup = IsInGroup() or IsInRaid()
     local currentFB = GetCurrentFB()
+
+    -- 历史表格查看态检测：如果正在查看历史账单，优先只读展示该历史快照中的 teamInfo
+    if BG and BG.HistoryMainFrame and BG.HistoryMainFrame:IsShown() and BG.History and BG.History.chooseNum then
+        local num = BG.History.chooseNum
+        local histList = BiaoGe and BiaoGe.HistoryList and BiaoGe.HistoryList[currentFB]
+        if histList and histList[num] then
+            local DT = histList[num][1]
+            local histData = BiaoGe.History and BiaoGe.History[currentFB] and BiaoGe.History[currentFB][DT]
+            local histTeam = histData and histData.teamInfo
+            return 3, histTeam or { yy = "", leader = "", recruits = {} }, currentFB
+        end
+    end
+
+    local inGroup = IsInGroup() or IsInRaid()
     local fbData = BiaoGe and BiaoGe[currentFB] and BiaoGe[currentFB].teamInfo
 
     if not inGroup then
