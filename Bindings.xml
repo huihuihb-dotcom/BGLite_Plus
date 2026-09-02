@@ -1,0 +1,14 @@
+<Bindings>
+    <!--
+        WoW 会自动从插件根目录加载本文件，不需要在 TOC 里声明。
+        动作名 ROLEOVERVIEW 与多语言文件中的 BINDING_NAME_ROLEOVERVIEW 保持一致。
+    -->
+    <Binding name="ROLEOVERVIEW" header="BIAOGE" category="BINDING_HEADER_BIAOGE">
+        if BG and BG.SetFBCD then
+            BG.SetFBCD(nil, nil, true)
+            if BG.PlaySound then
+                BG.PlaySound(1)
+            end
+        end
+    </Binding>
+</Bindings>

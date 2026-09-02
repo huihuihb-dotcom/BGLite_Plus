@@ -1,0 +1,32 @@
+## Interface: 11508, 11509, 20506, 30405, 38002, 40402, 50503, 50504, 50505, 120005, 120007, 120100
+## Title: <BGLite_Plus> |cff00BFFFBGLite 增强功能包|r
+## Notes: 为 BGLite 提供心愿清单、装备库检索、多服角色与团本CD悬停总览、团队组队工具（密语自动邀请/YY号识别一键复制/入队通知）、阵容拖拽调队管理与职业装备智能过滤。
+## Notes-zhCN: 为 BGLite 提供心愿清单、装备库检索、多服角色与团本CD悬停总览、团队组队工具（密语自动邀请/YY号识别一键复制/入队通知）、阵容拖拽调队管理与职业装备智能过滤。
+## Notes-zhTW: 為 BGLite 提供心願清單、裝備庫檢索、多服角色與團本CD懸停總覽、團隊組隊工具（密語自動邀請/YY號識別一鍵複製/入隊通知）、陣容拖拽調隊管理與職業裝備智能過濾。
+## Author: 波比兔
+## Version: 1.0.2
+## RequiredDeps: BGLite
+## SavedVariables: BiaoGe
+
+Locales\zhCN.lua
+Locales\zhTW.lua
+Locales\enUS.lua
+
+Core\Lib.lua
+Core\DB_FilterClassItem.lua
+Core\RoleOverview_core.lua
+Core\RoleOverviewSort.lua
+Core\RoleOverview.lua
+Core\FilterClassItem.lua
+Core\ItemLib.lua
+Core\Hope.lua
+Core\RoleOverviewOptions.lua
+Core\RaidTool.lua
+Core\Init.lua
+
+## Title-zhCN: |cff880303[增强]|r BGLite 增强功能包 (|cff00BFFF心愿单+装备库+角色总览+团队工具|r)
+## Title-zhTW: |cff880303[增強]|r BGLite 增強功能包 (|cff00BFFF心願單+裝備庫+角色總覽+團隊工具|r)
+## Category: Dungean & Raid
+## Category-zhCN: 副本团队
+## Category-zhTW: 副本團隊
+
