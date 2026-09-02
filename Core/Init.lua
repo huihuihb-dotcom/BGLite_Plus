@@ -333,9 +333,15 @@ local function InitPlusUI()
         end
     end
 
-    -- 5.5 表格主框架 (FBMainFrame) 生命周期补齐与装备过滤挂载
+    -- 5.5 表格主框架 (FBMainFrame) 生命周期补齐与装备过滤挂载 & 团队信息卡片
     if BG.FBMainFrame and not BG.FBMainFrame.hasHookedPlusOnShow then
         BG.FBMainFrame.hasHookedPlusOnShow = true
+
+        -- 创建团队信息卡片组件 (挂载在主框架黄金居中区)
+        if ns.TeamInfo and ns.TeamInfo.CreateUI then
+            ns.TeamInfo.CreateUI()
+        end
+
         BG.FBMainFrame:HookScript("OnShow", function(self)
             if BG.FilterClassItemMainFrame and BG.FilterClassItemMainFrame.Buttons2 then
                 BG.FilterClassItemMainFrame.Buttons2:SetParent(self)
@@ -348,6 +354,18 @@ local function InitPlusUI()
             if BG.UpdateAllFilter then
                 BG.UpdateAllFilter()
             end
+            if ns.TeamInfo and ns.TeamInfo.cardFrame then
+                SafeShow(ns.TeamInfo.cardFrame)
+                if ns.TeamInfo.UpdateUI then
+                    ns.TeamInfo.UpdateUI()
+                end
+            end
+        end)
+
+        BG.FBMainFrame:HookScript("OnHide", function(self)
+            if ns.TeamInfo and ns.TeamInfo.cardFrame then
+                SafeHide(ns.TeamInfo.cardFrame)
+            end
         end)
     end
 
@@ -356,6 +374,9 @@ local function InitPlusUI()
         BG.MainFrame.hasHookedPlus = true
         BG.MainFrame:HookScript("OnHide", function()
             HideAllSubFrames()
+            if ns.TeamInfo and ns.TeamInfo.cardFrame then
+                SafeHide(ns.TeamInfo.cardFrame)
+            end
         end)
 
         if BG.ClickTabButton then
@@ -369,6 +390,12 @@ local function InitPlusUI()
                 end
                 if num ~= BG.RaidToolMainFrameTabNum and BG.RaidToolMainFrame then
                     SafeHide(BG.RaidToolMainFrame)
+                end
+                if num ~= (BG.FBMainFrameTabNum or 1) and ns.TeamInfo and ns.TeamInfo.cardFrame then
+                    SafeHide(ns.TeamInfo.cardFrame)
+                elseif num == (BG.FBMainFrameTabNum or 1) and ns.TeamInfo and ns.TeamInfo.cardFrame then
+                    SafeShow(ns.TeamInfo.cardFrame)
+                    if ns.TeamInfo.UpdateUI then ns.TeamInfo.UpdateUI() end
                 end
 
                 orig_ClickTab(num)
@@ -423,9 +450,12 @@ local function InitPlusUI()
                 BG.UpdateItemLib()
             end
 
-            -- 切换副本后自动刷新装备过滤变灰状态
+            -- 切换副本后自动刷新装备过滤变灰状态与团队信息
             if BG.UpdateAllFilter then
                 BG.UpdateAllFilter()
+            end
+            if ns.TeamInfo and ns.TeamInfo.UpdateUI then
+                ns.TeamInfo.UpdateUI()
             end
         end
     end
