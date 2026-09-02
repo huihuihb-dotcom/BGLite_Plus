@@ -232,12 +232,28 @@ function ns.InitRoleOverviewOptions()
     btnBind:SetScript("OnShow", UpdateBindKeyText)
     UpdateBindKeyText()
 
-    yOffset = yOffset - 40
+    yOffset = yOffset - 42
 
-    -- 基础开关 - 行 4 (滑块单独成行，避免覆盖上方文字)
-    local sliderScale = CreateSlider("roleOverviewScale", L["角色总览缩放比例"], content, 0.5, 1.5, 0.05, 15, yOffset, L["调整悬浮窗与独立面板的显示缩放比例。"], 200)
+    -- 基础开关 - 行 4 (左侧：O键查询记录侧边栏，右侧：角色总览缩放比例)
+    local btSearchList = CreateCheckButton("searchList", L["O键角色查询记录侧边栏"], content, 15, yOffset, {
+        L["O键角色查询记录侧边栏"],
+        L["开启时：在官方好友/查询（O键）面板右侧显示历史查询记录侧边栏与名单导出功能。"],
+        L["关闭时：隐藏侧边栏与导出名单按钮。"],
+    }, function(val)
+        if BG.WhoFrameList then
+            if val == 1 and WhoFrame and WhoFrame:IsVisible() then
+                BG.WhoFrameList:Show()
+                if BG.WhoFrameSendOutButton then BG.WhoFrameSendOutButton:Show() end
+            else
+                BG.WhoFrameList:Hide()
+                if BG.WhoFrameSendOutButton then BG.WhoFrameSendOutButton:Hide() end
+            end
+        end
+    end)
 
-    yOffset = yOffset - 50
+    local sliderScale = CreateSlider("roleOverviewScale", L["角色总览缩放比例"], content, 0.5, 1.5, 0.05, 260, yOffset - 5, L["调整悬浮窗与独立面板的显示缩放比例。"], 180)
+
+    yOffset = yOffset - 55
 
     -- 3. 分割线
     local line = content:CreateLine()

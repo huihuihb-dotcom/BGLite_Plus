@@ -70,6 +70,16 @@ function BG.RoleOverviewUI()
             BiaoGe.MONEYchoice = nil
         end)
     end
+    if BG.IsTitan then
+        BG.Once("FBCDchoiceTitan_Raids_260902", 260902, function()
+            if BiaoGe.FBCDchoice then
+                BiaoGe.FBCDchoice.OStitan = 1
+                BiaoGe.FBCDchoice.EOEtitan = 1
+                BiaoGe.FBCDchoice.SSCtitan = 1
+                BiaoGe.FBCDchoice.TKtitan = 1
+            end
+        end)
+    end
     if not BiaoGe.FBCDchoice then
         BiaoGe.FBCDchoice = {}
         if BG.IsVanilla then
@@ -127,10 +137,10 @@ function BG.RoleOverviewUI()
             BiaoGe.FBCDchoice.TOCtitan = 1
             BiaoGe.FBCDchoice.ZUGtitan = 1
             BiaoGe.FBCDchoice.NAXXtitan = 1
-            BiaoGe.FBCDchoice.OStitan = 0
-            BiaoGe.FBCDchoice.EOEtitan = 0
-            BiaoGe.FBCDchoice.SSCtitan = 0
-            BiaoGe.FBCDchoice.TKtitan = 0
+            BiaoGe.FBCDchoice.OStitan = 1
+            BiaoGe.FBCDchoice.EOEtitan = 1
+            BiaoGe.FBCDchoice.SSCtitan = 1
+            BiaoGe.FBCDchoice.TKtitan = 1
             BiaoGe.FBCDchoice.Doomwalker = 0
             BiaoGe.FBCDchoice.DoomLordKazzak = 0
             BiaoGe.FBCDchoice["MCtitan"] = 1

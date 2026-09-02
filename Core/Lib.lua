@@ -262,7 +262,7 @@ function ns.EnsureAllDBStructures()
 
     -- 针对当前所有已存副本表进行 boss1~40 自愈补齐
     for fbKey, tbl in pairs(BiaoGe) do
-        if type(tbl) == "table" and type(fbKey) == "string" and fbKey ~= "options" and fbKey ~= "playerInfo" and fbKey ~= "equip" and fbKey ~= "MONEY" and fbKey ~= "RaidCD" and fbKey ~= "QuestCD" and fbKey ~= "roleOverviewNote" and fbKey ~= "realmName" and fbKey ~= "point" and fbKey ~= "duizhang" and fbKey ~= "BossFrame" and fbKey ~= "FilterClassItemDB" and fbKey ~= "Hope" and fbKey ~= "RaidTool" and fbKey ~= "RaidGroups" then
+        if type(tbl) == "table" and type(fbKey) == "string" and fbKey ~= "options" and fbKey ~= "playerInfo" and fbKey ~= "equip" and fbKey ~= "MONEY" and fbKey ~= "RaidCD" and fbKey ~= "QuestCD" and fbKey ~= "roleOverviewNote" and fbKey ~= "realmName" and fbKey ~= "point" and fbKey ~= "duizhang" and fbKey ~= "BossFrame" and fbKey ~= "FilterClassItemDB" and fbKey ~= "Hope" and fbKey ~= "RaidTool" and fbKey ~= "RaidGroups" and fbKey ~= "whoFrame" then
             tbl.tradeTbl = tbl.tradeTbl or {}
             for b = 1, 40 do
                 tbl["boss" .. b] = tbl["boss" .. b] or {}
@@ -295,6 +295,9 @@ local function InitDefaultOptions()
     end
     if BiaoGe.options["roleOverviewShowBuffCD"] == nil then
         BiaoGe.options["roleOverviewShowBuffCD"] = 1
+    end
+    if BiaoGe.options["searchList"] == nil then
+        BiaoGe.options["searchList"] = 1
     end
     if BiaoGe.HopeSendChannel == nil then
         BiaoGe.HopeSendChannel = "RAID"

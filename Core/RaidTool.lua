@@ -44,10 +44,10 @@ function ns.InitRaidToolDB()
     end
 
     if db.autoRaidAnnounceNew == nil then db.autoRaidAnnounceNew = false end
-    if db.raidAnnounceText == nil then db.raidAnnounceText = "欢迎 {name} 加入团队！请大家准备开组。" end
+    if db.raidAnnounceText == nil then db.raidAnnounceText = "欢迎 {name} 加入团队！yy 123456" end
     if db.raidAnnounceHistory == nil then
         db.raidAnnounceHistory = {
-            "欢迎 {name} 加入团队！请大家准备开组。",
+            "欢迎 {name} 加入团队！yy 123456",
             "欢迎 {name} 入团，YY频道：123456，请未上语音的尽快上语音。",
             "欢迎 {name} 进本，本周活动全通团，请检查装备与心愿单。",
         }
@@ -1134,6 +1134,11 @@ function RaidTool.CreateUI(parent)
     rightTitle:SetPoint("TOPLEFT", 16, -14)
     rightTitle:SetText(BG.STC_g1(L["团队阵容管理"]))
 
+    local topTip = rightPanel:CreateFontString(nil, "OVERLAY")
+    topTip:SetFont(BIAOGE_TEXT_FONT, 12, "OUTLINE")
+    topTip:SetPoint("LEFT", rightTitle, "RIGHT", 14, 0)
+    topTip:SetText(BG.STC_dis(L["(支持拖拽队员调换队伍，成员变动实时自动同步)"]))
+
     -- 顶部按钮
     local btnSyncRoster = BG.CreateButton(rightPanel)
     btnSyncRoster:SetSize(100, 24)
@@ -1141,14 +1146,14 @@ function RaidTool.CreateUI(parent)
     btnSyncRoster:SetText(L["同步当前团队"])
 
     local btnSaveProfile = BG.CreateButton(rightPanel)
-    btnSaveProfile:SetSize(90, 24)
+    btnSaveProfile:SetSize(100, 24)
     btnSaveProfile:SetPoint("LEFT", btnSyncRoster, "RIGHT", 8, 0)
     btnSaveProfile:SetText(L["保存为预设"])
 
     local btnApplyRoster = BG.CreateButton(rightPanel)
-    btnApplyRoster:SetSize(90, 24)
+    btnApplyRoster:SetSize(100, 24)
     btnApplyRoster:SetPoint("LEFT", btnSaveProfile, "RIGHT", 8, 0)
-    btnApplyRoster:SetText(L["应用此阵容"])
+    btnApplyRoster:SetText(BG.STC_g1(L["应用此阵容"]))
 
     -- 8 个小队网格 (单格 140x120)
     local slotButtons = {}
@@ -1342,6 +1347,17 @@ function RaidTool.CreateUI(parent)
     function RaidTool.SyncCurrentRaidRoster(isManual)
         local memberCount = GetRosterMemberCount()
         if memberCount == 0 then
+            wipe(currentRosterList)
+            wipe(currentRosterClasses)
+            local pName = UnitName("player")
+            if pName then
+                currentRosterList[1] = CleanPlayerName(pName)
+                currentRosterClasses[1] = select(2, UnitClass("player"))
+            end
+            for i = 1, 40 do
+                UpdateSlotVisual(i)
+            end
+            UpdateGroupBoxesVisibility()
             if isManual then
                 DEFAULT_CHAT_FRAME:AddMessage("|cffff2020[BGLite 团队工具] 你当前不在任何队伍或团队中！|r")
             end
@@ -1413,7 +1429,7 @@ function RaidTool.CreateUI(parent)
         RaidTool.SyncCurrentRaidRoster(true)
     end)
 
-    -- 预设管理面板 (宽度 590, 高度 110)
+    -- 预设管理面板 (宽度 590, 高度 110，专注平铺展示方块 Tab)
     local profilePanel = CreateFrame("Frame", nil, rightPanel, "BackdropTemplate")
     profilePanel:SetSize(590, 110)
     profilePanel:SetPoint("TOPLEFT", 16, gridY - 2 * (groupHeight + 8) - 4)
@@ -1427,59 +1443,28 @@ function RaidTool.CreateUI(parent)
     profilePanel:SetBackdropBorderColor(0.3, 0.3, 0.3, 0.8)
 
     local pTitle = profilePanel:CreateFontString(nil, "OVERLAY")
-    pTitle:SetFont(BIAOGE_TEXT_FONT, 14, "OUTLINE")
-    pTitle:SetPoint("TOPLEFT", 14, -10)
-    pTitle:SetText(BG.STC_g1(L["预设方案管理"]))
+    pTitle:SetFont(BIAOGE_TEXT_FONT, 13, "OUTLINE")
+    pTitle:SetPoint("TOPLEFT", 14, -8)
+    pTitle:SetText(BG.STC_g1(L["预设阵容快捷标签"]))
 
-    local profEditBox = CreateFrame("EditBox", nil, profilePanel, BG.editTemplate)
-    profEditBox:SetSize(170, 22)
-    profEditBox:SetPoint("TOPLEFT", 14, -36)
-    profEditBox:SetAutoFocus(false)
-    profEditBox:SetFont(BIAOGE_TEXT_FONT, 12, "OUTLINE")
+    local pSubTip = profilePanel:CreateFontString(nil, "OVERLAY")
+    pSubTip:SetFont(BIAOGE_TEXT_FONT, 11, "OUTLINE")
+    pSubTip:SetPoint("LEFT", pTitle, "RIGHT", 12, 0)
+    pSubTip:SetText(BG.STC_dis(L["(点击载入预设 | Alt+点击覆盖保存 | 右键删除)"]))
 
-    local profTip = profEditBox:CreateFontString(nil, "OVERLAY")
-    profTip:SetFont(BIAOGE_TEXT_FONT, 11, "OUTLINE")
-    profTip:SetPoint("LEFT", 5, 0)
-    profTip:SetTextColor(0.5, 0.5, 0.5)
-    profTip:SetText(L["输入方案名称..."])
+    -- Tab 按钮平铺容器
+    local tabContainer = CreateFrame("Frame", nil, profilePanel)
+    tabContainer:SetPoint("TOPLEFT", 14, -28)
+    tabContainer:SetPoint("BOTTOMRIGHT", -14, 10)
 
-    profEditBox:SetScript("OnTextChanged", function(self)
-        local text = self:GetText()
-        if text and text ~= "" then profTip:Hide() else profTip:Show() end
-    end)
+    local tabButtons = {}
+    local RefreshProfileTabs = nil
 
-    local btnSaveProfile = BG.CreateButton(profilePanel)
-    btnSaveProfile:SetSize(80, 22)
-    btnSaveProfile:SetPoint("LEFT", profEditBox, "RIGHT", 6, 0)
-    btnSaveProfile:SetText(L["保存预设"])
-
-    local btnApply = BG.CreateButton(profilePanel)
-    btnApply:SetSize(110, 26)
-    btnApply:SetPoint("TOPLEFT", 14, -70)
-    btnApply:SetText(BG.STC_g1(L["应用当前阵容"]))
-
-    local btnReset = BG.CreateButton(profilePanel)
-    btnReset:SetSize(80, 26)
-    btnReset:SetPoint("LEFT", btnApply, "RIGHT", 10, 0)
-    btnReset:SetText(L["清空网格"])
-
-    local dropDown = LibBG:Create_UIDropDownMenu(nil, profilePanel)
-    dropDown:SetPoint("LEFT", btnSaveProfile, "RIGHT", 10, -2)
-    LibBG:UIDropDownMenu_SetWidth(dropDown, 130)
-    LibBG:UIDropDownMenu_SetAnchor(dropDown, 0, 0, "TOP", dropDown, "BOTTOM")
-    BG.dropDownToggle(dropDown)
-
-    local selectedProfileName = nil
-
-    local function RefreshProfileDropdownText()
-        if selectedProfileName and selectedProfileName ~= "" then
-            LibBG:UIDropDownMenu_SetText(dropDown, selectedProfileName)
-        else
-            LibBG:UIDropDownMenu_SetText(dropDown, BG.STC_dis(L["选取预设方案..."]))
+    RefreshProfileTabs = function()
+        for _, btn in ipairs(tabButtons) do
+            btn:Hide()
         end
-    end
 
-    local function InitializeProfileDropdown(self, level)
         local profiles = BiaoGe.RaidGroups.profiles or {}
         local names = {}
         for pName, _ in pairs(profiles) do
@@ -1488,84 +1473,200 @@ function RaidTool.CreateUI(parent)
         table.sort(names)
 
         if #names == 0 then
-            local info = LibBG:UIDropDownMenu_CreateInfo()
-            info.text = BG.STC_dis(L["(暂无保存的预设)"])
-            info.notCheckable = true
-            info.disabled = true
-            LibBG:UIDropDownMenu_AddButton(info)
-            return
-        end
+            if not profilePanel.emptyTip then
+                local tip = profilePanel:CreateFontString(nil, "OVERLAY")
+                tip:SetFont(BIAOGE_TEXT_FONT, 12, "OUTLINE")
+                tip:SetPoint("LEFT", tabContainer, "LEFT", 2, 0)
+                tip:SetText(BG.STC_dis(L["暂无保存的预设，点击上方【保存为预设】可将当前团队阵容保存为快捷Tab。"]))
+                profilePanel.emptyTip = tip
+            end
+            profilePanel.emptyTip:Show()
+        else
+            if profilePanel.emptyTip then
+                profilePanel.emptyTip:Hide()
+            end
 
-        for _, pName in ipairs(names) do
-            local info = LibBG:UIDropDownMenu_CreateInfo()
-            info.text = pName
-            info.checked = (selectedProfileName == pName)
-            info.func = function()
-                selectedProfileName = pName
-                profEditBox:SetText(pName)
-                RefreshProfileDropdownText()
+            local xOffset = 0
+            local yOffset = 0
+            local maxRowWidth = 560
 
-                local profileData = BiaoGe.RaidGroups.profiles[pName]
-                if profileData and type(profileData) == "table" then
-                    for i = 1, 40 do
-                        currentRosterList[i] = profileData[i]
-                        UpdateSlotVisual(i)
-                    end
-                    UpdateGroupBoxesVisibility()
+            for idx, pName in ipairs(names) do
+                local btn = tabButtons[idx]
+                if not btn then
+                    btn = CreateFrame("Button", nil, tabContainer, "BackdropTemplate")
+                    btn:SetHeight(24)
+                    btn:SetBackdrop({
+                        bgFile = "Interface/ChatFrame/ChatFrameBackground",
+                        edgeFile = "Interface/Buttons/WHITE8X8",
+                        edgeSize = 1,
+                        insets = { left = 1, right = 1, top = 1, bottom = 1 },
+                    })
+                    btn.text = btn:CreateFontString(nil, "OVERLAY")
+                    btn.text:SetFont(BIAOGE_TEXT_FONT, 12, "OUTLINE")
+                    btn.text:SetPoint("CENTER", 0, 0)
+
+                    btn:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+
+                    tabButtons[idx] = btn
                 end
+
+                btn.profileName = pName
+                btn.text:SetText(pName)
+                local textWidth = btn.text:GetStringWidth() + 18
+                local btnWidth = math.max(68, textWidth)
+                btn:SetWidth(btnWidth)
+
+                if xOffset + btnWidth > maxRowWidth and xOffset > 0 then
+                    xOffset = 0
+                    yOffset = yOffset - 28
+                end
+
+                btn:ClearAllPoints()
+                btn:SetPoint("TOPLEFT", tabContainer, "TOPLEFT", xOffset, yOffset)
+                xOffset = xOffset + btnWidth + 6
+
+                local isSelected = (BiaoGe.RaidGroups.selectedProfile == pName)
+                if isSelected then
+                    btn:SetBackdropColor(0.12, 0.42, 0.72, 0.95)
+                    btn:SetBackdropBorderColor(1, 0.82, 0, 1)
+                    btn.text:SetTextColor(1, 0.95, 0.3)
+                else
+                    btn:SetBackdropColor(0.14, 0.14, 0.14, 0.85)
+                    btn:SetBackdropBorderColor(0.35, 0.35, 0.35, 0.9)
+                    btn.text:SetTextColor(0.9, 0.9, 0.9)
+                end
+
+                btn:SetScript("OnEnter", function(self)
+                    if BiaoGe.RaidGroups.selectedProfile ~= self.profileName then
+                        self:SetBackdropColor(0.22, 0.22, 0.22, 0.95)
+                        self:SetBackdropBorderColor(0.2, 0.8, 1, 1)
+                    end
+                    GameTooltip:SetOwner(self, "ANCHOR_TOP")
+                    GameTooltip:ClearLines()
+                    GameTooltip:AddLine(BG.STC_g1("预设阵容: ") .. self.profileName)
+                    GameTooltip:AddLine(BG.STC_w1("• 左键点击：") .. "载入该阵容到网格", 0.9, 0.9, 0.9)
+                    GameTooltip:AddLine(BG.STC_w1("• Alt+左键：") .. "覆盖保存当前网格到该预设", 0.9, 0.9, 0.9)
+                    GameTooltip:AddLine(BG.STC_r1("• 右键点击：") .. "删除该预设方案", 0.9, 0.9, 0.9)
+                    GameTooltip:Show()
+                end)
+
+                btn:SetScript("OnLeave", function(self)
+                    local sel = (BiaoGe.RaidGroups.selectedProfile == self.profileName)
+                    if sel then
+                        self:SetBackdropColor(0.12, 0.42, 0.72, 0.95)
+                        self:SetBackdropBorderColor(1, 0.82, 0, 1)
+                    else
+                        self:SetBackdropColor(0.14, 0.14, 0.14, 0.85)
+                        self:SetBackdropBorderColor(0.35, 0.35, 0.35, 0.9)
+                    end
+                    GameTooltip:Hide()
+                end)
+
+                btn:SetScript("OnClick", function(self, button)
+                    if button == "RightButton" then
+                        -- 删除预设
+                        BiaoGe.RaidGroups.profiles[self.profileName] = nil
+                        if BiaoGe.RaidGroups.selectedProfile == self.profileName then
+                            BiaoGe.RaidGroups.selectedProfile = nil
+                        end
+                        RaidTool.Log(format("已删除预设方案 [%s]。", self.profileName))
+                        RefreshProfileTabs()
+                        BG.PlaySound(1)
+                    elseif IsAltKeyDown() then
+                        -- 覆盖保存
+                        BiaoGe.RaidGroups.profiles[self.profileName] = {}
+                        for i = 1, 40 do
+                            BiaoGe.RaidGroups.profiles[self.profileName][i] = currentRosterList[i]
+                        end
+                        BiaoGe.RaidGroups.selectedProfile = self.profileName
+                        RaidTool.Log(format("已将当前网格覆盖保存到预设 [%s]！", self.profileName))
+                        RefreshProfileTabs()
+                        BG.PlaySound(1)
+                    else
+                        -- 加载预设
+                        BiaoGe.RaidGroups.selectedProfile = self.profileName
+                        local pData = BiaoGe.RaidGroups.profiles[self.profileName]
+                        if pData and type(pData) == "table" then
+                            wipe(currentRosterList)
+                            wipe(currentRosterClasses)
+                            for i = 1, 40 do
+                                currentRosterList[i] = pData[i]
+                                if pData[i] and pData[i] ~= "" and UnitName(pData[i]) then
+                                    currentRosterClasses[i] = select(2, UnitClass(pData[i]))
+                                end
+                                UpdateSlotVisual(i)
+                            end
+                            UpdateGroupBoxesVisibility()
+                        end
+                        RaidTool.Log(format("已载入预设方案 [%s]。", self.profileName))
+                        RefreshProfileTabs()
+                        BG.PlaySound(1)
+                    end
+                end)
+
+                btn:Show()
+            end
+        end
+    end
+
+    -- 注册原生弹窗：输入方案名称保存预设
+    StaticPopupDialogs["BG_SAVE_ROSTER_PROFILE"] = {
+        text = L["请输入团队阵容预设方案名称："],
+        button1 = L["保存"],
+        button2 = L["取消"],
+        hasEditBox = true,
+        maxLetters = 30,
+        OnShow = function(self)
+            local editBox = _G[self:GetName() .. "EditBox"]
+            if editBox then
+                editBox:SetText("")
+                editBox:SetFocus()
+            end
+        end,
+        OnAccept = function(self)
+            local editBox = _G[self:GetName() .. "EditBox"]
+            local name = editBox and editBox:GetText():trim()
+            if name and name ~= "" then
+                BiaoGe.RaidGroups.profiles[name] = {}
+                for i = 1, 40 do
+                    BiaoGe.RaidGroups.profiles[name][i] = currentRosterList[i]
+                end
+                BiaoGe.RaidGroups.selectedProfile = name
+                RefreshProfileTabs()
+                RaidTool.Log(format("已成功保存预设方案 [%s]！", name))
                 BG.PlaySound(1)
             end
-            LibBG:UIDropDownMenu_AddButton(info)
-        end
-    end
-
-    LibBG:UIDropDownMenu_Initialize(dropDown, InitializeProfileDropdown)
-    RefreshProfileDropdownText()
-
-    local btnDeleteProfile = BG.CreateButton(profilePanel)
-    btnDeleteProfile:SetSize(70, 22)
-    btnDeleteProfile:SetPoint("LEFT", dropDown, "RIGHT", -5, 2)
-    btnDeleteProfile:SetText(L["删除预设"])
-    btnDeleteProfile:SetScript("OnClick", function()
-        if selectedProfileName and BiaoGe.RaidGroups.profiles[selectedProfileName] then
-            BiaoGe.RaidGroups.profiles[selectedProfileName] = nil
-            profEditBox:SetText("")
-            selectedProfileName = nil
-            RefreshProfileDropdownText()
-            LibBG:UIDropDownMenu_Initialize(dropDown, InitializeProfileDropdown)
-            BG.PlaySound(1)
-        end
-    end)
-
-    local function SaveCurrentProfile()
-        local name = profEditBox:GetText():trim()
-        if name and name ~= "" then
-            BiaoGe.RaidGroups.profiles[name] = {}
-            for i = 1, 40 do
-                BiaoGe.RaidGroups.profiles[name][i] = currentRosterList[i]
+        end,
+        EditBoxOnEnterPressed = function(self)
+            local parent = self:GetParent()
+            local name = self:GetText():trim()
+            if name and name ~= "" then
+                BiaoGe.RaidGroups.profiles[name] = {}
+                for i = 1, 40 do
+                    BiaoGe.RaidGroups.profiles[name][i] = currentRosterList[i]
+                end
+                BiaoGe.RaidGroups.selectedProfile = name
+                RefreshProfileTabs()
+                RaidTool.Log(format("已成功保存预设方案 [%s]！", name))
+                BG.PlaySound(1)
             end
-            selectedProfileName = name
-            RefreshProfileDropdownText()
-            LibBG:UIDropDownMenu_Initialize(dropDown, InitializeProfileDropdown)
-            profEditBox:ClearFocus()
-            BG.PlaySound(1)
-        end
-    end
+            parent:Hide()
+        end,
+        EditBoxOnEscapePressed = function(self)
+            self:GetParent():Hide()
+        end,
+        timeout = 0,
+        whileDead = true,
+        hideOnEscape = true,
+        preferredIndex = 3,
+    }
 
-    btnSaveProfile:SetScript("OnClick", SaveCurrentProfile)
-    profEditBox:SetScript("OnEnterPressed", SaveCurrentProfile)
-
-    btnReset:SetScript("OnClick", function()
-        wipe(currentRosterList)
-        wipe(currentRosterClasses)
-        for i = 1, 40 do
-            UpdateSlotVisual(i)
-        end
-        UpdateGroupBoxesVisibility()
-        BG.PlaySound(1)
+    -- 顶部按钮事件绑定
+    btnSaveProfile:SetScript("OnClick", function()
+        StaticPopup_Show("BG_SAVE_ROSTER_PROFILE")
     end)
 
-    btnApply:SetScript("OnClick", function()
+    btnApplyRoster:SetScript("OnClick", function()
         RaidTool.ApplyRosterProfile(currentRosterList)
         BG.PlaySound(1)
     end)
@@ -1576,14 +1677,19 @@ function RaidTool.CreateUI(parent)
     footerTip:SetPoint("BOTTOM", mainFrame, "BOTTOM", 0, 18)
     footerTip:SetText(BG.STC_dis(L["空白位置待开发中；有需求欢迎dd留言。"]))
 
+    -- 全自动监听团队/小队变动（来人、退人、换队实时自动同步）
+    local rosterAutoUpdateFrame = CreateFrame("Frame", nil, mainFrame)
+    rosterAutoUpdateFrame:RegisterEvent("GROUP_ROSTER_UPDATE")
+    pcall(function() rosterAutoUpdateFrame:RegisterEvent("RAID_ROSTER_UPDATE") end)
+    rosterAutoUpdateFrame:SetScript("OnEvent", function(self, event)
+        if mainFrame:IsShown() and not RosterState.isProcessing then
+            RaidTool.SyncCurrentRaidRoster(false)
+        end
+    end)
+
     mainFrame:HookScript("OnShow", function()
         RaidTool.SyncCurrentRaidRoster(false)
-        rosterEventFrame:RegisterEvent("GROUP_ROSTER_UPDATE")
-    end)
-    mainFrame:HookScript("OnHide", function()
-        if not RosterState.isProcessing then
-            rosterEventFrame:UnregisterEvent("GROUP_ROSTER_UPDATE")
-        end
+        RefreshProfileTabs()
     end)
 end
 
@@ -1599,8 +1705,8 @@ local function CleanYYNumber(raw)
     return nil
 end
 
-local function FormatYYHyperlink(rawText, yyNum)
-    return "|cff00BFFF|Hgarrmission:BGLiteCopyYY:" .. yyNum .. "|h[YY " .. yyNum .. "]|h|r"
+local function FormatYYHyperlink(yyNum)
+    return "|cff00BFFF|Hgarrmission:BGLiteChannelLink:" .. yyNum .. "|h[YY " .. yyNum .. "]|h|r"
 end
 
 local function YYMessageFilter(self, event, msg, sender, ...)
@@ -1612,7 +1718,8 @@ local function YYMessageFilter(self, event, msg, sender, ...)
         return false, msg, sender, ...
     end
 
-    if msg:find("garrmission:BGLiteCopyYY:") then
+    -- 如果消息中已经包含我们的语音链接或者已经带有超链接，避免重复或二次破坏
+    if msg:find("garrmission:BGLiteChannelLink:") or msg:find("garrmission:BGLiteCopyYY:") then
         return false, msg, sender, ...
     end
 
@@ -1622,7 +1729,6 @@ local function YYMessageFilter(self, event, msg, sender, ...)
         "[yY][yY]%s*[:：=＝%-%s]*([0-9]+)",
         "歪歪%s*[:：=＝%-%s]*([0-9]+)",
         "[dD][dD]%s*[:：=＝%-%s]*([0-9]+)",
-        "钉钉%s*[:：=＝%-%s]*([0-9]+)",
         "[kK][oO][oO][kK]%s*[:：=＝%-%s]*([0-9]+)",
         "[vV][xX]%s*[:：=＝%-%s]*([0-9]+)",
         "频道%s*[:：=＝%-%s]*([0-9]+)",
@@ -1636,8 +1742,22 @@ local function YYMessageFilter(self, event, msg, sender, ...)
             if not s then break end
             local cleanNum = CleanYYNumber(cap)
             if cleanNum then
-                local fullMatch = msg:sub(s, e)
-                local link = FormatYYHyperlink(fullMatch, cleanNum)
+                -- 检查并吸收外部可能自带的中括号或中文括号，避免出现 [[YY ...]] 嵌套
+                if s > 1 and msg:sub(s - 1, s - 1) == "[" and msg:sub(e + 1, e + 1) == "]" then
+                    s = s - 1
+                    e = e + 1
+                elseif s >= 4 and msg:sub(s - 3, s - 1) == "【" and msg:sub(e + 1, e + 3) == "】" then
+                    s = s - 3
+                    e = e + 3
+                elseif s > 1 and msg:sub(s - 1, s - 1) == "(" and msg:sub(e + 1, e + 1) == ")" then
+                    s = s - 1
+                    e = e + 1
+                elseif s >= 4 and msg:sub(s - 3, s - 1) == "（" and msg:sub(e + 1, e + 3) == "）" then
+                    s = s - 3
+                    e = e + 3
+                end
+
+                local link = FormatYYHyperlink(cleanNum)
                 msg = msg:sub(1, s - 1) .. link .. msg:sub(e + 1)
                 startIdx = s + #link
                 modified = true
@@ -1742,7 +1862,7 @@ end
 -- Hook SetItemRef 处理超链接点击
 hooksecurefunc("SetItemRef", function(link, text, button)
     if not link then return end
-    local yyNum = link:match("^garrmission:BGLiteCopyYY:(%d+)") or link:match("^BGLiteCopyYY:(%d+)")
+    local yyNum = link:match("^garrmission:BGLiteChannelLink:(%d+)") or link:match("^garrmission:BGLiteCopyYY:(%d+)") or link:match("^BGLiteCopyYY:(%d+)")
     if yyNum then
         if IsShiftKeyDown() then
             -- SHIFT 点击：填入聊天输入框

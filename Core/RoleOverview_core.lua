@@ -1700,7 +1700,9 @@ function BG.SetFBCD(self, position, click, refresh)
                 local info = pzDB[id]
                 local count = tostring(GetCount(pzDB, vv.id, vv.type))
                 local countString, setSmall
-                if vv.type == "skill" and id == 0 then
+                if vv.type == "money" or id == "money" then
+                    countString = count .. (isNewUI and "" or " " .. AddTexture(vv.tex))
+                elseif vv.type == "skill" and id == 0 then
                     countString = BG.FormatNumber(count)
                     if isNewUI and countString ~= L["未学"] and countString ~= UNKNOW then
                         setSmall = true
@@ -1845,7 +1847,12 @@ function BG.SetFBCD(self, position, click, refresh)
             for ii = 2, #MONEYchoice_table do
                 local vv = MONEYchoice_table[ii]
                 local id = vv.id
-                local count = BG.FormatNumber(GetCount(DB2sum, id, vv.type)) .. " " .. AddTexture(vv.tex) -- 牌子
+                local count
+                if vv.type == "money" or id == "money" then
+                    count = tostring(GetCount(DB2sum, id, vv.type)) .. " " .. AddTexture(vv.tex)
+                else
+                    count = BG.FormatNumber(GetCount(DB2sum, id, vv.type)) .. " " .. AddTexture(vv.tex) -- 牌子
+                end
                 local t_paizi = mainFrame:CreateFontString()
                 t_paizi:SetFont(BIAOGE_TEXT_FONT, fontsize, "OUTLINE")
                 if isNewUI then
