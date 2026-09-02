@@ -90,6 +90,38 @@ local function IsAddonNoise(text)
     return false
 end
 
+-- 清理集结号内部协议元数据（如缺职业、版本掩码、MHH尾缀），截断 WARRIOR / 职业列表之前的内容
+local function CleanMeetingHornRawText(text)
+    if not text or text == "" then return "" end
+
+    -- 1. 截断职业列表或内部职业标识之前的协议串 (WARRIOR, PALADIN, HUNTER, ROGUE, PRIEST, DEATHKNIGHT, SHAMAN, MAGE, WARLOCK, DRUID)
+    local CLASS_TOKENS = {
+        "WARRIOR", "PALADIN", "HUNTER", "ROGUE", "PRIEST",
+        "DEATHKNIGHT", "SHAMAN", "MAGE", "WARLOCK", "DRUID",
+    }
+    for _, classToken in ipairs(CLASS_TOKENS) do
+        -- 匹配 ..WARRIOR 或 .WARRIOR 或 空格WARRIOR 或 _WARRIOR
+        local s, e = text:find("[%s%.~_]+" .. classToken)
+        if s and s > 1 then
+            text = text:sub(1, s - 1)
+        end
+    end
+
+    -- 2. 截断集结号协议尾缀 (如 ~0,0,3 或 .MHH@@ 或 MHH@)
+    local s1 = text:find("[~_]%d+") or text:find("[%s%.~_]*MHH@*")
+    if s1 and s1 > 1 then
+        text = text:sub(1, s1 - 1)
+    end
+
+    -- 3. 截断版本/状态编码数字串 (如 3.80.3456.1..)
+    text = text:gsub("[%s%.~_]*%d+%.%d+%.%d+%.%d+.*$", "")
+    text = text:gsub("[%s%.~_]*%d+%.%d+%.%d+.*$", "")
+
+    -- 4. 去除多余末尾的点号、波浪号和空白
+    text = text:gsub("[%s%.~_]+$", "")
+    return text:trim()
+end
+
 -- 解析集结号原生 MHH 广播数据包 (如: MHH@波比兔.百元均分团。测试信息 不开； 无)
 local function ParseMHHMessage(msg, sender)
     if not msg or not msg:find("^MHH") then return nil end
@@ -111,6 +143,7 @@ local function ParseMHHMessage(msg, sender)
         if comment and comment ~= "" then
             formatted = formatted .. comment
         end
+        formatted = CleanMeetingHornRawText(formatted)
         return CleanName(leader), formatted, leader
     end
     return nil
@@ -121,7 +154,7 @@ local WorldRecruitCache = {}
 local CACHE_EXPIRATION = 15 * 60 -- 15 分钟
 
 local function AddToWorldCache(sender, msg)
-    if not sender or not msg or #msg < 8 then return end
+    if not sender or not msg or #msg < 4 then return end
     if IsAddonNoise(msg) then return end
     local now = GetServerTime()
 
@@ -137,6 +170,9 @@ local function AddToWorldCache(sender, msg)
         return
     end
 
+    local cleanMsg = CleanMeetingHornRawText(msg)
+    if cleanMsg == "" then return end
+
     local pureName = CleanName(sender)
     for k, v in pairs(WorldRecruitCache) do
         if now - v.time > CACHE_EXPIRATION then
@@ -145,7 +181,7 @@ local function AddToWorldCache(sender, msg)
     end
 
     WorldRecruitCache[pureName] = {
-        msg = msg,
+        msg = cleanMsg,
         time = now,
         fullName = sender,
     }
@@ -325,35 +361,41 @@ local function HookMeetingHornInteractions()
     end)
 end
 
--- 6. 全局当前队伍独立暂存池 (未进本/组队中时的数据容器)
-TeamInfo.currentGroupData = {
-    yy = "",
-    leader = "",
-    recruits = {},
-    isBound = false,
-    boundFB = nil,
-}
-
--- 获取当前查看的副本简写
+-- 6. 数据存储与持久化 (支持 Reload 全状态自愈与防丢)
 local function GetCurrentFB()
     return BG.FB1 or (BG.FBtable and BG.FBtable[1]) or "TOC"
 end
 
--- 获取当前卡片所处的展示状态
+local function InitDataPersistence()
+    if not BiaoGe then return end
+    BiaoGe.currentGroupData = BiaoGe.currentGroupData or {
+        yy = "",
+        leader = "",
+        recruits = {},
+        isBound = false,
+        boundFB = nil,
+    }
+    TeamInfo.currentGroupData = BiaoGe.currentGroupData
+end
+
+-- 获取当前面板所处的展示状态
 -- 1: STATE_UNBOUND (进本前/组队未绑定态)
 -- 2: STATE_BOUND   (已进本/表格已绑定态)
 -- 3: STATE_ARCHIVE (单人查账/历史存档态)
 function TeamInfo.GetCardState()
+    InitDataPersistence()
     local inGroup = IsInGroup() or IsInRaid()
     local currentFB = GetCurrentFB()
+    local fbData = BiaoGe and BiaoGe[currentFB] and BiaoGe[currentFB].teamInfo
+
     if not inGroup then
-        local data = BiaoGe and BiaoGe[currentFB] and BiaoGe[currentFB].teamInfo
-        return 3, data or { yy = "", leader = "", recruits = {} }, currentFB
+        return 3, fbData or { yy = "", leader = "", recruits = {} }, currentFB
     end
 
-    if TeamInfo.currentGroupData.isBound and TeamInfo.currentGroupData.boundFB == currentFB then
-        local data = BiaoGe and BiaoGe[currentFB] and BiaoGe[currentFB].teamInfo
-        return 2, data or TeamInfo.currentGroupData, currentFB
+    -- 组队状态下：如果已绑定当前副本，或者当前副本有持久化记录
+    if (TeamInfo.currentGroupData.isBound and TeamInfo.currentGroupData.boundFB == currentFB)
+       or (fbData and fbData.leader and fbData.leader ~= "") then
+        return 2, fbData or TeamInfo.currentGroupData, currentFB
     end
 
     return 1, TeamInfo.currentGroupData, currentFB
@@ -361,6 +403,7 @@ end
 
 -- 获取适合写入的数据源
 function TeamInfo.GetActiveDataForWrite()
+    InitDataPersistence()
     local inGroup = IsInGroup() or IsInRaid()
     if inGroup then
         return TeamInfo.currentGroupData
@@ -376,6 +419,7 @@ end
 
 -- 将当前暂存的组队信息「固化绑定」到指定副本表格中
 function TeamInfo.BindCurrentGroupToFB(targetFB)
+    InitDataPersistence()
     targetFB = targetFB or GetCurrentFB()
     if not BiaoGe or not BiaoGe[targetFB] then return end
 
@@ -397,6 +441,10 @@ end
 -- 记录一条通告（自动去重、容量管理，并同步到绑定副本）
 function TeamInfo.AddRecruitEntry(channel, text, customTime, FB)
     if not text or text == "" then return false end
+    text = CleanMeetingHornRawText(text)
+    if not text or text == "" then return false end
+
+    InitDataPersistence()
     local data = TeamInfo.GetActiveDataForWrite()
     if not data then return false end
 
@@ -410,8 +458,8 @@ function TeamInfo.AddRecruitEntry(channel, text, customTime, FB)
         end
     end
 
-    -- 最多保留 15 条
-    if #data.recruits >= 15 then
+    -- 最多保留 25 条历史
+    if #data.recruits >= 25 then
         tremove(data.recruits, 1)
     end
 
@@ -442,6 +490,7 @@ end
 
 function TeamInfo.SetYY(yy)
     if not yy then return end
+    InitDataPersistence()
     local cleanYY = tostring(yy):gsub("%s", "")
     local data = TeamInfo.GetActiveDataForWrite()
     if data then
@@ -456,12 +505,29 @@ function TeamInfo.SetYY(yy)
     TeamInfo.UpdateUI()
 end
 
--- 7. 进团/组队主触发逻辑 (含团长变更追踪)
+-- 统一团队信息调试日志打印 (受团队工具中的“开启调试日志”复选框控制)
+function TeamInfo.Log(msg, colorHex)
+    local isDebug = false
+    if ns.RaidTool and ns.RaidTool.IsDebugEnabled then
+        isDebug = ns.RaidTool.IsDebugEnabled()
+    elseif BiaoGe and BiaoGe.RaidTool and BiaoGe.RaidTool.debugLog ~= nil then
+        isDebug = (BiaoGe.RaidTool.debugLog == true or BiaoGe.RaidTool.debugLog == 1)
+    elseif BiaoGe and BiaoGe.options and BiaoGe.options.raidToolDebugLog ~= nil then
+        isDebug = (BiaoGe.options.raidToolDebugLog == 1 or BiaoGe.options.raidToolDebugLog == true)
+    end
+
+    if isDebug then
+        local c = colorHex or "00FFCC"
+        DEFAULT_CHAT_FRAME:AddMessage("|cff" .. c .. "[BGLite 团队信息] " .. msg .. "|r")
+    end
+end
+
+-- 7. 进团/组队主触发逻辑 (含团长变更追踪与进本自动绑定)
 local groupJoinTime = 0
 function TeamInfo.OnGroupUpdate(forceScan)
+    InitDataPersistence()
     local inGroup = IsInGroup() or IsInRaid()
     if not inGroup then
-        TeamInfo.currentGroupData = { yy = "", leader = "", recruits = {}, isBound = false, boundFB = nil }
         TeamInfo.UpdateUI()
         return
     end
@@ -484,26 +550,40 @@ function TeamInfo.OnGroupUpdate(forceScan)
     local cleanLeader = CleanName(leaderName)
     local data = TeamInfo.currentGroupData
 
+    if forceScan then
+        TeamInfo.Log(string.format(L["开始手动抓取队伍信息... 当前团长: |cffFFFF00%s|r"], (cleanLeader ~= "" and cleanLeader or L["未知"])), "00FF88")
+    end
+
     -- 团长换人追踪 (Leader Change Tracking)
     if cleanLeader ~= "" and data.leader and data.leader ~= "" and data.leader ~= cleanLeader then
         local oldLeader = data.leader
         data.leader = cleanLeader
         local changeMsg = string.format(L["团长变更为: %s (原团长: %s)"], cleanLeader, oldLeader)
         TeamInfo.AddRecruitEntry(L["团队变动"], changeMsg)
+        TeamInfo.Log(changeMsg, "FF9900")
         DEFAULT_CHAT_FRAME:AddMessage("|cff00BFFF[BGLite]|r |cffFF9900" .. changeMsg .. "|r")
     elseif cleanLeader ~= "" and (not data.leader or data.leader == "") then
         data.leader = cleanLeader
     end
 
     -- 自动进本检测：若进入了团队副本且尚未绑定，则自动绑定到对应副本
-    local isInstance, instanceType = IsInInstance()
-    if isInstance and (instanceType == "raid" or instanceType == "party") then
-        local FBID = select(8, GetInstanceInfo())
-        if FBID and BG.FBIDtable and BG.FBIDtable[FBID] then
-            local fbKey = BG.FBIDtable[FBID]
-            if not data.isBound or data.boundFB ~= fbKey then
-                TeamInfo.BindCurrentGroupToFB(fbKey)
+    local currentFBKey = nil
+    if BG and BG.FB2 then
+        currentFBKey = BG.FB2
+    else
+        local isInstance, instanceType = IsInInstance()
+        if isInstance and (instanceType == "raid" or instanceType == "party") then
+            local FBID = select(8, GetInstanceInfo())
+            if FBID and BG and BG.FBIDtable and BG.FBIDtable[FBID] then
+                currentFBKey = BG.FBIDtable[FBID]
             end
+        end
+    end
+
+    if currentFBKey and currentFBKey ~= "" then
+        if not data.isBound or data.boundFB ~= currentFBKey then
+            TeamInfo.Log(string.format(L["检测到已进入副本 <%s>，正在执行自动绑定..."], currentFBKey), "00BFFF")
+            TeamInfo.BindCurrentGroupToFB(currentFBKey)
         end
     end
 
@@ -519,9 +599,14 @@ function TeamInfo.OnGroupUpdate(forceScan)
         end
         if fullText ~= "" then
             local added = TeamInfo.AddRecruitEntry(L["集结号"], fullText)
-            if added then
-                DEFAULT_CHAT_FRAME:AddMessage("|cff00BFFF[BGLite]|r " .. L["已自动从集结号捕获团队招募: "] .. "|cff00FF00" .. fullText .. "|r")
-            end
+            TeamInfo.Log(string.format(L["【集结号】成功抓取活动: %s"], fullText), "00FF00")
+            -- if added then
+            --     DEFAULT_CHAT_FRAME:AddMessage("|cff00BFFF[BGLite]|r " .. L["已自动从集结号捕获团队招募: "] .. "|cff00FF00" .. fullText .. "|r")
+            -- end
+        end
+    else
+        if forceScan then
+            TeamInfo.Log(L["【集结号】未检索到当前团长发布的有效活动"], "AAAAAA")
         end
     end
 
@@ -531,8 +616,13 @@ function TeamInfo.OnGroupUpdate(forceScan)
         local timeStr = date("%H:%M:%S", item.time)
         local channelName = item.isMHH and L["集结号"] or L["世界频道"]
         local added = TeamInfo.AddRecruitEntry(channelName, item.msg, timeStr)
-        if added then
-            DEFAULT_CHAT_FRAME:AddMessage("|cff00BFFF[BGLite]|r " .. L["已自动捕获团长招募: "] .. "|cff00FF00" .. item.msg .. "|r")
+        TeamInfo.Log(string.format(L["【世界频道缓存】匹配到团长喊话: %s"], item.msg), "00FF00")
+        -- if added then
+        --     DEFAULT_CHAT_FRAME:AddMessage("|cff00BFFF[BGLite]|r " .. L["已自动捕获团长招募: "] .. "|cff00FF00" .. item.msg .. "|r")
+        -- end
+    else
+        if forceScan then
+            TeamInfo.Log(L["【世界频道缓存】近 15 分钟内未发现该团长的开团喊话"], "AAAAAA")
         end
     end
 
@@ -590,20 +680,23 @@ eventFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
 eventFrame:SetScript("OnEvent", function(self, event, msg, sender, ...)
     if event == "PLAYER_ENTERING_WORLD" or event == "ZONE_CHANGED_NEW_AREA" then
         HookMeetingHornInteractions()
-        TeamInfo.OnGroupUpdate()
+        C_Timer.After(1.0, function() TeamInfo.OnGroupUpdate() end)
+        C_Timer.After(3.0, function() TeamInfo.OnGroupUpdate() end)
         return
     elseif event == "GROUP_JOINED" then
         TriggerMultiWaveScan()
         return
     elseif event == "GROUP_LEFT" then
-        TeamInfo.currentGroupData = { yy = "", leader = "", recruits = {}, isBound = false, boundFB = nil }
+        if BiaoGe and BiaoGe.currentGroupData then
+            BiaoGe.currentGroupData = { yy = "", leader = "", recruits = {}, isBound = false, boundFB = nil }
+            TeamInfo.currentGroupData = BiaoGe.currentGroupData
+        end
         TeamInfo.UpdateUI()
         return
     elseif event == "GROUP_ROSTER_UPDATE" or event == "RAID_ROSTER_UPDATE" then
         if IsInGroup() or IsInRaid() then
             C_Timer.After(0.3, function() TeamInfo.OnGroupUpdate() end)
         else
-            TeamInfo.currentGroupData = { yy = "", leader = "", recruits = {}, isBound = false, boundFB = nil }
             TeamInfo.UpdateUI()
         end
         return
@@ -628,7 +721,7 @@ eventFrame:SetScript("OnEvent", function(self, event, msg, sender, ...)
         if numOnly and #numOnly >= 4 and #numOnly <= 12 and (GetServerTime() - groupJoinTime < 600) then
             TeamInfo.SetYY(numOnly)
             TeamInfo.AddRecruitEntry(L["团队频道"], L["团长发布YY号: "] .. numOnly)
-            DEFAULT_CHAT_FRAME:AddMessage("|cff00BFFF[BGLite]|r " .. L["已自动记录团长YY: "] .. "|cff00FF00" .. numOnly .. "|r")
+            -- DEFAULT_CHAT_FRAME:AddMessage("|cff00BFFF[BGLite]|r " .. L["已自动记录团长YY: "] .. "|cff00FF00" .. numOnly .. "|r")
             return
         end
 
@@ -645,49 +738,116 @@ eventFrame:SetScript("OnEvent", function(self, event, msg, sender, ...)
     end
 end)
 
--- 9. UI 组件构建 (方案 A：三态指示卡片)
+-- 9. UI 组件构建 (右侧抽屉侧边栏 + 顶部控制按钮)
 function TeamInfo.CreateUI()
     local parent = BG and BG.MainFrame
-    if not parent or TeamInfo.cardFrame then return end
+    if not parent or TeamInfo.sideFrame then return end
 
-    local f = CreateFrame("Frame", "BGLite_TeamInfoCard", parent, "BackdropTemplate")
-    f:SetSize(525, 48)
-    f:SetPoint("BOTTOMLEFT", parent, "BOTTOMLEFT", 295, 30)
+    -- 9.1 顶部栏入口切换按钮 (挂载在拍卖记录按钮旁边)
+    local topBtn = CreateFrame("Button", "BGLite_ButtonTeamInfo", parent)
+    topBtn:SetSize(65, 20)
+    if BG.ButtonAuctionLog then
+        topBtn:SetPoint("LEFT", BG.ButtonAuctionLog, "RIGHT", BG.TopLeftButtonJianGe or 10, 0)
+    elseif BG.ButtonMove then
+        topBtn:SetPoint("LEFT", BG.ButtonMove, "RIGHT", BG.TopLeftButtonJianGe or 10, 0)
+    else
+        topBtn:SetPoint("TOPLEFT", parent, "TOPLEFT", 220, -5)
+    end
+    topBtn:SetNormalFontObject(BG.FontGreen15 or "GameFontNormal")
+    topBtn:SetHighlightFontObject(BG.FontWhite15 or "GameFontHighlight")
+    topBtn:SetText(L["团队信息"])
+    topBtn:SetSize(topBtn:GetFontString():GetWidth() + 6, 20)
+    if BG.SetTextHighlightTexture then BG.SetTextHighlightTexture(topBtn) end
+    TeamInfo.topBtn = topBtn
+
+    topBtn:SetScript("OnClick", function(self)
+        BiaoGe.options = BiaoGe.options or {}
+        if TeamInfo.sideFrame:IsVisible() then
+            BiaoGe.options.showTeamInfoFrame = 0
+            TeamInfo.sideFrame:Hide()
+        else
+            BiaoGe.options.showTeamInfoFrame = 1
+            TeamInfo.sideFrame:Show()
+            TeamInfo.UpdateUI()
+        end
+        if BG.PlaySound then BG.PlaySound(1) end
+    end)
+    topBtn:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_BOTTOMLEFT", 0, 0)
+        GameTooltip:ClearLines()
+        GameTooltip:AddLine(L["团队信息与开团通告"], 1, 1, 1)
+        GameTooltip:AddLine(L["点击展开/收起右侧团队信息面板。"], 1, 0.82, 0, true)
+        GameTooltip:AddLine(" ")
+        GameTooltip:AddLine(L["功能特性："], 0, 0.9, 1)
+        GameTooltip:AddLine(L["自动捕获集结号、世界喊话与开团规则，支持YY号一键复制及副本账单自动绑定。"], 0.85, 0.85, 0.85, true)
+        GameTooltip:AddLine(" ")
+        GameTooltip:AddLine(L["【开发调试中】如遇任何异常或有优化建议，欢迎前往 DD频道: 434056 交流反馈！"], 0.2, 1, 0.6, true)
+        GameTooltip:Show()
+    end)
+    topBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+
+    -- 9.2 右侧抽屉侧边栏 (挂载在 BG.MainFrame 右侧边缘，高度与主界面及拍卖记录一致)
+    local fHeight = (BG.FBHeight and BG.FB1 and BG.FBHeight[BG.FB1]) or (parent:GetHeight()) or 560
+    local f = CreateFrame("Frame", "BGLite_TeamInfoSideFrame", parent, "BackdropTemplate")
+    f:SetSize(340, fHeight)
+    f:SetPoint("TOPLEFT", parent, "TOPRIGHT", 3, 0)
     f:SetFrameStrata("HIGH")
     f:SetFrameLevel((parent:GetFrameLevel() or 100) + 30)
     f:SetBackdrop({
         bgFile = "Interface/ChatFrame/ChatFrameBackground",
         edgeFile = "Interface/Tooltips/UI-Tooltip-Border",
-        edgeSize = 10,
-        insets = { left = 2, right = 2, top = 2, bottom = 2 }
+        edgeSize = 14,
+        insets = { left = 3, right = 3, top = 3, bottom = 3 }
     })
-    f:SetBackdropColor(0, 0, 0, 0.88)
-    TeamInfo.cardFrame = f
+    f:SetBackdropColor(0.05, 0.05, 0.05, 0.92)
+    f:SetBackdropBorderColor(0.2, 0.8, 1.0, 0.95)
+    f:EnableMouse(true)
+    f:Hide()
+    TeamInfo.sideFrame = f
 
-    -- 状态标签与标题
+    -- 顶部标题与状态标签
+    local titleText = f:CreateFontString(nil, "ARTWORK")
+    titleText:SetFont(BIAOGE_TEXT_FONT, 14, "OUTLINE")
+    titleText:SetPoint("TOPLEFT", 12, -10)
+    titleText:SetTextColor(0, 0.9, 1)
+    titleText:SetText(L["团队信息与招募通告"])
+    f.titleText = titleText
+
+    -- 右上角关闭按钮
+    local closeBtn = CreateFrame("Button", nil, f, "UIPanelCloseButton")
+    closeBtn:SetSize(24, 24)
+    closeBtn:SetPoint("TOPRIGHT", -4, -4)
+    closeBtn:SetScript("OnClick", function()
+        BiaoGe.options = BiaoGe.options or {}
+        BiaoGe.options.showTeamInfoFrame = 0
+        f:Hide()
+        if BG.PlaySound then BG.PlaySound(1) end
+    end)
+
+    -- 状态标签
     local statusTag = f:CreateFontString(nil, "ARTWORK")
     statusTag:SetFont(BIAOGE_TEXT_FONT, 12, "OUTLINE")
-    statusTag:SetPoint("TOPLEFT", 8, -6)
+    statusTag:SetPoint("TOPLEFT", 12, -32)
     f.statusTag = statusTag
 
     -- 团长信息
     local leaderText = f:CreateFontString(nil, "ARTWORK")
-    leaderText:SetFont(BIAOGE_TEXT_FONT, 11, "OUTLINE")
-    leaderText:SetPoint("LEFT", statusTag, "RIGHT", 4, 0)
+    leaderText:SetFont(BIAOGE_TEXT_FONT, 12, "OUTLINE")
+    leaderText:SetPoint("LEFT", statusTag, "RIGHT", 6, 0)
     leaderText:SetTextColor(1, 0.82, 0)
     f.leaderText = leaderText
 
-    -- YY 频道区域
+    -- 第一操作行：YY 频道与复制
     local yyLabel = f:CreateFontString(nil, "ARTWORK")
     yyLabel:SetFont(BIAOGE_TEXT_FONT, 12, "OUTLINE")
-    yyLabel:SetPoint("LEFT", leaderText, "RIGHT", 6, 0)
+    yyLabel:SetPoint("TOPLEFT", 12, -54)
     yyLabel:SetTextColor(1, 1, 1)
-    yyLabel:SetText(L["YY:"])
+    yyLabel:SetText(L["YY 频道:"])
     f.yyLabel = yyLabel
 
     local yyEdit = CreateFrame("EditBox", nil, f, "InputBoxTemplate")
-    yyEdit:SetSize(68, 18)
-    yyEdit:SetPoint("LEFT", yyLabel, "RIGHT", 2, 0)
+    yyEdit:SetSize(110, 20)
+    yyEdit:SetPoint("LEFT", yyLabel, "RIGHT", 6, 0)
     yyEdit:SetAutoFocus(false)
     yyEdit:SetFont(BIAOGE_TEXT_FONT, 12, "OUTLINE")
     yyEdit:SetTextColor(0, 1, 0)
@@ -700,10 +860,9 @@ function TeamInfo.CreateUI()
         end
     end)
 
-    -- 复制 YY 按钮
     local btnCopyYY = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
-    btnCopyYY:SetSize(38, 20)
-    btnCopyYY:SetPoint("LEFT", yyEdit, "RIGHT", 3, 0)
+    btnCopyYY:SetSize(52, 22)
+    btnCopyYY:SetPoint("LEFT", yyEdit, "RIGHT", 5, 0)
     btnCopyYY:SetText(L["复制"])
     btnCopyYY:SetScript("OnClick", function()
         local _, data = TeamInfo.GetCardState()
@@ -713,135 +872,94 @@ function TeamInfo.CreateUI()
             ChatEdit_ActivateChat(editBox)
             editBox:SetText(yy)
             editBox:HighlightText()
-            DEFAULT_CHAT_FRAME:AddMessage("|cff00BFFF[BGLite]|r " .. L["已将 YY 频道号放入输入框: "] .. "|cff00FF00" .. yy .. "|r")
+            -- DEFAULT_CHAT_FRAME:AddMessage("|cff00BFFF[BGLite]|r " .. L["已将 YY 频道号放入输入框: "] .. "|cff00FF00" .. yy .. "|r")
             if BG.PlaySound then BG.PlaySound(1) end
         else
-            DEFAULT_CHAT_FRAME:AddMessage("|cff00BFFF[BGLite]|r " .. L["当前没有记录到有效的 YY 号"])
+            -- DEFAULT_CHAT_FRAME:AddMessage("|cff00BFFF[BGLite]|r " .. L["当前没有记录到有效的 YY 号"])
         end
     end)
     f.btnCopyYY = btnCopyYY
 
-    -- 导出全部通告按钮 (靠右)
-    local btnCopyAll = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
-    btnCopyAll:SetSize(58, 20)
-    btnCopyAll:SetPoint("TOPRIGHT", -6, -5)
-    btnCopyAll:SetText(L["导出"])
-    btnCopyAll:SetScript("OnClick", function()
-        local _, data = TeamInfo.GetCardState()
-        if not data or not data.recruits or #data.recruits == 0 then
-            DEFAULT_CHAT_FRAME:AddMessage("|cff00BFFF[BGLite]|r " .. L["当前暂无招募通告记录"])
-            return
-        end
-        local lines = {}
-        for _, item in ipairs(data.recruits) do
-            tinsert(lines, string.format("[%s] [%s] %s", item.time or "", item.channel or "", item.text or ""))
-        end
-        local fullOutput = table.concat(lines, "\n")
-        local editBox = ChatEdit_ChooseBoxForSend and ChatEdit_ChooseBoxForSend() or DEFAULT_CHAT_FRAME.editBox
-        ChatEdit_ActivateChat(editBox)
-        editBox:SetText(fullOutput)
-        editBox:HighlightText()
-        DEFAULT_CHAT_FRAME:AddMessage("|cff00BFFF[BGLite]|r " .. L["已将全部招募通告（带时间戳）放入输入框！"])
-        if BG.PlaySound then BG.PlaySound(1) end
-    end)
-    f.btnCopyAll = btnCopyAll
-
-    -- 手动刷新按钮
-    local btnScan = CreateFrame("Button", nil, f)
-    btnScan:SetSize(35, 20)
-    btnScan:SetPoint("RIGHT", btnCopyAll, "LEFT", -3, 0)
-    local btnScanText = btnScan:CreateFontString(nil, "ARTWORK")
-    btnScanText:SetFont(BIAOGE_TEXT_FONT, 11, "OUTLINE")
-    btnScanText:SetPoint("CENTER")
-    btnScanText:SetText("|cff00FF00[抓取]|r")
-    btnScan:SetScript("OnClick", function()
-        TeamInfo.OnGroupUpdate(true)
-        if BG.PlaySound then BG.PlaySound(1) end
-    end)
-    btnScan:SetScript("OnEnter", function(self)
-        GameTooltip:SetOwner(self, "ANCHOR_TOPRIGHT")
-        GameTooltip:SetText(L["点击立即重新从集结号与世界频道抓取团长招募语与YY"])
-        GameTooltip:Show()
-    end)
-    btnScan:SetScript("OnLeave", function() GameTooltip:Hide() end)
-    f.btnScan = btnScan
-
-    -- 一键绑定开团按钮 (仅在未绑定态出现)
+    -- 第二操作行：功能按钮组 (已移除导出通告)
     local btnBind = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
-    btnBind:SetSize(58, 20)
-    btnBind:SetPoint("RIGHT", btnScan, "LEFT", -3, 0)
+    btnBind:SetSize(90, 22)
+    btnBind:SetPoint("TOPLEFT", 12, -80)
     btnBind:SetText("|cffFF9900" .. L["绑定开团"] .. "|r")
     btnBind:SetScript("OnClick", function()
         TeamInfo.BindCurrentGroupToFB()
     end)
-    btnBind:SetScript("OnEnter", function(self)
-        local curFB = GetCurrentFB()
-        local fbShort = BG.GetFBinfo and BG.GetFBinfo(curFB, "shortName") or curFB
-        GameTooltip:SetOwner(self, "ANCHOR_TOPRIGHT")
-        GameTooltip:SetText(string.format(L["点击将当前队伍信息与招募通告正式绑定至 <%s> 表格"], fbShort))
-        GameTooltip:Show()
-    end)
-    btnBind:SetScript("OnLeave", function() GameTooltip:Hide() end)
     f.btnBind = btnBind
 
-    -- 第二行：通告条目展示框 (鼠标悬停展开完整历史)
-    local recruitBox = CreateFrame("Button", nil, f, "BackdropTemplate")
-    recruitBox:SetSize(509, 18)
-    recruitBox:SetPoint("BOTTOMLEFT", 8, 4)
-    recruitBox:SetBackdrop({
-        bgFile = "Interface/Buttons/WHITE8X8",
-        edgeFile = "Interface/Tooltips/UI-Tooltip-Border",
-        edgeSize = 6,
-        insets = { left = 1, right = 1, top = 1, bottom = 1 }
-    })
-    recruitBox:SetBackdropColor(0.08, 0.08, 0.08, 0.9)
-    recruitBox:SetBackdropBorderColor(0.4, 0.4, 0.4, 0.8)
-    f.recruitBox = recruitBox
-
-    local recruitText = recruitBox:CreateFontString(nil, "ARTWORK")
-    recruitText:SetFont(BIAOGE_TEXT_FONT, 11, "OUTLINE")
-    recruitText:SetPoint("TOPLEFT", 4, -2)
-    recruitText:SetPoint("BOTTOMRIGHT", -4, 2)
-    recruitText:SetJustifyH("LEFT")
-    recruitText:SetJustifyV("MIDDLE")
-    recruitText:SetWordWrap(false)
-    recruitText:SetTextColor(0.9, 0.9, 0.9)
-    f.recruitText = recruitText
-
-    -- 鼠标悬停显示全部多条通告 Tooltip
-    recruitBox:SetScript("OnEnter", function(self)
-        local _, data = TeamInfo.GetCardState()
-        if not data or not data.recruits or #data.recruits == 0 then return end
-        GameTooltip:SetOwner(self, "ANCHOR_TOPLEFT", 0, 5)
-        GameTooltip:ClearLines()
-        GameTooltip:AddLine(L["【团队招募与开团通告完整时序记录】"], 0, 0.9, 1)
-        GameTooltip:AddLine(" ")
-        for i, item in ipairs(data.recruits) do
-            local header = string.format("|cff00FF00[%s]|r |cffFFFF00[%s]|r", item.time or "", item.channel or "")
-            GameTooltip:AddLine(header, 1, 1, 1)
-            GameTooltip:AddLine("  " .. (item.text or ""), 0.9, 0.9, 0.9, true)
-            if i < #data.recruits then
-                GameTooltip:AddLine(" ")
-            end
-        end
-        GameTooltip:AddLine(" ")
-        GameTooltip:AddLine(L["提示: 点击右上角 [导出] 按钮可一键导出带时间戳正文"], 0.6, 0.6, 0.6)
-        GameTooltip:Show()
+    local btnScan = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
+    btnScan:SetSize(75, 22)
+    btnScan:SetPoint("LEFT", btnBind, "RIGHT", 8, 0)
+    btnScan:SetText("|cff00FF00" .. L["抓取"] .. "|r")
+    btnScan:SetScript("OnClick", function()
+        TeamInfo.OnGroupUpdate(true)
+        if BG.PlaySound then BG.PlaySound(1) end
     end)
+    f.btnScan = btnScan
 
-    recruitBox:SetScript("OnLeave", function()
-        GameTooltip:Hide()
-    end)
+    -- 分割线
+    local line = f:CreateTexture(nil, "ARTWORK")
+    line:SetSize(316, 1)
+    line:SetPoint("TOPLEFT", 12, -108)
+    line:SetColorTexture(0.3, 0.3, 0.3, 0.8)
 
+    -- 通告列表标题
+    local listTitle = f:CreateFontString(nil, "ARTWORK")
+    listTitle:SetFont(BIAOGE_TEXT_FONT, 12, "OUTLINE")
+    listTitle:SetPoint("TOPLEFT", 12, -114)
+    listTitle:SetTextColor(0.8, 0.8, 0.8)
+    listTitle:SetText(L["招募喊话与团队规则时序列表:"])
+
+    -- 9.3 滚动列表容器 (填满等高下方区域)
+    local scroll = CreateFrame("ScrollFrame", "BGLite_TeamInfoScroll", f, "UIPanelScrollFrameTemplate")
+    scroll:SetPoint("TOPLEFT", 12, -132)
+    scroll:SetPoint("BOTTOMRIGHT", -28, 12)
+    if BG.CreateSrollBarBackdrop then BG.CreateSrollBarBackdrop(scroll.ScrollBar) end
+    if BG.HookScrollBarShowOrHide then BG.HookScrollBarShowOrHide(scroll) end
+    f.scroll = scroll
+
+    local content = CreateFrame("Frame", "BGLite_TeamInfoScrollContent", scroll)
+    content:SetSize(296, 300)
+    scroll:SetScrollChild(content)
+    f.content = content
+    f.entries = {}
+
+    -- 空数据提示
+    local emptyHint = f.content:CreateFontString(nil, "ARTWORK")
+    emptyHint:SetFont(BIAOGE_TEXT_FONT, 11, "OUTLINE")
+    emptyHint:SetPoint("TOPLEFT", 6, -10)
+    emptyHint:SetPoint("TOPRIGHT", -6, -10)
+    emptyHint:SetJustifyH("LEFT")
+    emptyHint:SetTextColor(0.6, 0.6, 0.6)
+    f.emptyHint = emptyHint
+
+    -- 依据持久化选项恢复显示/隐藏
+    BiaoGe.options = BiaoGe.options or {}
+    if BiaoGe.options.showTeamInfoFrame == 1 then
+        f:Show()
+    else
+        f:Hide()
+    end
+
+    TeamInfo.UpdateUI()
 end
 
--- 10. 刷新卡片 UI 与状态机渲染
+-- 10. 刷新侧边栏 UI 与状态机渲染 (高度动态自适应 + 滚动条目渲染)
 function TeamInfo.UpdateUI()
-    local f = TeamInfo.cardFrame
+    InitDataPersistence()
+    local f = TeamInfo.sideFrame
     if not f or not f:IsVisible() then return end
 
     local state, data, currentFB = TeamInfo.GetCardState()
     local fbShort = BG.GetFBinfo and BG.GetFBinfo(currentFB, "shortName") or currentFB
+
+    -- 动态与主界面及拍卖记录保持一致高度
+    local parent = BG and BG.MainFrame
+    local h = (BG.FBHeight and currentFB and BG.FBHeight[currentFB]) or (parent and parent:GetHeight()) or 560
+    f:SetHeight(h)
 
     if state == 1 then
         -- 状态 1：进本前 / 组队未绑定态 (翠绿边框)
@@ -873,33 +991,137 @@ function TeamInfo.UpdateUI()
         f.yyEdit:SetText((data and data.yy) or "")
     end
 
-    if data and data.recruits and #data.recruits > 0 then
-        local lines = {}
-        for i = math.max(1, #data.recruits - 1), #data.recruits do
-            local item = data.recruits[i]
-            tinsert(lines, string.format("|cff00FF00[%s]|r |cffFFFF00[%s]|r %s", item.time or "", item.channel or "", item.text or ""))
+    -- 渲染时序通告列表项
+    for _, btn in ipairs(f.entries) do
+        btn:Hide()
+    end
+
+    local recruits = (data and data.recruits) or {}
+    local startY = 0
+    local itemHeight = 42
+    local totalHeight = 0
+
+    if #recruits == 0 then
+        if f.emptyHint then
+            if state == 1 then
+                f.emptyHint:SetText(L["已开启队伍监听，自动捕获集结号、YY与开团规则..."])
+            else
+                f.emptyHint:SetText(L["暂无该副本场次的招募通告与开团规则记录"])
+            end
+            f.emptyHint:Show()
         end
-        f.recruitText:SetText(table.concat(lines, "\n"))
     else
-        if state == 1 then
-            f.recruitText:SetText("|cff777777" .. L["已开启当前队伍监听，自动捕获集结号、YY与团长规则..."] .. "|r")
-        else
-            f.recruitText:SetText("|cff777777" .. L["暂无该场次的招募通告与开团规则记录"] .. "|r")
+        if f.emptyHint then f.emptyHint:Hide() end
+
+        for i, item in ipairs(recruits) do
+            local btn = f.entries[i]
+            if not btn then
+                btn = CreateFrame("Button", nil, f.content, "BackdropTemplate")
+                btn:SetSize(292, itemHeight)
+                btn:SetFrameStrata(f:GetFrameStrata())
+                btn:SetFrameLevel(f.content:GetFrameLevel() + 2)
+                btn:SetBackdrop({
+                    bgFile = "Interface/Buttons/WHITE8X8",
+                    edgeFile = "Interface/Tooltips/UI-Tooltip-Border",
+                    edgeSize = 6,
+                    insets = { left = 1, right = 1, top = 1, bottom = 1 }
+                })
+                btn:SetBackdropColor(0.12, 0.12, 0.12, 0.85)
+                btn:SetBackdropBorderColor(0.35, 0.35, 0.35, 0.8)
+
+                local timeText = btn:CreateFontString(nil, "OVERLAY")
+                timeText:SetFont(BIAOGE_TEXT_FONT, 11, "OUTLINE")
+                timeText:SetPoint("TOPLEFT", 5, -3)
+                timeText:SetPoint("TOPRIGHT", -5, -3)
+                timeText:SetJustifyH("LEFT")
+                btn.timeText = timeText
+
+                local bodyText = btn:CreateFontString(nil, "OVERLAY")
+                bodyText:SetFont(BIAOGE_TEXT_FONT, 11, "OUTLINE")
+                bodyText:SetPoint("TOPLEFT", 5, -17)
+                bodyText:SetPoint("BOTTOMRIGHT", -5, 3)
+                bodyText:SetJustifyH("LEFT")
+                bodyText:SetJustifyV("TOP")
+                bodyText:SetWordWrap(true)
+                bodyText:SetTextColor(0.9, 0.9, 0.9)
+                btn.bodyText = bodyText
+
+                btn:SetScript("OnClick", function(self, button)
+                    if self.rawText and self.rawText ~= "" then
+                        local editBox = ChatEdit_ChooseBoxForSend and ChatEdit_ChooseBoxForSend() or DEFAULT_CHAT_FRAME.editBox
+                        ChatEdit_ActivateChat(editBox)
+                        editBox:SetText(self.rawText)
+                        editBox:HighlightText()
+                        -- DEFAULT_CHAT_FRAME:AddMessage("|cff00BFFF[BGLite]|r " .. L["已将此条通告放入输入框"])
+                        if BG.PlaySound then BG.PlaySound(1) end
+                    end
+                end)
+
+                btn:SetScript("OnEnter", function(self)
+                    self:SetBackdropColor(0.2, 0.35, 0.5, 0.95)
+                    GameTooltip:SetOwner(self, "ANCHOR_LEFT")
+                    GameTooltip:ClearLines()
+                    GameTooltip:AddLine(self.headerText or "", 1, 1, 1)
+                    GameTooltip:AddLine(self.rawText or "", 0.9, 0.9, 0.9, true)
+                    GameTooltip:AddLine(" ")
+                    GameTooltip:AddLine(L["点击此条可将正文放入聊天输入框"], 0.6, 0.6, 0.6)
+                    GameTooltip:Show()
+                end)
+                btn:SetScript("OnLeave", function(self)
+                    self:SetBackdropColor(0.12, 0.12, 0.12, 0.85)
+                    GameTooltip:Hide()
+                end)
+
+                f.entries[i] = btn
+            end
+
+            btn:SetPoint("TOPLEFT", f.content, "TOPLEFT", 2, -startY)
+            local header = string.format("|cff00FF00[%s]|r |cffFFFF00[%s]|r", item.time or "", item.channel or "")
+            btn.timeText:SetText(header)
+            btn.bodyText:SetText(item.text or "")
+            btn.headerText = header
+            btn.rawText = item.text or ""
+            btn:Show()
+
+            startY = startY + itemHeight + 3
+            totalHeight = startY
         end
+    end
+
+    f.content:SetSize(296, math.max(20, totalHeight))
+    if f.scroll and f.scroll.UpdateScrollChildRect then
+        f.scroll:UpdateScrollChildRect()
     end
 end
 
--- 自愈挂载：无论何时打开表格，确保卡片已创建并处于显示状态
+-- 11. Hook 清空表格逻辑，当清空某个副本表格时，同步清空该副本绑定的团队信息
+if BG and BG.ClearBiaoGe then
+    hooksecurefunc(BG, "ClearBiaoGe", function(clearType, FB)
+        if clearType == "biaoge" and FB and BiaoGe and BiaoGe[FB] then
+            BiaoGe[FB].teamInfo = nil
+            TeamInfo.UpdateUI()
+        end
+    end)
+end
+
+-- 自愈与定时扫描挂载：定时检测进本状态与自动同步
 local initFrame = CreateFrame("Frame")
 initFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
 initFrame:RegisterEvent("PLAYER_LOGIN")
 initFrame:SetScript("OnEvent", function()
     C_Timer.After(0.5, function()
-        if BG and BG.MainFrame and not TeamInfo.cardFrame then
+        if BG and BG.MainFrame and not TeamInfo.sideFrame then
             TeamInfo.CreateUI()
         end
-        if TeamInfo.cardFrame then
+        if TeamInfo.sideFrame and TeamInfo.sideFrame:IsVisible() then
             TeamInfo.UpdateUI()
         end
     end)
+end)
+
+-- 每 3 秒定期检测是否进入了新副本，实现 100% 自动绑定
+C_Timer.NewTicker(3, function()
+    if IsInGroup() or IsInRaid() then
+        TeamInfo.OnGroupUpdate()
+    end
 end)

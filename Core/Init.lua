@@ -333,11 +333,11 @@ local function InitPlusUI()
         end
     end
 
-    -- 5.5 表格主框架 (FBMainFrame) 生命周期补齐与装备过滤挂载 & 团队信息卡片
+    -- 5.5 表格主框架 (FBMainFrame) 生命周期补齐与装备过滤挂载 & 团队信息侧边栏
     if BG.FBMainFrame and not BG.FBMainFrame.hasHookedPlusOnShow then
         BG.FBMainFrame.hasHookedPlusOnShow = true
 
-        -- 创建团队信息卡片组件 (挂载在主框架黄金居中区)
+        -- 创建团队信息组件 (顶部入口按钮与右侧抽屉面板)
         if ns.TeamInfo and ns.TeamInfo.CreateUI then
             ns.TeamInfo.CreateUI()
         end
@@ -354,17 +354,22 @@ local function InitPlusUI()
             if BG.UpdateAllFilter then
                 BG.UpdateAllFilter()
             end
-            if ns.TeamInfo and ns.TeamInfo.cardFrame then
-                SafeShow(ns.TeamInfo.cardFrame)
-                if ns.TeamInfo.UpdateUI then
-                    ns.TeamInfo.UpdateUI()
+            if ns.TeamInfo and ns.TeamInfo.topBtn then
+                SafeShow(ns.TeamInfo.topBtn)
+            end
+            if BiaoGe and BiaoGe.options and BiaoGe.options.showTeamInfoFrame == 1 then
+                if ns.TeamInfo and ns.TeamInfo.sideFrame then
+                    SafeShow(ns.TeamInfo.sideFrame)
                 end
+            end
+            if ns.TeamInfo and ns.TeamInfo.UpdateUI then
+                ns.TeamInfo.UpdateUI()
             end
         end)
 
         BG.FBMainFrame:HookScript("OnHide", function(self)
-            if ns.TeamInfo and ns.TeamInfo.cardFrame then
-                SafeHide(ns.TeamInfo.cardFrame)
+            if ns.TeamInfo and ns.TeamInfo.sideFrame then
+                SafeHide(ns.TeamInfo.sideFrame)
             end
         end)
     end
@@ -374,8 +379,8 @@ local function InitPlusUI()
         BG.MainFrame.hasHookedPlus = true
         BG.MainFrame:HookScript("OnHide", function()
             HideAllSubFrames()
-            if ns.TeamInfo and ns.TeamInfo.cardFrame then
-                SafeHide(ns.TeamInfo.cardFrame)
+            if ns.TeamInfo and ns.TeamInfo.sideFrame then
+                SafeHide(ns.TeamInfo.sideFrame)
             end
         end)
 
@@ -391,11 +396,15 @@ local function InitPlusUI()
                 if num ~= BG.RaidToolMainFrameTabNum and BG.RaidToolMainFrame then
                     SafeHide(BG.RaidToolMainFrame)
                 end
-                if num ~= (BG.FBMainFrameTabNum or 1) and ns.TeamInfo and ns.TeamInfo.cardFrame then
-                    SafeHide(ns.TeamInfo.cardFrame)
-                elseif num == (BG.FBMainFrameTabNum or 1) and ns.TeamInfo and ns.TeamInfo.cardFrame then
-                    SafeShow(ns.TeamInfo.cardFrame)
-                    if ns.TeamInfo.UpdateUI then ns.TeamInfo.UpdateUI() end
+                if num ~= (BG.FBMainFrameTabNum or 1) then
+                    if ns.TeamInfo and ns.TeamInfo.topBtn then SafeHide(ns.TeamInfo.topBtn) end
+                    if ns.TeamInfo and ns.TeamInfo.sideFrame then SafeHide(ns.TeamInfo.sideFrame) end
+                elseif num == (BG.FBMainFrameTabNum or 1) then
+                    if ns.TeamInfo and ns.TeamInfo.topBtn then SafeShow(ns.TeamInfo.topBtn) end
+                    if BiaoGe and BiaoGe.options and BiaoGe.options.showTeamInfoFrame == 1 then
+                        if ns.TeamInfo and ns.TeamInfo.sideFrame then SafeShow(ns.TeamInfo.sideFrame) end
+                    end
+                    if ns.TeamInfo and ns.TeamInfo.UpdateUI then ns.TeamInfo.UpdateUI() end
                 end
 
                 orig_ClickTab(num)
