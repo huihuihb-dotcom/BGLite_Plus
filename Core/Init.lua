@@ -15,6 +15,16 @@ local function SafeShow(f)
     end
 end
 
+local function RestoreLastTab()
+    if BiaoGe and BiaoGe.lastFrame and BG[BiaoGe.lastFrame .. "MainFrameTabNum"] and BG[BiaoGe.lastFrame .. "MainFrame"] then
+        if BG.ClickTabButton then
+            BG.ClickTabButton(BG[BiaoGe.lastFrame .. "MainFrameTabNum"])
+        end
+    elseif BG.ClickTabButton and BG.FBMainFrameTabNum then
+        BG.ClickTabButton(BG.FBMainFrameTabNum)
+    end
+end
+
 local function HookMinimap()
     local ldb = LibStub:GetLibrary("LibDataBroker-1.1", true)
     if not ldb then return end
@@ -51,9 +61,7 @@ local function HookMinimap()
         end
         if button == "LeftButton" and not IsControlKeyDown() then
             if BG.MainFrame and not BG.MainFrame:IsVisible() then
-                if BG.ClickTabButton and BG.FBMainFrameTabNum then
-                    BG.ClickTabButton(BG.FBMainFrameTabNum)
-                end
+                RestoreLastTab()
             end
         end
         if orig_OnClick then
@@ -422,13 +430,8 @@ local function InitPlusUI()
         end
     end
 
-    -- 默认初始化切换到表格 (FB) Tab
-    if BiaoGe then
-        BiaoGe.lastFrame = "FB"
-    end
-    if BG.ClickTabButton and BG.FBMainFrameTabNum then
-        BG.ClickTabButton(BG.FBMainFrameTabNum)
-    end
+    -- 初始化加载时恢复上次退出的 Tab 面板（默认表格）
+    RestoreLastTab()
 
     -- 7. 物品信息加载回调防抖刷新
     if not ns.hasHookedItemInfoEvent then
