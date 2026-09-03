@@ -37,7 +37,7 @@ do --简体说明书
         "|cffFFFFFF-快速记账：|r|A:NPE_RightClick:0:0|a聊天框装备时打开（当你是团员时）",
         "|cffFFFFFF-查看同部位其他可选装备：|rCTRL+点击装备",
         "|cffFFFFFF-交换格子：|rCTRL+ALT+SHIFT+点击格子1，再点格子2，可交换两行全部内容",
-        "|cffFFFFFF-角色总览：|r快捷命令：/BGR",
+        "|cffFFFFFF-角色总览：|r快捷命令：/bgcd 或 /bgrole 或 /bgr",
         "|cffFFFFFF-更多功能介绍可在设置里查看",
         " ",
     }

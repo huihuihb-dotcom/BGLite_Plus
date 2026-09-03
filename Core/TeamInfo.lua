@@ -760,9 +760,11 @@ function TeamInfo.CreateUI()
     local parent = BG and BG.MainFrame
     if not parent or TeamInfo.sideFrame then return end
 
-    -- 9.1 顶部栏入口切换按钮 (挂载在拍卖记录按钮旁边)
+    -- 9.1 顶部栏入口切换按钮 (挂载在拍卖记录按钮旁边，全局 Tab 常驻)
     local topBtn = CreateFrame("Button", "BGLite_ButtonTeamInfo", parent)
     topBtn:SetSize(65, 20)
+    topBtn:SetFrameStrata(parent:GetFrameStrata())
+    topBtn:SetFrameLevel((parent:GetFrameLevel() or 100) + 35)
     if BG.ButtonAuctionLog then
         topBtn:SetPoint("LEFT", BG.ButtonAuctionLog, "RIGHT", BG.TopLeftButtonJianGe or 10, 0)
     elseif BG.ButtonMove then
@@ -775,17 +777,21 @@ function TeamInfo.CreateUI()
     topBtn:SetText(L["团队信息"])
     topBtn:SetSize(topBtn:GetFontString():GetWidth() + 6, 20)
     if BG.SetTextHighlightTexture then BG.SetTextHighlightTexture(topBtn) end
+    topBtn:Show()
     TeamInfo.topBtn = topBtn
+    BG.ButtonTeamInfo = topBtn
 
     topBtn:SetScript("OnClick", function(self)
         BiaoGe.options = BiaoGe.options or {}
-        if TeamInfo.sideFrame:IsVisible() then
+        if TeamInfo.sideFrame and TeamInfo.sideFrame:IsVisible() then
             BiaoGe.options.showTeamInfoFrame = 0
             TeamInfo.sideFrame:Hide()
         else
             BiaoGe.options.showTeamInfoFrame = 1
-            TeamInfo.sideFrame:Show()
-            TeamInfo.UpdateUI()
+            if TeamInfo.sideFrame then
+                TeamInfo.sideFrame:Show()
+                TeamInfo.UpdateUI()
+            end
         end
         if BG.PlaySound then BG.PlaySound(1) end
     end)
@@ -807,8 +813,8 @@ function TeamInfo.CreateUI()
     local fHeight = (BG.FBHeight and BG.FB1 and BG.FBHeight[BG.FB1]) or (parent:GetHeight()) or 560
     local f = CreateFrame("Frame", "BGLite_TeamInfoSideFrame", parent, "BackdropTemplate")
     f:SetSize(340, fHeight)
-    f:SetPoint("TOPLEFT", parent, "TOPRIGHT", 3, 0)
-    f:SetFrameStrata("HIGH")
+    f:SetPoint("TOPLEFT", parent, "TOPRIGHT", 1, 0)
+    f:SetFrameStrata(parent:GetFrameStrata())
     f:SetFrameLevel((parent:GetFrameLevel() or 100) + 30)
     f:SetBackdrop({
         bgFile = "Interface/ChatFrame/ChatFrameBackground",
@@ -819,7 +825,7 @@ function TeamInfo.CreateUI()
     f:SetBackdropColor(0.05, 0.05, 0.05, 0.92)
     f:SetBackdropBorderColor(0.2, 0.8, 1.0, 0.95)
     f:EnableMouse(true)
-    f:Hide()
+    f:SetShown(BiaoGe.options and BiaoGe.options.showTeamInfoFrame == 1)
     TeamInfo.sideFrame = f
 
     -- 顶部标题与状态标签
@@ -827,7 +833,7 @@ function TeamInfo.CreateUI()
     titleText:SetFont(BIAOGE_TEXT_FONT, 14, "OUTLINE")
     titleText:SetPoint("TOPLEFT", 12, -10)
     titleText:SetTextColor(0, 0.9, 1)
-    titleText:SetText(L["团队信息与招募通告"])
+    titleText:SetText(L["团队关键信息留存（首发）"])
     f.titleText = titleText
 
     -- 右上角关闭按钮
@@ -1121,6 +1127,37 @@ if BG and BG.ClearBiaoGe then
     end)
 end
 
+-- 12. 全局 Tab / 副本切换与主界面常驻生命周期联动 (保持右侧框体与顶部按钮始终存在)
+local function SyncTeamInfoStateWithMainFrame()
+    if not BG or not BG.MainFrame then return end
+    if not TeamInfo.sideFrame then
+        TeamInfo.CreateUI()
+    end
+    if TeamInfo.topBtn then
+        TeamInfo.topBtn:Show()
+        TeamInfo.topBtn:SetFrameLevel((BG.MainFrame:GetFrameLevel() or 100) + 35)
+    end
+    if TeamInfo.sideFrame then
+        local shouldShow = (BiaoGe and BiaoGe.options and BiaoGe.options.showTeamInfoFrame == 1)
+        if shouldShow and BG.MainFrame:IsShown() then
+            TeamInfo.sideFrame:Show()
+            TeamInfo.UpdateUI()
+        elseif not shouldShow then
+            TeamInfo.sideFrame:Hide()
+        end
+    end
+end
+
+-- Hook 底部 Tab 切换 (表格、对账、装备库、心愿单、团队工具、设置等)
+if BG and BG.ClickTabButton then
+    hooksecurefunc(BG, "ClickTabButton", SyncTeamInfoStateWithMainFrame)
+end
+
+-- Hook 副本切换与拍卖记录全局联动 (在任何切本、切 Tab 时同步保持右侧框体)
+if BG and BG.UpdateAuctionLogFrame then
+    hooksecurefunc(BG, "UpdateAuctionLogFrame", SyncTeamInfoStateWithMainFrame)
+end
+
 -- 自愈与定时扫描挂载：定时检测进本状态与自动同步
 local initFrame = CreateFrame("Frame")
 initFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
@@ -1130,9 +1167,11 @@ initFrame:SetScript("OnEvent", function()
         if BG and BG.MainFrame and not TeamInfo.sideFrame then
             TeamInfo.CreateUI()
         end
-        if TeamInfo.sideFrame and TeamInfo.sideFrame:IsVisible() then
-            TeamInfo.UpdateUI()
+        if BG and BG.MainFrame and not BG.MainFrame.hasHookedTeamInfoShow then
+            BG.MainFrame.hasHookedTeamInfoShow = true
+            BG.MainFrame:HookScript("OnShow", SyncTeamInfoStateWithMainFrame)
         end
+        SyncTeamInfoStateWithMainFrame()
     end)
 end)
 

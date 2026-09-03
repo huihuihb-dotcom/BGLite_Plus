@@ -2717,18 +2717,82 @@ GameTooltip:SetCurrencyByID(697)
     end
 end
 
---[[
-function()
-    if not aura_env.last or aura_env.last < GetTime() - 2 then
-        aura_env.last = GetTime()
-        local bossIds = { Galleon = 32098, Sha = 32099, Nalak = 32518, Oondasta = 32519, Rukhmar = 37464}
-        local label = "World Bosses: \n-------------\n"
-        for name, id in pairs(bossIds) do
-            label = label .. format("%s: %s", name, C_QuestLog.IsQuestFlaggedCompleted(id) and "\124cff00ff00Yes\124r" or "\124cffff0000No\124r") .. "\n"
+-- 角色总览快捷命令 (/bgcd, /bgrole, /bgzl, /bgliter, /bgr)
+SlashCmdList["BiaoGeRoleOverview"] = function()
+    if BG and BG.SetFBCD then
+        BG.SetFBCD(nil, nil, true)
+        if BG.PlaySound then
+            BG.PlaySound(1)
         end
-        aura_env.label = label
+    end
+end
+SLASH_BiaoGeRoleOverview1 = "/bgcd"
+SLASH_BiaoGeRoleOverview2 = "/bgrole"
+SLASH_BiaoGeRoleOverview3 = "/bgzl"
+SLASH_BiaoGeRoleOverview4 = "/bgliter"
+SLASH_BiaoGeRoleOverview5 = "/bgr"
+
+-- 清除外部插件（如 Baganator 等）对 /bgr 的抢占
+SLASH_Baganator2 = nil
+
+-- 主菜单右下角【CD总览】按钮（排在“通报：”文字左侧）
+function BG.RoleOverviewButtonUI()
+    if BG.ButtonRoleOverview then return BG.ButtonRoleOverview end
+    local parent = BG.ButtonZhangDan or BG.FBMainFrame
+    if not parent then return end
+
+    local bt = BG.CreateButton(parent)
+    local width = (BG.ButtonZhangDan and BG.ButtonZhangDan:GetWidth()) or 60
+    local height = (BG.ButtonZhangDan and BG.ButtonZhangDan:GetHeight()) or 25
+    bt:SetSize(width, height)
+
+    if BG.ButtonZhangDan then
+        -- 排在“通报：”文字（约占用 -45px）的左侧
+        bt:SetPoint("RIGHT", BG.ButtonZhangDan, "LEFT", -55, 0)
+    else
+        bt:SetPoint("BOTTOMRIGHT", BG.MainFrame, "BOTTOMRIGHT", -350, 38)
     end
 
-    return aura_env.label
+    bt:SetText(L["CD总览"])
+    BG.ButtonRoleOverview = bt
+
+    bt:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_TOPLEFT", 0, 0)
+        GameTooltip:ClearLines()
+        GameTooltip:AddLine(L["CD总览"], 1, 1, 1, true)
+        GameTooltip:AddLine(L["点击打开/关闭角色CD与资源总览面板。"], 1, 0.82, 0, true)
+        GameTooltip:AddLine(L["快捷命令：/bgcd 或 /bgrole"], 0.5, 0.8, 1, true)
+        GameTooltip:Show()
+    end)
+    bt:SetScript("OnLeave", function(self)
+        GameTooltip:Hide()
+    end)
+
+    bt:SetScript("OnClick", function(self)
+        if BG.SetFBCD then
+            BG.SetFBCD(nil, nil, true)
+        end
+        if BG.PlaySound then
+            BG.PlaySound(1)
+        end
+    end)
+
+    return bt
 end
- ]]
+
+-- 自动安全注入（在主界面构建完成后挂载在“通报：”文字左侧）
+local function AutoInjectRoleOverviewButton()
+    if BG.ButtonRoleOverview then return end
+    if BG.ButtonZhangDan or BG.FBMainFrame then
+        BG.RoleOverviewButtonUI()
+    end
+end
+
+if BG.Init2 then
+    BG.Init2(AutoInjectRoleOverviewButton)
+end
+if C_Timer and C_Timer.After then
+    C_Timer.After(0.1, AutoInjectRoleOverviewButton)
+    C_Timer.After(0.5, AutoInjectRoleOverviewButton)
+    C_Timer.After(1.5, AutoInjectRoleOverviewButton)
+end

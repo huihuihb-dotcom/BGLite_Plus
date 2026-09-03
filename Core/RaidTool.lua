@@ -660,7 +660,7 @@ function RaidTool.CreateUI(parent)
     leftPanel:SetBackdropBorderColor(0.3, 0.3, 0.3, 0.8)
 
     local leftTitle = leftPanel:CreateFontString(nil, "OVERLAY")
-    leftTitle:SetFont(BIAOGE_TEXT_FONT, 15, "OUTLINE")
+    leftTitle:SetFont(BIAOGE_TEXT_FONT, 16, "OUTLINE")
     leftTitle:SetPoint("TOPLEFT", 14, -10)
     leftTitle:SetText(BG.STC_g1(L["组队工具 (自动邀请)"]))
 
@@ -668,8 +668,8 @@ function RaidTool.CreateUI(parent)
     cbDebugLog:SetSize(16, 16)
     cbDebugLog:SetPoint("TOPRIGHT", leftPanel, "TOPRIGHT", -80, -10)
     cbDebugLog.text = cbDebugLog:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
-    cbDebugLog.text:SetPoint("LEFT", cbDebugLog, "RIGHT", 2, 0)
-    cbDebugLog.text:SetFont(BIAOGE_TEXT_FONT, 11, "OUTLINE")
+    cbDebugLog.text:SetPoint("LEFT", cbDebugLog, "RIGHT", 3, 0)
+    cbDebugLog.text:SetFont(BIAOGE_TEXT_FONT, 12, "OUTLINE")
     cbDebugLog.text:SetText(L["调试日志"])
     cbDebugLog:SetChecked(RaidTool.IsDebugEnabled())
     cbDebugLog:SetHitRectInsets(-2, -cbDebugLog.text:GetStringWidth() - 4, -2, -2)
@@ -681,15 +681,15 @@ function RaidTool.CreateUI(parent)
         self:SetChecked(RaidTool.IsDebugEnabled())
     end)
 
-    local leftY = -32
+    local leftY = -34
 
     -- 紧凑型两列 4 开关
     local cbAutoInv = CreateFrame("CheckButton", nil, leftPanel, "UICheckButtonTemplate")
     cbAutoInv:SetSize(18, 18)
     cbAutoInv:SetPoint("TOPLEFT", 14, leftY)
     cbAutoInv.text = cbAutoInv:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
-    cbAutoInv.text:SetPoint("LEFT", cbAutoInv, "RIGHT", 3, 0)
-    cbAutoInv.text:SetFont(BIAOGE_TEXT_FONT, 12, "OUTLINE")
+    cbAutoInv.text:SetPoint("LEFT", cbAutoInv, "RIGHT", 4, 0)
+    cbAutoInv.text:SetFont(BIAOGE_TEXT_FONT, 13, "OUTLINE")
     cbAutoInv.text:SetText(L["开启自动邀请"])
     cbAutoInv:SetChecked(BiaoGe.RaidTool.autoInvite)
     cbAutoInv:SetHitRectInsets(-2, -cbAutoInv.text:GetStringWidth() - 4, -2, -2)
@@ -700,10 +700,10 @@ function RaidTool.CreateUI(parent)
 
     local cbAnyMsg = CreateFrame("CheckButton", nil, leftPanel, "UICheckButtonTemplate")
     cbAnyMsg:SetSize(18, 18)
-    cbAnyMsg:SetPoint("TOPLEFT", 170, leftY)
+    cbAnyMsg:SetPoint("TOPLEFT", 168, leftY)
     cbAnyMsg.text = cbAnyMsg:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
-    cbAnyMsg.text:SetPoint("LEFT", cbAnyMsg, "RIGHT", 3, 0)
-    cbAnyMsg.text:SetFont(BIAOGE_TEXT_FONT, 12, "OUTLINE")
+    cbAnyMsg.text:SetPoint("LEFT", cbAnyMsg, "RIGHT", 4, 0)
+    cbAnyMsg.text:SetFont(BIAOGE_TEXT_FONT, 13, "OUTLINE")
     cbAnyMsg.text:SetText(L["任意密语进组"])
     cbAnyMsg:SetChecked(BiaoGe.RaidTool.anyMessage)
     cbAnyMsg:SetHitRectInsets(-2, -cbAnyMsg.text:GetStringWidth() - 4, -2, -2)
@@ -712,14 +712,14 @@ function RaidTool.CreateUI(parent)
         BG.PlaySound(1)
     end)
 
-    leftY = leftY - 22
+    leftY = leftY - 24
 
     local cbOnlyGuild = CreateFrame("CheckButton", nil, leftPanel, "UICheckButtonTemplate")
     cbOnlyGuild:SetSize(18, 18)
     cbOnlyGuild:SetPoint("TOPLEFT", 14, leftY)
     cbOnlyGuild.text = cbOnlyGuild:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
-    cbOnlyGuild.text:SetPoint("LEFT", cbOnlyGuild, "RIGHT", 3, 0)
-    cbOnlyGuild.text:SetFont(BIAOGE_TEXT_FONT, 12, "OUTLINE")
+    cbOnlyGuild.text:SetPoint("LEFT", cbOnlyGuild, "RIGHT", 4, 0)
+    cbOnlyGuild.text:SetFont(BIAOGE_TEXT_FONT, 13, "OUTLINE")
     cbOnlyGuild.text:SetText(L["仅限公会成员"])
     cbOnlyGuild:SetChecked(BiaoGe.RaidTool.onlyGuild)
     cbOnlyGuild:SetHitRectInsets(-2, -cbOnlyGuild.text:GetStringWidth() - 4, -2, -2)
@@ -730,10 +730,10 @@ function RaidTool.CreateUI(parent)
 
     local cbAutoRaid = CreateFrame("CheckButton", nil, leftPanel, "UICheckButtonTemplate")
     cbAutoRaid:SetSize(18, 18)
-    cbAutoRaid:SetPoint("TOPLEFT", 170, leftY)
+    cbAutoRaid:SetPoint("TOPLEFT", 168, leftY)
     cbAutoRaid.text = cbAutoRaid:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
-    cbAutoRaid.text:SetPoint("LEFT", cbAutoRaid, "RIGHT", 3, 0)
-    cbAutoRaid.text:SetFont(BIAOGE_TEXT_FONT, 12, "OUTLINE")
+    cbAutoRaid.text:SetPoint("LEFT", cbAutoRaid, "RIGHT", 4, 0)
+    cbAutoRaid.text:SetFont(BIAOGE_TEXT_FONT, 13, "OUTLINE")
     cbAutoRaid.text:SetText(L["满5人转团队"])
     cbAutoRaid:SetChecked(BiaoGe.RaidTool.autoConvertToRaid)
     cbAutoRaid:SetHitRectInsets(-2, -cbAutoRaid.text:GetStringWidth() - 4, -2, -2)
@@ -761,7 +761,7 @@ function RaidTool.CreateUI(parent)
 
         for idx, kw in ipairs(BiaoGe.RaidTool.keywords or {}) do
             local tag = CreateFrame("Button", nil, tagContainer, "BackdropTemplate")
-            tag:SetHeight(18)
+            tag:SetHeight(20)
             tag:SetBackdrop({
                 bgFile = "Interface/ChatFrame/ChatFrameBackground",
                 edgeFile = "Interface/Buttons/WHITE8X8",
@@ -772,8 +772,8 @@ function RaidTool.CreateUI(parent)
             tag:SetBackdropBorderColor(0.2, 0.7, 1, 0.85)
 
             local txt = tag:CreateFontString(nil, "OVERLAY")
-            txt:SetFont(BIAOGE_TEXT_FONT, 11, "OUTLINE")
-            txt:SetPoint("LEFT", 5, 0)
+            txt:SetFont(BIAOGE_TEXT_FONT, 12, "OUTLINE")
+            txt:SetPoint("LEFT", 6, 0)
             txt:SetText(kw .. "  |cffff5555×|r")
 
             local tagW = txt:GetStringWidth() + 10
@@ -802,13 +802,13 @@ function RaidTool.CreateUI(parent)
     leftY = leftY - 50
 
     local addEditBox = CreateFrame("EditBox", nil, leftPanel, BG.editTemplate)
-    addEditBox:SetSize(175, 20)
+    addEditBox:SetSize(175, 22)
     addEditBox:SetPoint("TOPLEFT", 14, leftY)
     addEditBox:SetAutoFocus(false)
-    addEditBox:SetFont(BIAOGE_TEXT_FONT, 11, "OUTLINE")
+    addEditBox:SetFont(BIAOGE_TEXT_FONT, 13, "OUTLINE")
 
     local tipText = addEditBox:CreateFontString(nil, "OVERLAY")
-    tipText:SetFont(BIAOGE_TEXT_FONT, 11, "OUTLINE")
+    tipText:SetFont(BIAOGE_TEXT_FONT, 13, "OUTLINE")
     tipText:SetPoint("LEFT", 5, 0)
     tipText:SetTextColor(0.5, 0.5, 0.5)
     tipText:SetText(L["输入新关键字并回车..."])
@@ -839,18 +839,18 @@ function RaidTool.CreateUI(parent)
     addEditBox:SetScript("OnSpacePressed", CommitNewKeyword)
 
     local btnAddTag = BG.CreateButton(leftPanel)
-    btnAddTag:SetSize(65, 20)
+    btnAddTag:SetSize(65, 22)
     btnAddTag:SetPoint("LEFT", addEditBox, "RIGHT", 5, 0)
     btnAddTag:SetText(L["添加标签"])
     btnAddTag:SetScript("OnClick", CommitNewKeyword)
 
-    leftY = leftY - 24
+    leftY = leftY - 26
 
     local quickPresets = { "123", "111", "1", "+", "组" }
     local qX = 14
     for _, presetWord in ipairs(quickPresets) do
         local qBtn = BG.CreateButton(leftPanel)
-        qBtn:SetSize(40, 18)
+        qBtn:SetSize(40, 20)
         qBtn:SetPoint("TOPLEFT", qX, leftY)
         qBtn:SetText(presetWord)
         qBtn:SetScript("OnClick", function()
@@ -867,7 +867,7 @@ function RaidTool.CreateUI(parent)
         qX = qX + 44
     end
 
-    leftY = leftY - 26
+    leftY = leftY - 28
 
     ----------------------------------------------------------------------------
     -- 下半部分：新成员进组自动发言与密语通知
@@ -881,7 +881,7 @@ function RaidTool.CreateUI(parent)
     leftY = leftY - 12
 
     local notifTitle = leftPanel:CreateFontString(nil, "OVERLAY")
-    notifTitle:SetFont(BIAOGE_TEXT_FONT, 14, "OUTLINE")
+    notifTitle:SetFont(BIAOGE_TEXT_FONT, 15, "OUTLINE")
     notifTitle:SetPoint("TOPLEFT", 14, leftY)
     notifTitle:SetText(BG.STC_g1(L["新进成员自动通知 (进组触发)"]))
 
@@ -890,7 +890,7 @@ function RaidTool.CreateUI(parent)
     cbNotifyOnlyLeader:SetPoint("TOPLEFT", 215, leftY + 1)
     cbNotifyOnlyLeader.text = cbNotifyOnlyLeader:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
     cbNotifyOnlyLeader.text:SetPoint("LEFT", cbNotifyOnlyLeader, "RIGHT", 3, 0)
-    cbNotifyOnlyLeader.text:SetFont(BIAOGE_TEXT_FONT, 11, "OUTLINE")
+    cbNotifyOnlyLeader.text:SetFont(BIAOGE_TEXT_FONT, 12, "OUTLINE")
     cbNotifyOnlyLeader.text:SetText(L["仅团长/助理"])
     cbNotifyOnlyLeader:SetChecked(BiaoGe.RaidTool.notifyOnlyLeader)
     cbNotifyOnlyLeader:SetHitRectInsets(-2, -cbNotifyOnlyLeader.text:GetStringWidth() - 4, -2, -2)
@@ -930,7 +930,7 @@ function RaidTool.CreateUI(parent)
         activeManagerModal = modal
 
         local mTitle = modal:CreateFontString(nil, "OVERLAY")
-        mTitle:SetFont(BIAOGE_TEXT_FONT, 14, "OUTLINE")
+        mTitle:SetFont(BIAOGE_TEXT_FONT, 15, "OUTLINE")
         mTitle:SetPoint("TOPLEFT", 14, -12)
         mTitle:SetText(BG.STC_g1(titleText))
 
@@ -939,7 +939,7 @@ function RaidTool.CreateUI(parent)
         mCloseBtn:SetScript("OnClick", function() modal:Hide() end)
 
         local subTip = modal:CreateFontString(nil, "OVERLAY")
-        subTip:SetFont(BIAOGE_TEXT_FONT, 11, "OUTLINE")
+        subTip:SetFont(BIAOGE_TEXT_FONT, 12, "OUTLINE")
         subTip:SetPoint("TOPLEFT", 14, -32)
         subTip:SetText(BG.STC_dis(L["点击左侧文字选取应用，点击右侧 [×] 删除预设:"]))
 
@@ -956,8 +956,8 @@ function RaidTool.CreateUI(parent)
             local list = BiaoGe.RaidTool[historyKey] or {}
             for i, textItem in ipairs(list) do
                 local row = CreateFrame("Frame", nil, scrollParent, "BackdropTemplate")
-                row:SetSize(330, 22)
-                row:SetPoint("TOPLEFT", 0, - (i - 1) * 24)
+                row:SetSize(330, 24)
+                row:SetPoint("TOPLEFT", 0, - (i - 1) * 26)
                 row:SetBackdrop({
                     bgFile = "Interface/ChatFrame/ChatFrameBackground",
                     edgeFile = "Interface/Buttons/WHITE8X8",
@@ -968,10 +968,10 @@ function RaidTool.CreateUI(parent)
                 row:SetBackdropBorderColor(0.25, 0.25, 0.25, 0.8)
 
                 local selectBtn = CreateFrame("Button", nil, row)
-                selectBtn:SetSize(295, 22)
+                selectBtn:SetSize(295, 24)
                 selectBtn:SetPoint("LEFT", 0, 0)
                 local txt = selectBtn:CreateFontString(nil, "OVERLAY")
-                txt:SetFont(BIAOGE_TEXT_FONT, 11, "OUTLINE")
+                txt:SetFont(BIAOGE_TEXT_FONT, 13, "OUTLINE")
                 txt:SetPoint("LEFT", 6, 0)
                 txt:SetPoint("RIGHT", -5, 0)
                 txt:SetJustifyH("LEFT")
@@ -1018,7 +1018,7 @@ function RaidTool.CreateUI(parent)
     cbWhisper:SetPoint("TOPLEFT", 14, leftY)
     cbWhisper.text = cbWhisper:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
     cbWhisper.text:SetPoint("LEFT", cbWhisper, "RIGHT", 4, 0)
-    cbWhisper.text:SetFont(BIAOGE_TEXT_FONT, 12, "OUTLINE")
+    cbWhisper.text:SetFont(BIAOGE_TEXT_FONT, 13, "OUTLINE")
     cbWhisper.text:SetText(L["自动密语新进队成员"])
     cbWhisper:SetChecked(BiaoGe.RaidTool.autoWhisperNewMember)
     cbWhisper:SetHitRectInsets(-2, -cbWhisper.text:GetStringWidth() - 4, -2, -2)
@@ -1038,13 +1038,13 @@ function RaidTool.CreateUI(parent)
     end)
     cbWhisper:SetScript("OnLeave", GameTooltip_Hide)
 
-    leftY = leftY - 20
+    leftY = leftY - 22
 
     local whisperEditBox = CreateFrame("EditBox", nil, leftPanel, BG.editTemplate)
-    whisperEditBox:SetSize(302, 20)
+    whisperEditBox:SetSize(302, 22)
     whisperEditBox:SetPoint("TOPLEFT", 14, leftY)
     whisperEditBox:SetAutoFocus(false)
-    whisperEditBox:SetFont(BIAOGE_TEXT_FONT, 11, "OUTLINE")
+    whisperEditBox:SetFont(BIAOGE_TEXT_FONT, 13, "OUTLINE")
     whisperEditBox:SetText(BiaoGe.RaidTool.whisperNewMemberText or "")
 
     local function SaveWhisperText()
@@ -1060,10 +1060,10 @@ function RaidTool.CreateUI(parent)
     end)
     whisperEditBox:SetScript("OnEditFocusLost", SaveWhisperText)
 
-    leftY = leftY - 24
+    leftY = leftY - 26
 
     local btnSaveWhisper = BG.CreateButton(leftPanel)
-    btnSaveWhisper:SetSize(72, 18)
+    btnSaveWhisper:SetSize(72, 20)
     btnSaveWhisper:SetPoint("TOPLEFT", 14, leftY)
     btnSaveWhisper:SetText(L["存为预设"])
     btnSaveWhisper:SetScript("OnClick", function()
@@ -1083,14 +1083,14 @@ function RaidTool.CreateUI(parent)
     end)
 
     local btnManageWhisper = BG.CreateButton(leftPanel)
-    btnManageWhisper:SetSize(85, 18)
+    btnManageWhisper:SetSize(90, 20)
     btnManageWhisper:SetPoint("LEFT", btnSaveWhisper, "RIGHT", 6, 0)
     btnManageWhisper:SetText(L["预设管理/选取"])
     btnManageWhisper:SetScript("OnClick", function()
         OpenPresetManagerModal(L["自动密语预设管理与选取"], "whisperHistory", whisperEditBox, "whisperNewMemberText")
     end)
 
-    leftY = leftY - 26
+    leftY = leftY - 28
 
     -- 2. 自动团队/小队发言
     local cbRaidAnn = CreateFrame("CheckButton", nil, leftPanel, "UICheckButtonTemplate")
@@ -1098,7 +1098,7 @@ function RaidTool.CreateUI(parent)
     cbRaidAnn:SetPoint("TOPLEFT", 14, leftY)
     cbRaidAnn.text = cbRaidAnn:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
     cbRaidAnn.text:SetPoint("LEFT", cbRaidAnn, "RIGHT", 4, 0)
-    cbRaidAnn.text:SetFont(BIAOGE_TEXT_FONT, 12, "OUTLINE")
+    cbRaidAnn.text:SetFont(BIAOGE_TEXT_FONT, 13, "OUTLINE")
     cbRaidAnn.text:SetText(L["自动在团队/小队频道发言"])
     cbRaidAnn:SetChecked(BiaoGe.RaidTool.autoRaidAnnounceNew)
     cbRaidAnn:SetHitRectInsets(-2, -cbRaidAnn.text:GetStringWidth() - 4, -2, -2)
@@ -1118,13 +1118,13 @@ function RaidTool.CreateUI(parent)
     end)
     cbRaidAnn:SetScript("OnLeave", GameTooltip_Hide)
 
-    leftY = leftY - 20
+    leftY = leftY - 22
 
     local raidAnnEditBox = CreateFrame("EditBox", nil, leftPanel, BG.editTemplate)
-    raidAnnEditBox:SetSize(302, 20)
+    raidAnnEditBox:SetSize(302, 22)
     raidAnnEditBox:SetPoint("TOPLEFT", 14, leftY)
     raidAnnEditBox:SetAutoFocus(false)
-    raidAnnEditBox:SetFont(BIAOGE_TEXT_FONT, 11, "OUTLINE")
+    raidAnnEditBox:SetFont(BIAOGE_TEXT_FONT, 13, "OUTLINE")
     raidAnnEditBox:SetText(BiaoGe.RaidTool.raidAnnounceText or "")
 
     local function SaveRaidAnnText()
@@ -1140,10 +1140,10 @@ function RaidTool.CreateUI(parent)
     end)
     raidAnnEditBox:SetScript("OnEditFocusLost", SaveRaidAnnText)
 
-    leftY = leftY - 24
+    leftY = leftY - 26
 
     local btnSaveRaidAnn = BG.CreateButton(leftPanel)
-    btnSaveRaidAnn:SetSize(72, 18)
+    btnSaveRaidAnn:SetSize(72, 20)
     btnSaveRaidAnn:SetPoint("TOPLEFT", 14, leftY)
     btnSaveRaidAnn:SetText(L["存为预设"])
     btnSaveRaidAnn:SetScript("OnClick", function()
@@ -1163,14 +1163,14 @@ function RaidTool.CreateUI(parent)
     end)
 
     local btnManageRaidAnn = BG.CreateButton(leftPanel)
-    btnManageRaidAnn:SetSize(85, 18)
+    btnManageRaidAnn:SetSize(90, 20)
     btnManageRaidAnn:SetPoint("LEFT", btnSaveRaidAnn, "RIGHT", 6, 0)
     btnManageRaidAnn:SetText(L["预设管理/选取"])
     btnManageRaidAnn:SetScript("OnClick", function()
         OpenPresetManagerModal(L["团队发言预设管理与选取"], "raidAnnounceHistory", raidAnnEditBox, "raidAnnounceText")
     end)
 
-    leftY = leftY - 22
+    leftY = leftY - 24
 
     -- 3. 聊天框 YY 语音转超链接开关
     local cbYYLink = CreateFrame("CheckButton", nil, leftPanel, "UICheckButtonTemplate")
@@ -1178,7 +1178,7 @@ function RaidTool.CreateUI(parent)
     cbYYLink:SetPoint("TOPLEFT", 14, leftY)
     cbYYLink.text = cbYYLink:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
     cbYYLink.text:SetPoint("LEFT", cbYYLink, "RIGHT", 4, 0)
-    cbYYLink.text:SetFont(BIAOGE_TEXT_FONT, 12, "OUTLINE")
+    cbYYLink.text:SetFont(BIAOGE_TEXT_FONT, 13, "OUTLINE")
     cbYYLink.text:SetText(L["聊天框语音/YY号转超链接 (点击秒复制)"])
     cbYYLink:SetChecked(BiaoGe.RaidTool.enableYYLink)
     cbYYLink:SetHitRectInsets(-2, -cbYYLink.text:GetStringWidth() - 4, -2, -2)
@@ -1190,7 +1190,7 @@ function RaidTool.CreateUI(parent)
     leftY = leftY - 18
 
     local varTip = leftPanel:CreateFontString(nil, "OVERLAY")
-    varTip:SetFont(BIAOGE_TEXT_FONT, 10, "OUTLINE")
+    varTip:SetFont(BIAOGE_TEXT_FONT, 11, "OUTLINE")
     varTip:SetPoint("TOPLEFT", 14, leftY)
     varTip:SetText(BG.STC_dis(L["* 支持 {name} 自动替换姓名 | 点击YY超链接直接全选复制"]))
 
@@ -1342,14 +1342,14 @@ function RaidTool.CreateUI(parent)
         groupFrames[grp] = gBox
 
         local gTitle = gBox:CreateFontString(nil, "OVERLAY")
-        gTitle:SetFont(BIAOGE_TEXT_FONT, 12, "OUTLINE")
+        gTitle:SetFont(BIAOGE_TEXT_FONT, 13, "OUTLINE")
         gTitle:SetPoint("TOPLEFT", 6, -3)
         gTitle:SetText(BG.STC_y1(format(L["第 %d 小队"], grp)))
 
         for pos = 1, MEMBERS_PER_GROUP do
             local idx = (grp - 1) * MEMBERS_PER_GROUP + pos
             local slotBtn = CreateFrame("Button", nil, gBox, "BackdropTemplate")
-            slotBtn:SetSize(groupWidth - 10, 19)
+            slotBtn:SetSize(groupWidth - 10, 20)
             slotBtn:SetPoint("TOPLEFT", 5, -17 - (pos - 1) * 20)
             slotBtn:SetBackdrop({
                 bgFile = "Interface/ChatFrame/ChatFrameBackground",
@@ -1360,7 +1360,7 @@ function RaidTool.CreateUI(parent)
             slotBtn.index = idx
 
             slotBtn.text = slotBtn:CreateFontString(nil, "OVERLAY")
-            slotBtn.text:SetFont(BIAOGE_TEXT_FONT, 12, "OUTLINE")
+            slotBtn.text:SetFont(BIAOGE_TEXT_FONT, 13, "OUTLINE")
             slotBtn.text:SetPoint("LEFT", 6, 0)
             slotBtn.text:SetWordWrap(false)
 
@@ -1529,12 +1529,12 @@ function RaidTool.CreateUI(parent)
     profilePanel:SetBackdropBorderColor(0.3, 0.3, 0.3, 0.8)
 
     local pTitle = profilePanel:CreateFontString(nil, "OVERLAY")
-    pTitle:SetFont(BIAOGE_TEXT_FONT, 13, "OUTLINE")
+    pTitle:SetFont(BIAOGE_TEXT_FONT, 14, "OUTLINE")
     pTitle:SetPoint("TOPLEFT", 14, -8)
     pTitle:SetText(BG.STC_g1(L["预设阵容快捷标签"]))
 
     local pSubTip = profilePanel:CreateFontString(nil, "OVERLAY")
-    pSubTip:SetFont(BIAOGE_TEXT_FONT, 11, "OUTLINE")
+    pSubTip:SetFont(BIAOGE_TEXT_FONT, 12, "OUTLINE")
     pSubTip:SetPoint("LEFT", pTitle, "RIGHT", 12, 0)
     pSubTip:SetText(BG.STC_dis(L["(点击载入预设 | Alt+点击覆盖保存 | 右键删除)"]))
 
@@ -1654,7 +1654,7 @@ function RaidTool.CreateUI(parent)
                         insets = { left = 1, right = 1, top = 1, bottom = 1 },
                     })
                     btn.text = btn:CreateFontString(nil, "OVERLAY")
-                    btn.text:SetFont(BIAOGE_TEXT_FONT, 12, "OUTLINE")
+                    btn.text:SetFont(BIAOGE_TEXT_FONT, 13, "OUTLINE")
                     btn.text:SetPoint("CENTER", 0, 0)
 
                     btn:RegisterForClicks("LeftButtonUp", "RightButtonUp")

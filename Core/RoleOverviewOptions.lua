@@ -15,9 +15,20 @@ local function RefreshRoleOverview()
     end
 end
 
-local function CreateCheckButton(name, text, parent, x, y, ontext, callback)
+local defaultOptionsMap = {
+    roleOverviewShowAllServer = 1,
+    roleOverviewOnlyFullLevel = 0,
+    roleOverviewShowFaction = 1,
+    roleOverviewResOnlyFullLevel = 0,
+    roleOverviewShowTalent = 1,
+    roleOverviewShowBuffCD = 1,
+    searchList = 1,
+    roleOverviewShortName = 0, -- 默认关闭/否
+}
+
+local function CreateCheckButton(name, text, parent, x, y, ontext, callback, defaultVal)
     local bt = CreateFrame("CheckButton", nil, parent, "UICheckButtonTemplate")
-    bt:SetSize(24, 24)
+    bt:SetSize(22, 22)
     bt:SetPoint("TOPLEFT", parent, x, y)
     
     local textLabel = bt.text or _G[bt:GetName() .. "Text"]
@@ -37,11 +48,16 @@ local function CreateCheckButton(name, text, parent, x, y, ontext, callback)
     local textW = textLabel:GetStringWidth()
     bt:SetHitRectInsets(-2, -textW - 8, -2, -2)
 
-    local defaultChecked = true
-    if BiaoGe and BiaoGe.options and BiaoGe.options[name] ~= nil then
-        defaultChecked = (BiaoGe.options[name] == 1)
+    local isChecked = false
+    if defaultVal ~= nil then
+        isChecked = (defaultVal == 1 or defaultVal == true)
+    elseif defaultOptionsMap[name] ~= nil then
+        isChecked = (defaultOptionsMap[name] == 1)
     end
-    bt:SetChecked(defaultChecked)
+    if BiaoGe and BiaoGe.options and BiaoGe.options[name] ~= nil then
+        isChecked = (BiaoGe.options[name] == 1)
+    end
+    bt:SetChecked(isChecked)
 
     bt:SetScript("OnClick", function(self)
         local val = self:GetChecked() and 1 or 0
