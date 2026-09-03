@@ -1395,10 +1395,19 @@ local function SetItemLib()
 end
 local function UpdateTiptext()
     local FB = BG.FB1
-    local chooseID
-    if BiaoGe.FilterClassItemDB and BiaoGe.FilterClassItemDB[RealmID] and BiaoGe.FilterClassItemDB[RealmID][player] then
-        chooseID = BiaoGe.FilterClassItemDB[RealmID][player].chooseID
+    local filterDB, chooseID
+    if BG.GetFilterClassItemDB then
+        filterDB, chooseID = BG.GetFilterClassItemDB()
     end
+    if not filterDB or not next(filterDB) then
+        local rID = GetRealmID() or (BG and BG.realmID)
+        local pName = BG.playerName or UnitName("player")
+        if BiaoGe and BiaoGe.FilterClassItemDB and rID and pName and BiaoGe.FilterClassItemDB[rID] then
+            filterDB = BiaoGe.FilterClassItemDB[rID][pName] or BiaoGe.FilterClassItemDB[rID][UnitName("player")] or {}
+            chooseID = filterDB.chooseID
+        end
+    end
+
     if chooseID then
         mainFrame.noItem:SetText(L["该部位没有合适当前过滤方案的装备"])
     else
@@ -1417,8 +1426,8 @@ local function UpdateTiptext()
     end
 
     local F = BG.STC_dis(L["没有过滤方案"])
-    if chooseID and BiaoGe.FilterClassItemDB[RealmID][player][chooseID] then
-        F = BiaoGe.FilterClassItemDB[RealmID][player][chooseID].Name or F
+    if chooseID and filterDB and filterDB[chooseID] then
+        F = filterDB[chooseID].Name or F
     end
 
     local C
@@ -2289,8 +2298,11 @@ function BG.ItemLibUI()
                 local text = self:GetText()
                 local name, link, quality, level, _, _, _, _, EquipLoc, Texture, _, typeID, subclassID, bindType = GetItemInfo(text)
 
-                local num = BiaoGe.FilterClassItemDB[RealmID][player].chooseID -- 隐藏
-                if num ~= 0 then
+                local num
+                if BG.GetFilterClassItemDB then
+                    _, num = BG.GetFilterClassItemDB()
+                end
+                if num and num ~= 0 then
                     BG.UpdateFilter(self)
                 end
 

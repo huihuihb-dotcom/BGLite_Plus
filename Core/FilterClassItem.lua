@@ -25,19 +25,34 @@ local pt = print
 
 local F = {}
 
+function BG.GetFilterClassItemDB()
+    local RealmID = GetRealmID() or (BG and BG.realmID)
+    local fullName = BG.playerName or GetUnitName("player", true)
+    local shortName = UnitName("player")
+    if not (BiaoGe and RealmID) then return {}, nil end
+    BiaoGe.FilterClassItemDB = BiaoGe.FilterClassItemDB or {}
+    BiaoGe.FilterClassItemDB[RealmID] = BiaoGe.FilterClassItemDB[RealmID] or {}
+
+    local targetDB = (fullName and BiaoGe.FilterClassItemDB[RealmID][fullName])
+        or (shortName and BiaoGe.FilterClassItemDB[RealmID][shortName])
+    if not targetDB then
+        targetDB = {}
+    end
+    if fullName then BiaoGe.FilterClassItemDB[RealmID][fullName] = targetDB end
+    if shortName then BiaoGe.FilterClassItemDB[RealmID][shortName] = targetDB end
+
+    return targetDB, targetDB.chooseID
+end
+
 function BG.FilterClassItemUI()
     if ns.InitFilterClassItemDB then
         ns.InitFilterClassItemDB()
     end
-    local RealmID = GetRealmID()
-    local player = UnitName("player") or BG.playerName
+    local db = BG.GetFilterClassItemDB()
+    local RealmID = GetRealmID() or (BG and BG.realmID)
+    local player = BG.playerName or UnitName("player")
     local _, class = UnitClass("player")
     if not (RealmID and player) then return end
-
-    BiaoGe.FilterClassItemDB = BiaoGe.FilterClassItemDB or {}
-    BiaoGe.FilterClassItemDB[RealmID] = BiaoGe.FilterClassItemDB[RealmID] or {}
-    BiaoGe.FilterClassItemDB[RealmID][player] = BiaoGe.FilterClassItemDB[RealmID][player] or {}
-    local db = BiaoGe.FilterClassItemDB[RealmID][player]
     -- Font
     do
         local color = "Filter_+" -- BG.FontFilter_+
@@ -74,6 +89,8 @@ function BG.FilterClassItemUI()
             end
         end
         db.chooseID = num
+        local curDB = BG.GetFilterClassItemDB and BG.GetFilterClassItemDB()
+        if curDB then curDB.chooseID = num end
         if num then
             BG.FilterClassItemMainFrame.resetButton:Show()
         else
@@ -961,5 +978,404 @@ function BG.FilterClassItemUI()
         UpdateAllButton(db.chooseID)
         BG.FilterClassItemMainFrame.resetButton:SetParent(F.frames[type])
         BG.FilterClassItemMainFrame.Buttons2:SetParent(BG.FBMainFrame)
+    end
+end
+
+------------------ 接管并重写过滤引擎 (覆盖 BGLite 闭包死锁) ------------------
+do
+    local alpha_ban = 0.4
+    local alpha_yes = 1
+    local ITEM_SOCKET_BONUS = (ITEM_SOCKET_BONUS or "镶孔奖励：%s"):gsub("%%s", "(.+)")
+    local ITEM_MOD_FERAL_ATTACK_POWER = (ITEM_MOD_FERAL_ATTACK_POWER or "在猎豹、熊等等攻击强度提高%s点"):gsub("%%s", "(.+)")
+    local ITEM_LIMIT_CATEGORY_MULTIPLE = (ITEM_LIMIT_CATEGORY_MULTIPLE or "唯一%s（%d）"):gsub("%%s", "(.+)"):gsub("%%d", "(%%d+)")
+    local itemAttributeCache = {}
+    local attribute = {
+        ITEM_MOD_STRENGTH_SHORT = "^%+%C-" .. (ITEM_MOD_STRENGTH_SHORT or "力量"),
+        ITEM_MOD_AGILITY_SHORT = "^%+%C-" .. (ITEM_MOD_AGILITY_SHORT or "敏捷"),
+        ITEM_MOD_INTELLECT_SHORT = "^%+%C-" .. (ITEM_MOD_INTELLECT_SHORT or "智力"),
+    }
+
+    function BG.Tooltip_SetItemByID(itemID)
+        if not BiaoGeTooltip then return end
+        BiaoGeTooltip:SetOwner(UIParent, "ANCHOR_NONE")
+        BiaoGeTooltip:ClearLines()
+        if type(itemID) == "string" then
+            BiaoGeTooltip:SetHyperlink(itemID)
+        else
+            BiaoGeTooltip:SetItemByID(itemID)
+        end
+    end
+
+    function BG.GetTooltipTextLeftAll(itemID)
+        if not BiaoGeTooltip then return "" end
+        BG.Tooltip_SetItemByID(itemID)
+        local tbl = {}
+        local ii = 2
+        if BG.IsRetail and not itemAttributeCache[itemID] then
+            itemAttributeCache[itemID] = {}
+            for i = 2, BiaoGeTooltip:NumLines() do
+                local leftText = _G["BiaoGeTooltipTextLeft" .. i]
+                local text = leftText and leftText:GetText()
+                if text and text ~= "" then
+                    for name, ab in pairs(attribute) do
+                        if text:find(ab) then
+                            itemAttributeCache[itemID][name] = true
+                        end
+                    end
+                end
+            end
+        end
+        while _G["BiaoGeTooltipTextLeft" .. ii] do
+            local leftText = _G["BiaoGeTooltipTextLeft" .. ii]
+            local text = leftText and leftText:GetText()
+            if text and text ~= "" then
+                text = text:gsub("每5秒恢复%d+点法力值", "每5秒回复%d+点法力值")
+                if (not WARDROBE_SETS or not text:find(WARDROBE_SETS)) and
+                   not text:find(ITEM_SOCKET_BONUS) and
+                   not text:find(ITEM_MOD_FERAL_ATTACK_POWER) and
+                   not text:find(ITEM_LIMIT_CATEGORY_MULTIPLE)
+                then
+                    tinsert(tbl, text)
+                end
+            end
+            ii = ii + 1
+        end
+        return table.concat(tbl, "\n")
+    end
+
+    local function FilterArmor(db, num, typeID, EquipLoc, subclassID)
+        if not (num and db and db[num] and db[num].Armor) then return end
+        if typeID == 4 and EquipLoc ~= "INVTYPE_CLOAK" then
+            for id, v in pairs(db[num].Armor) do
+                if subclassID == tonumber(id) then
+                    if subclassID == 0 then
+                        if EquipLoc == "INVTYPE_HOLDABLE" then
+                            return true
+                        end
+                    else
+                        return true
+                    end
+                end
+            end
+        end
+    end
+
+    local function FilterWeapon(db, num, typeID, EquipLoc, subclassID)
+        if not (num and db and db[num] and db[num].Weapon) then return end
+        if typeID == 2 then
+            for id, v in pairs(db[num].Weapon) do
+                if subclassID == tonumber(id) then
+                    return true
+                end
+            end
+        end
+    end
+
+    local function GetDBShuXingInfo(name)
+        if not (BG.FilterClassItemDB and BG.FilterClassItemDB.ShuXing_filter) then return end
+        local tbl = BG.FilterClassItemDB.ShuXing_filter[name]
+        if tbl then
+            return tbl.value, tbl.nothave
+        end
+    end
+
+    local function FilterShuXing(db, num, TooltipText)
+        if not (num and db and db[num] and db[num].ShuXing) then return end
+        for name in pairs(db[num].ShuXing) do
+            local localTextTbl, nothave = GetDBShuXingInfo(name)
+            if localTextTbl then
+                local yes = false
+                for _, localText in pairs(localTextTbl) do
+                    if strfind(TooltipText, localText) then
+                        yes = true
+                        break
+                    end
+                end
+                if yes then
+                    if nothave then
+                        for _, nothaveLocalText in pairs(nothave) do
+                            if strfind(TooltipText, nothaveLocalText) then
+                                return false
+                            end
+                        end
+                        return true
+                    else
+                        return true
+                    end
+                end
+            end
+        end
+    end
+
+    local function FilterCLASS(db, num, TooltipText)
+        if not (num and db and db[num] and db[num].Class) then return end
+        if CLASS and strfind(TooltipText, CLASS) then
+            for id, v in pairs(db[num].Class) do
+                if id == "过滤职业限定" then
+                    local c = UnitClass("player")
+                    if not strfind(TooltipText, c) then
+                        return true
+                    end
+                end
+            end
+        end
+    end
+
+    local function FilterBnetAccount(db, num, TooltipText)
+        if not (num and db and db[num] and db[num].BnetAccount) then return end
+        for id in pairs(db[num].BnetAccount) do
+            if id == "忽略战网绑定" then
+                if ITEM_BIND_TO_BNETACCOUNT and strfind(TooltipText, ITEM_BIND_TO_BNETACCOUNT) then
+                    return true
+                end
+            end
+        end
+    end
+
+    local function FilterTANK(db, num, TooltipText, typeID, EquipLoc)
+        if not (BG.FilterClassItem_Default and BG.FilterClassItem_Default.TankKey) then return end
+        if not (num and db and db[num] and db[num].Tank) then return end
+        if typeID == 4 and EquipLoc ~= "INVTYPE_TRINKET" and EquipLoc ~= "INVTYPE_RELIC" then
+            for id, v in pairs(db[num].Tank) do
+                if id == "过滤坦克" then
+                    local tank = false
+                    for key, value in pairs(BG.FilterClassItem_Default.TankKey) do
+                        if strfind(TooltipText, value) then
+                            tank = true
+                            break
+                        end
+                    end
+                    if not tank then
+                        return true
+                    end
+                end
+            end
+        end
+    end
+
+    local function FilterAttribute(db, num, itemID)
+        if not (num and db and db[num] and db[num].MainAttribute) then return end
+        if not next(db[num].MainAttribute) then
+            return false
+        end
+        local stats = itemAttributeCache[itemID]
+        if stats and next(stats) and BG.FilterClassItemDB and BG.FilterClassItemDB.MainAttribute_filter then
+            for id, v in pairs(db[num].MainAttribute) do
+                if stats[BG.FilterClassItemDB.MainAttribute_filter[id]] then
+                    return false
+                end
+            end
+            return true
+        end
+    end
+
+    function BG.FilterAll(itemID, typeID, EquipLoc, subclassID, tooltipText)
+        if typeID == 9 then return false end
+        local db, num = BG.GetFilterClassItemDB()
+        if not (num and db and db[num]) then return false end
+
+        local TooltipText = tooltipText or BG.GetTooltipTextLeftAll(itemID)
+        if FilterBnetAccount(db, num, TooltipText) then return false end
+        if FilterArmor(db, num, typeID, EquipLoc, subclassID) then
+            return true
+        end
+        if FilterWeapon(db, num, typeID, EquipLoc, subclassID) then
+            return true
+        end
+        if FilterShuXing(db, num, TooltipText) then
+            return true
+        end
+        if FilterCLASS(db, num, TooltipText) then
+            return true
+        end
+        if FilterTANK(db, num, TooltipText, typeID, EquipLoc) then
+            return true
+        end
+        if BG.FilterClassItemDB and BG.FilterClassItemDB.MainAttribute then
+            if FilterAttribute(db, num, itemID) then
+                return true
+            end
+        end
+        return false
+    end
+
+    function BG.FilterItem(bt, link)
+        if not bt then return end
+        local text = link or (bt.GetText and bt:GetText())
+        if not text or text == "" then
+            bt:SetAlpha(alpha_yes)
+            return
+        end
+        local itemID, _, _, EquipLoc, _, typeID, subclassID = GetItemInfoInstant(text)
+        local db, num = BG.GetFilterClassItemDB()
+
+        if itemID and num and db and db[num] then
+            if BG.FilterAll(itemID, typeID, EquipLoc, subclassID) then
+                bt:SetAlpha(alpha_ban)
+                return
+            end
+        end
+        bt:SetAlpha(alpha_yes)
+    end
+
+    function BG.UpdateFilter(bt, link)
+        if not bt then return end
+        local link = link or (bt.GetText and bt:GetText())
+        if not (link and type(link) == "string") then
+            bt:SetAlpha(alpha_yes)
+            return
+        end
+        local itemID = GetItemID(link)
+        local db, num = BG.GetFilterClassItemDB()
+        if not (link:find("item:") and itemID and num and db and db[num]) then
+            bt:SetAlpha(alpha_yes)
+            return
+        end
+
+        local item = Item:CreateFromItemID(itemID)
+        item:ContinueOnItemLoad(function()
+            if not BG.itemCaches then BG.itemCaches = {} end
+            if not BG.itemCaches[itemID] then
+                BG.Tooltip_SetItemByID(itemID)
+                if BG.After then
+                    BG.After(0.01, function()
+                        BG.FilterItem(bt, link)
+                        BG.itemCaches[itemID] = true
+                    end)
+                else
+                    BG.FilterItem(bt, link)
+                    BG.itemCaches[itemID] = true
+                end
+            else
+                BG.FilterItem(bt, link)
+            end
+        end)
+    end
+
+    function BG.UpdateAllFilter()
+        local FB = BG.FB1
+        if not FB then return end
+
+        -- 1. 当前表格
+        if BG.Frame and BG.Frame[FB] and Maxb and Maxb[FB] then
+            for b = 1, Maxb[FB] do
+                local maxi = (BG.GetMaxi and BG.GetMaxi(FB, b)) or 10
+                for i = 1, maxi do
+                    if BG.Frame[FB]["boss" .. b] then
+                        local bt = BG.Frame[FB]["boss" .. b]["zhuangbei" .. i]
+                        if bt then
+                            BG.UpdateFilter(bt)
+                        end
+                    end
+                end
+            end
+        end
+
+        -- 2. 历史表格
+        if BG.HistoryFrame and BG.HistoryFrame[FB] and Maxb and Maxb[FB] then
+            for b = 1, Maxb[FB] do
+                local maxi = (BG.GetMaxi and BG.GetMaxi(FB, b)) or 10
+                for i = 1, maxi do
+                    if BG.HistoryFrame[FB]["boss" .. b] then
+                        local bt = BG.HistoryFrame[FB]["boss" .. b]["zhuangbei" .. i]
+                        if bt then
+                            BG.UpdateFilter(bt)
+                        end
+                    end
+                end
+            end
+        end
+
+        -- 3. 心愿清单
+        if BG.HopeFrame and BG.HopeFrame[FB] and HopeMaxn and HopeMaxn[FB] and HopeMaxb and HopeMaxb[FB] then
+            for n = 1, HopeMaxn[FB] do
+                if BG.HopeFrame[FB]["nandu" .. n] then
+                    for b = 1, HopeMaxb[FB] do
+                        if BG.HopeFrame[FB]["nandu" .. n]["boss" .. b] then
+                            for i = 1, (HopeMaxi or 7) do
+                                local bt = BG.HopeFrame[FB]["nandu" .. n]["boss" .. b]["zhuangbei" .. i]
+                                if bt then
+                                    BG.UpdateFilter(bt)
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+        end
+
+        -- 4. 点装列表
+        if BG.ZhuangbeiList then
+            local i = 1
+            while BG.ZhuangbeiList["button" .. i] do
+                local bt = BG.ZhuangbeiList["button" .. i]
+                BG.UpdateFilter(bt)
+                i = i + 1
+            end
+        end
+
+        -- 5. 装备过期列表
+        if BG.itemGuoQiFrame and BG.itemGuoQiFrame:IsVisible() and BG.itemGuoQiFrame.buttons then
+            for i, bt in ipairs(BG.itemGuoQiFrame.buttons) do
+                BG.UpdateFilter(bt, bt.link)
+            end
+        end
+
+        -- 6. 自动拍卖记录
+        if BG.auctionLogFrame and BG.auctionLogFrame:IsVisible() and BG.auctionLogFrame.buttons then
+            for i, bt in ipairs(BG.auctionLogFrame.buttons) do
+                if bt.frame then
+                    BG.UpdateFilter(bt.frame, bt.link)
+                end
+            end
+        end
+
+        -- 7. 装备库右侧心愿格子
+        if BG.ItemLibMainFrame and BG.ItemLibMainFrame.Hope then
+            for k, bt in pairs(BG.ItemLibMainFrame.Hope) do
+                if type(bt) == "table" and bt.EquipLoc then
+                    BG.UpdateFilter(bt)
+                end
+            end
+        end
+
+        if BG.FilterClassItemMainFrame and BG.FilterClassItemMainFrame.AddFrame then
+            BG.FilterClassItemMainFrame.AddFrame:Hide()
+        end
+
+        -- 8. 装备库左侧清单即时重算刷新
+        if BG.ItemLibMainFrame and BG.ItemLibMainFrame:IsVisible() then
+            if BG.UpdateItemLib then
+                BG.UpdateItemLib()
+            end
+        else
+            BG.itemLibNeedUpdate = true
+        end
+
+        -- 9. BGA 光环高亮 (如安装)
+        if BGA and BGA.Frames then
+            local db, num = BG.GetFilterClassItemDB()
+            for _, f in ipairs(BGA.Frames) do
+                f.filter = nil
+                if f.player and (f.player == BG.playerName or (f.playerID and f.player == f.playerID)) then
+                    if BGA.aura_env and BGA.aura_env.SetFrameColor then
+                        BGA.aura_env.SetFrameColor(f, 1)
+                    end
+                else
+                    if num and db and db[num] then
+                        local name, link, quality, level, _, _, _, _, EquipLoc, Texture, _, typeID, subclassID = GetItemInfo(f.itemID)
+                        if BG.FilterAll(f.itemID, typeID, EquipLoc, subclassID) then
+                            f.filter = true
+                            if BGA.aura_env and BGA.aura_env.SetFrameColor then
+                                BGA.aura_env.SetFrameColor(f, 2)
+                            end
+                        end
+                    end
+                    if not f.filter and BGA.aura_env and BGA.aura_env.SetFrameColor then
+                        BGA.aura_env.SetFrameColor(f, 0)
+                    end
+                end
+            end
+        end
     end
 end

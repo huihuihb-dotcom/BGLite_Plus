@@ -1035,22 +1035,64 @@ local function HookAllItemButtons()
                     if bt and not bt._hasHistoryMoneyHook then
                         bt._hasHistoryMoneyHook = true
 
-                        -- 鼠标进入装备框时触发历史价格展示
+                        -- 鼠标进入装备框时触发装备信息展示与历史价格展示
                         if BG.OnEnterDelay then
                             BG.OnEnterDelay(bt, function(self)
+                                self.isEnter = true
+                                if BG.FrameDs and BG.FrameDs[FB .. 1] and BG.FrameDs[FB .. 1]["boss" .. b] and BG.FrameDs[FB .. 1]["boss" .. b]["ds" .. i] then
+                                    BG.FrameDs[FB .. 1]["boss" .. b]["ds" .. i]:Show()
+                                end
                                 local text = self:GetText()
                                 if text and text ~= "" and not tonumber(text) then
-                                    local itemID = GetItemID(text)
-                                    if itemID and BG.SetHistoryMoney then
-                                        local maijiaBox = BG.Frame[FB]["boss" .. b] and BG.Frame[FB]["boss" .. b]["maijia" .. i]
-                                        local jineBox = BG.Frame[FB]["boss" .. b] and BG.Frame[FB]["boss" .. b]["jine" .. i]
-                                        local nowPlayer = maijiaBox and maijiaBox:GetText() or ""
-                                        local nowMoney = jineBox and jineBox:GetText() or ""
-                                        local r, g, b_col = 1, 1, 1
-                                        if maijiaBox and maijiaBox.GetTextColor then
-                                            r, g, b_col = maijiaBox:GetTextColor()
+                                    local link = text
+                                    local itemID = GetItemID(link)
+                                    if BG.Show_AllHighlight then
+                                        BG.Show_AllHighlight(link, "biaoge")
+                                    end
+                                    if itemID then
+                                        -- 1. 装备原生属性信息悬浮窗 (GameTooltip)
+                                        if not (BG.IsHideTooltipKeyDown and BG.IsHideTooltipKeyDown()) then
+                                            local point
+                                            if BG.ButtonIsInRight and BG.ButtonIsInRight(self) then
+                                                GameTooltip:SetOwner(self, "ANCHOR_LEFT", 0, 0)
+                                                point = "LEFT"
+                                            else
+                                                GameTooltip:SetOwner(self, "ANCHOR_RIGHT", 0, 0)
+                                                point = "RIGHT"
+                                            end
+                                            GameTooltip:ClearLines()
+                                            local showLink = (BG.SetSpecIDToLink and BG.SetSpecIDToLink(link)) or link
+                                            GameTooltip:SetHyperlink(showLink)
+                                            if L and L['< 按住CTRL+SHIFT隐藏此界面 >'] then
+                                                GameTooltip:AddLine(L['< 按住CTRL+SHIFT隐藏此界面 >'], 0, 1, 0, true)
+                                            end
+                                            GameTooltip:Show()
+                                            if BG.SetZUGSetTooltip then
+                                                BG.SetZUGSetTooltip(itemID, point)
+                                            end
                                         end
-                                        BG.SetHistoryMoney(itemID, nowMoney, nowPlayer, r, g, b_col)
+
+                                        -- 2. 装备历史价格走势图
+                                        if BG.SetHistoryMoney then
+                                            local maijiaBox = BG.Frame[FB]["boss" .. b] and BG.Frame[FB]["boss" .. b]["maijia" .. i]
+                                            local jineBox = BG.Frame[FB]["boss" .. b] and BG.Frame[FB]["boss" .. b]["jine" .. i]
+                                            local nowPlayer = maijiaBox and maijiaBox:GetText() or ""
+                                            local nowMoney = jineBox and jineBox:GetText() or ""
+                                            local r, g, b_col = 1, 1, 1
+                                            if maijiaBox and maijiaBox.GetTextColor then
+                                                r, g, b_col = maijiaBox:GetTextColor()
+                                            end
+                                            BG.SetHistoryMoney(itemID, nowMoney, nowPlayer, r, g, b_col)
+                                        end
+
+                                        -- 3. 辅助高亮与状态
+                                        BG.DressUpLastButton = self
+                                        BG.canShowTrunToItemLibCursor = true
+                                        if BG.IsML then
+                                            BG.canShowStartAuctionCursor = true
+                                        else
+                                            BG.canShowHopeCursor = true
+                                        end
                                     end
                                 end
                             end, BG.itemOnEnterDelay or 0.1)
@@ -1059,8 +1101,16 @@ local function HookAllItemButtons()
                         -- 鼠标移出时隐藏
                         if BG.OnLeaveDelay then
                             BG.OnLeaveDelay(bt, function(self)
+                                self.isEnter = false
+                                GameTooltip:Hide()
                                 if BG.HideHistoryMoney then
                                     BG.HideHistoryMoney()
+                                end
+                                if BG.FrameDs and BG.FrameDs[FB .. 1] and BG.FrameDs[FB .. 1]["boss" .. b] and BG.FrameDs[FB .. 1]["boss" .. b]["ds" .. i] then
+                                    BG.FrameDs[FB .. 1]["boss" .. b]["ds" .. i]:Hide()
+                                end
+                                if BG.Hide_AllHighlight then
+                                    BG.Hide_AllHighlight()
                                 end
                             end)
                         end

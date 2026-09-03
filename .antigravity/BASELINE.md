@@ -186,11 +186,28 @@
     - 顶部操作按钮升级至 `110x26`（**`14`** 像素），底部预设 Tab 按钮升级至 `26px` 高度（**`14`** 像素）。
   - **默认预设历史一次性清洗与升级迁移 (2026-09-03)**：
     - 借助 `BG.Once("RaidTool_PresetHistory_v105")` 机制，在用户升级到 1.0.5 时自动执行一次旧数据向新默认预设（如 DD/YY进组话术）的平滑刷新，执行后打上版本标记，确保后续用户自定义增删预设完全保留且永不被重复覆盖。
-* **架构设计准则强化：BGLite 目录绝对只读 (2026-09-03)**:
-  - 严格将 `BGLite` 视为第三方上游只读依赖，任何改动均已全部撤销回滚，保持原汁原味。
-  - 所有新功能（Tab 按钮、欠款旁的 CD总览 按钮、通报联动、全局 Hook）均 **100% 封装在 `BGLite_Plus` 内部以纯动态挂载（Dependency Injection / Hook）方式实现**，确保 `BGLite` 在任何升级或覆盖时均不受影响。
+* **职业筛选即时生效与过滤引擎接管修复 (2026-09-03)**:
+  - **故障成因**:
+    1. **Key 不一致**: `BGLite/function2.lua` 和 `ItemLib.lua` 使用带服全称 `BG.playerName`（如 `"波比兔-席瓦莱恩"`），而 `FilterClassItem.lua` 和 `DB_FilterClassItem.lua` 使用了短名 `UnitName("player")`（如 `"波比兔"`），导致点击修改的方案与底层读取的表完全失联；
+    2. **闭包引用固化**: `BGLite/function2.lua` 在加载时内部闭包 `local db` 提前执行并将 `chooseID` 强制设为 `nil`，后续无法被外部更新；
+    3. **装备库未即时联动重算**: 界面停留在装备库时，`BG.UpdateAllFilter()` 未主动触发 `UpdateItemLib()` 重算列表。
+  - **修复与架构实施 (保持 BGLite 绝对只读)**:
+    1. **统一数据源与双向映射**: 建立 `BG.GetFilterClassItemDB()`，自动处理短名与带服全名的双向 table 引用指针同步，无论任何历史代码按哪个 key 读取均能获取同一份实时数据；
+    2. **接管重写过滤引擎**: 在 `BGLite_Plus/Core/FilterClassItem.lua` 末尾完整重写 `BG.FilterAll`、`BG.FilterItem`、`BG.UpdateFilter` 和 `BG.UpdateAllFilter`，彻底摆脱上游只读依赖中的死锁闭包；
+    3. **毫秒级联动刷新**: 点击方案按钮时，方案号实时写入，`BG.UpdateAllFilter()` 同步刷新表格变灰、心愿清单变灰、并在装备库处于显示状态时立即重新过滤装备列表并更新顶部方案名称与件数统计，彻底告别 reload。
+* **表格装备悬停 GameTooltip 与历史价格走势图同步展示修复 (2026-09-03)**:
+  - **故障成因**:
+    - 在接入常规表格历史价格走势图 Hook 时，直接对装备格 `bt` 调用了 `BG.OnEnterDelay(bt, ...)`；
+    - 上游依赖 `BGLite/function1.lua` 的 `OnEnterDelay` 在未传 `isHook=true` 时直接采用 `self:SetScript("OnEnter", ...)` 覆盖原有脚本；
+    - 注入回调中仅调用了 `BG.SetHistoryMoney`，未调用原生 `GameTooltip:SetHyperlink` 和 `GameTooltip:Show`，导致原生的装备属性/装等浮窗与底色高亮被彻底冲掉抹杀。
+  - **修复实施**:
+    - 在 [History.lua](file:///e:/World%20of%20Warcraft/_classic_titan_/Interface/AddOns/BGLite_Plus/Core/History.lua) 常规表格装备格悬停回调中，完整补充原生装备 Tooltip 绘制链路（`GameTooltip:SetOwner`、`GameTooltip:SetHyperlink`、`BG.SetZUGSetTooltip` 以及 `BG.FrameDs` 底色高亮）；
+    - 鼠标悬停时：**鼠标处即时弹出完整的魔兽原生装备属性 Tooltip，右下角同步弹出带有渐变彩色柱状图的历史价格走势图**；移出时两者同步关闭，双浮窗完美协同共存。
 
 ## 9. 下一步计划 / 待办事项
 - 持续收集时光服玩家在实战团本中的喊话样本，丰富特征词库。
 - 跟踪测试进本传送门切换与历史表格归档载入的流畅度。
+- 观察玩家在不同客户端语言环境下的职业方案切换表现。
+
+
 

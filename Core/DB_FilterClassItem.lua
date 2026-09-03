@@ -5,8 +5,10 @@ local L = ns.L
 local pt = print
 
 function ns.InitFilterClassItemDB()
-    local RealmID = GetRealmID()
-    local player = UnitName("player") or BG.playerName
+    local RealmID = GetRealmID() or (BG and BG.realmID)
+    local fullName = BG.playerName or GetUnitName("player", true)
+    local shortName = UnitName("player")
+    local player = fullName or shortName
     local _, class = UnitClass("player")
 
     BG.Once("FilterClassItemDB", 260425, function()
@@ -22,16 +24,20 @@ function ns.InitFilterClassItemDB()
     BiaoGe.FilterClassItemDB = BiaoGe.FilterClassItemDB or {}
     if RealmID then
         BiaoGe.FilterClassItemDB[RealmID] = BiaoGe.FilterClassItemDB[RealmID] or {}
-        if player then
-            BiaoGe.FilterClassItemDB[RealmID][player] = BiaoGe.FilterClassItemDB[RealmID][player] or {}
-            if BG.verLess3 and select(2, UnitClass('player')) == 'HUNTER' then
-                BG.Once("FilterClassItemDB" .. UnitGUID('player'), 260618, function()
-                    BiaoGe.FilterClassItemDB[RealmID][player] = {}
-                end)
-            end
+        local targetDB = (fullName and BiaoGe.FilterClassItemDB[RealmID][fullName])
+            or (shortName and BiaoGe.FilterClassItemDB[RealmID][shortName])
+            or {}
+
+        if BG.verLess3 and select(2, UnitClass('player')) == 'HUNTER' then
+            BG.Once("FilterClassItemDB" .. UnitGUID('player'), 260618, function()
+                targetDB = {}
+            end)
         end
+
+        if fullName then BiaoGe.FilterClassItemDB[RealmID][fullName] = targetDB end
+        if shortName then BiaoGe.FilterClassItemDB[RealmID][shortName] = targetDB end
     end
-    local db = (RealmID and player and BiaoGe.FilterClassItemDB[RealmID][player]) or {}
+    local db = (RealmID and (fullName and BiaoGe.FilterClassItemDB[RealmID][fullName] or shortName and BiaoGe.FilterClassItemDB[RealmID][shortName])) or {}
 
     BG.FilterClassItemDB = {}
     BG.FilterClassItem_Default = {}
