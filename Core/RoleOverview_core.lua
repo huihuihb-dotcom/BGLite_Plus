@@ -758,13 +758,15 @@ local function CreateRaidCDTitle(mainFrame, FBCDchoice_table, n, FBCDwidth, text
         n = n + 1
         AddLine(mainFrame, -6 - height * n, isNewUI)
     end
+    local useShort = (BiaoGe and BiaoGe.options and BiaoGe.options.roleOverviewShortName == 1)
     for i, v in ipairs(FBCDchoice_table) do
         local diff = BG.GetDiffShortName(v.diff) or ""
         local f = CreateFrame("Frame", nil, mainFrame, "BackdropTemplate")
         local t = f:CreateFontString()
         t:SetFont(BIAOGE_TEXT_FONT, fontsize, "OUTLINE")
         t:SetPoint("CENTER")
-        t:SetText("|cff" .. v.color .. diff .. (v.name3 or v.name2 or v.name):gsub("sod", "") .. RR)
+        local titleName = (useShort and v.shortName) or v.name3 or v.name2 or v.name
+        t:SetText("|cff" .. v.color .. diff .. tostring(titleName):gsub("sod", "") .. RR)
         local textWidth = t:GetWidth()
         if v.name == 'professionCD' then
             textWidth = max(textWidth, professionCDStrWidth)

@@ -134,7 +134,18 @@
   - 监听并支持进本清空前自动将原账单归档为历史表格1；
   - 聊天框附带 `[撤回清空]` 超链接，点击一键恢复历史表格1数据并删除临时存档。
 
-## 8. 下一步计划 / 待办事项
+## 8. 角色总览副本简称与 TeamInfo 拍卖过滤优化 (2026-09-03)
+* **角色总览副本简称支持 (Role Overview Short Names)**:
+  - 在 `Core/RoleOverview.lua` 为全版本全副本（SoD/60/TBC/WLK/Titan/CTM/MOP/Retail）定义了标准紧凑简称 `shortName`（如 SW、TOC、NAXX、OS、EOE、SSC、TK、MC、宝库、ULD、ICC、RS、BT、HS、GL、ML、KZ、TAQ、AQL、BWL、DS、FL、SOO 等）。
+  - 在 `Core/RoleOverviewOptions.lua` 基础设置第 4 行右侧新增【显示副本简称】复选框（`roleOverviewShortName`，默认关闭/否），位于【快捷键：】设置正上方。
+  - 在 `Core/RoleOverview_core.lua` 中升级表头宽度自适应计算，开启时表头显示紧凑简称，自动压缩列宽，显著减少横向视口占用。
+* **TeamInfo 金团拍卖与升级噪音深度过滤**:
+  - 在 `NOISE_KEYWORDS` 黑名单中扩充 `"拍卖开始"`、`"流拍"`、`"建议升级"` 等关键字，彻底拦截金团拍卖插件的打本喊话与装备建议。
+  - 从 `RULE_EXTRA_KEYWORDS` 规则词库中移除 `"流拍"`，避免金团流拍被误判为开团规则。
+  - 在 `AddRecruitEntry` 中增加进栈前多重噪音过滤防御。
+  - **当前数据容量确认**：团队信息通告池每个副本与组队状态严格保存 **100 行** 历史通告（超出自动循环淘汰首条）。
+
+## 9. 下一步计划 / 待办事项
 - 持续收集时光服玩家在实战团本中的喊话样本，丰富特征词库。
 - 跟踪测试进本传送门切换与历史表格归档载入的流畅度。
 

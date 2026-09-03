@@ -213,6 +213,9 @@ do
     L["重拍"] = true
     L["表格快捷键"] = true
     L["角色总览快捷键"] = true
+    L["显示副本简称"] = true
+    L["开启时：角色总览列标题使用紧凑副本简称（如 SW、TOC、NAXX）。"] = true
+    L["关闭时：使用完整副本名称。"] = true
     L["本次交易记为退货"] = true
     L["（|cffFFD700%s|r-|cffff0000%s|r）"] = true
     L["|cff00BFFF< 退货成功 >|r\n装备：%s\n退货人：%s\n应退金额：|cffFFD700%s|rg%s\nBoss：|cff%s%s"] = true

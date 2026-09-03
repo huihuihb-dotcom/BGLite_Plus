@@ -204,7 +204,7 @@ function ns.InitRoleOverviewOptions()
 
     yOffset = yOffset - 35
 
-    -- 基础开关 - 行 4 (左侧：O键查询记录侧边栏，右侧：快捷键绑定)
+    -- 基础开关 - 行 4 (左侧：O键查询记录侧边栏，右侧：显示副本简称)
     local btSearchList = CreateCheckButton("searchList", L["O键角色查询记录侧边栏"], content, 15, yOffset, {
         L["O键角色查询记录侧边栏"],
         L["开启时：在官方好友/查询（O键）面板右侧显示历史查询记录侧边栏与名单导出功能。"],
@@ -221,7 +221,17 @@ function ns.InitRoleOverviewOptions()
         end
     end)
 
-    -- 角色总览快捷键直达绑定
+    local btShortName = CreateCheckButton("roleOverviewShortName", L["显示副本简称"], content, 260, yOffset, {
+        L["显示副本简称"],
+        L["开启时：角色总览列标题使用紧凑副本简称（如 SW、TOC、NAXX）。"],
+        L["关闭时：使用完整副本名称。"],
+    }, function(val)
+        RefreshRoleOverview()
+    end)
+
+    yOffset = yOffset - 35
+
+    -- 基础开关 - 行 5 (右侧：快捷键绑定)
     local tBind = content:CreateFontString()
     tBind:SetFont(BIAOGE_TEXT_FONT, 13, "OUTLINE")
     tBind:SetPoint("TOPLEFT", content, 260, yOffset)
@@ -259,7 +269,7 @@ function ns.InitRoleOverviewOptions()
 
     yOffset = yOffset - 42
 
-    -- 基础开关 - 行 5 (左侧：角色总览排序方式 + 修改排序，右侧：角色总览缩放比例)
+    -- 基础开关 - 行 6 (左侧：角色总览排序方式 + 修改排序，右侧：角色总览缩放比例)
     local tSort = content:CreateFontString()
     tSort:SetFont(BIAOGE_TEXT_FONT, 13, "OUTLINE")
     tSort:SetPoint("TOPLEFT", content, 15, yOffset + 2)

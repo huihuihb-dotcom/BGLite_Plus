@@ -73,11 +73,13 @@ local function ContainsTitanKeyword(text)
     return false
 end
 
--- 3. 插件自动欢迎/通知黑名单 (杜绝网易有爱、大脚等入队代发干扰)
+-- 3. 插件自动欢迎/通知/金团拍卖等黑名单 (杜绝网易有爱、大脚入队代发及金团拍卖喊话干扰)
 local NOISE_KEYWORDS = {
     "有爱提示", "大脚提示", "大脚团队", "爱不易", "网易有爱",
     "欢迎新队友", "欢迎加入", "愿我们同心协力", "拥有一次完美的旅程",
     "祝大家游戏愉快", "开始通报", "准备确认", "插件提示",
+    -- 金团拍卖及装备升级过滤
+    "拍卖开始", "流拍", "建议升级",
 }
 
 local function IsAddonNoise(text)
@@ -454,8 +456,10 @@ end
 -- 记录一条通告（自动去重、容量管理，并同步到绑定副本）
 function TeamInfo.AddRecruitEntry(channel, text, customTime, FB)
     if not text or text == "" then return false end
+    if IsAddonNoise(text) then return false end
     text = CleanMeetingHornRawText(text)
     if not text or text == "" then return false end
+    if IsAddonNoise(text) then return false end
 
     InitDataPersistence()
     local data = TeamInfo.GetActiveDataForWrite()
@@ -471,8 +475,8 @@ function TeamInfo.AddRecruitEntry(channel, text, customTime, FB)
         end
     end
 
-    -- 最多保留 25 条历史
-    if #data.recruits >= 25 then
+    -- 最多保留 100 条历史
+    if #data.recruits >= 100 then
         tremove(data.recruits, 1)
     end
 
@@ -664,7 +668,7 @@ local function IsValidRecruitOrRuleMessage(msg)
     -- 补充开团规则关键词
     local RULE_EXTRA_KEYWORDS = {
         "规则", "起拍", "罚款", "补贴", "补助", "打手", "考核", "合剂", "分金", "听指挥",
-        "不分金", "灭团", "清buff", "消灭", "装备起", "包团", "流拍", "降价", "退组",
+        "不分金", "灭团", "清buff", "消灭", "装备起", "包团", "降价", "退组",
     }
     for _, kw in ipairs(RULE_EXTRA_KEYWORDS) do
         if msg:find(kw, 1, true) then
