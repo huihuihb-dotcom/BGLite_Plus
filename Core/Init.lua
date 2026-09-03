@@ -79,6 +79,7 @@ local function HideAllSubFrames()
     SafeHide(BG.HopeMainFrame)
     SafeHide(BG.RaidToolMainFrame)
     SafeHide(BG.FilterClassItemMainFrame)
+    SafeHide(BG.TradeHistoryMainFrame)
 end
 
 local function InitPlusUI()
@@ -101,6 +102,9 @@ local function InitPlusUI()
     end
     if ns.InitRaidToolOthersOptions then
         ns.InitRaidToolOthersOptions()
+    end
+    if ns.InitTradeHistoryModule then
+        securecall(ns.InitTradeHistoryModule)
     end
     if BG.OpenOption and not ns.hasHookedOpenOptionForRaidTool then
         ns.hasHookedOpenOptionForRaidTool = true
@@ -331,6 +335,40 @@ local function InitPlusUI()
         if not BG.ButtonTabRaidTool and BG.RaidToolMainFrame then
             BG.ButtonTabRaidTool = BG.Create_TabButton(BG.RaidToolMainFrameTabNum, L["团队工具"], BG.RaidToolMainFrame)
         end
+        BG.TradeHistoryMainFrameTabNum = BG.TradeHistoryMainFrameTabNum or 101
+        if not BG.ButtonTabTrade and not BG.TradeHistoryTabButton and BG.TradeHistoryMainFrame then
+            BG.ButtonTabTrade = BG.Create_TabButton(BG.TradeHistoryMainFrameTabNum, L["交易记录"], BG.TradeHistoryMainFrame)
+            BG.TradeHistoryTabButton = BG.ButtonTabTrade
+            if BG.OnEnterDelay then
+                BG.OnEnterDelay(BG.ButtonTabTrade, function(self)
+                    GameTooltip:SetOwner(self, "ANCHOR_TOPLEFT", 0, 0)
+                    GameTooltip:ClearLines()
+                    GameTooltip:AddLine(L["< 交易记录 >"], 1, 1, 1, true)
+                    GameTooltip:AddLine(L["查看和搜索与玩家的交易历史记录。"], 1, 0.82, 0, true)
+                    GameTooltip:Show()
+                end, 0.5, true)
+            end
+        end
+    end
+
+    -- 隐藏交易面板底部的「交易选项设置」按钮
+    local function HideTradeOptionButton()
+        if not BG.TradeHistoryMainFrame then return end
+        local textToFind = (L and L["交易选项设置"]) or "交易选项设置"
+        local children = { BG.TradeHistoryMainFrame:GetChildren() }
+        for _, child in ipairs(children) do
+            if child.GetText and child:GetText() == textToFind then
+                child:Hide()
+                child:ClearAllPoints()
+                child:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", -9999, -9999)
+                child:HookScript("OnShow", function(self) self:Hide() end)
+            end
+        end
+    end
+    HideTradeOptionButton()
+    if BG.TradeHistoryMainFrame and not BG.TradeHistoryMainFrame.hasHookedHideOptionBtn then
+        BG.TradeHistoryMainFrame.hasHookedHideOptionBtn = true
+        BG.TradeHistoryMainFrame:HookScript("OnShow", HideTradeOptionButton)
     end
 
     -- 5.5 表格主框架 (FBMainFrame) 生命周期补齐与装备过滤挂载 & 团队信息侧边栏
@@ -368,6 +406,9 @@ local function InitPlusUI()
         end)
 
         BG.FBMainFrame:HookScript("OnHide", function(self)
+            if BG.HistoryMainFrame and BG.HistoryMainFrame:IsShown() then
+                return
+            end
             if ns.TeamInfo and ns.TeamInfo.sideFrame then
                 SafeHide(ns.TeamInfo.sideFrame)
             end
@@ -395,6 +436,9 @@ local function InitPlusUI()
                 end
                 if num ~= BG.RaidToolMainFrameTabNum and BG.RaidToolMainFrame then
                     SafeHide(BG.RaidToolMainFrame)
+                end
+                if num ~= BG.TradeHistoryMainFrameTabNum and BG.TradeHistoryMainFrame then
+                    SafeHide(BG.TradeHistoryMainFrame)
                 end
                 if num ~= (BG.FBMainFrameTabNum or 1) then
                     if ns.TeamInfo and ns.TeamInfo.topBtn then SafeHide(ns.TeamInfo.topBtn) end

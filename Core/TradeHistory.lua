@@ -233,6 +233,9 @@ local function RoadTrade()
             if BG.NanDuDropDown and BG.NanDuDropDown.DropDown then
                 BG.NanDuDropDown.DropDown:Hide()
             end
+            if BG.UpdateTradeHistoryScrollFrame then
+                BG.UpdateTradeHistoryScrollFrame()
+            end
         end)
         mf:SetScript("OnHide", function(self)
             if not self:IsShown() and BiaoGe.lastFrame == "TradeHistory" then
@@ -1118,12 +1121,16 @@ local function InitTradeHistoryModule()
     RoadTrade()
 end
 
-if BG and BG.Init then
-    BG.Init(InitTradeHistoryModule)
+ns.InitTradeHistoryModule = InitTradeHistoryModule
+BG.TradeHistoryUI = RoadTrade
+
+if IsLoggedIn() then
+    InitTradeHistoryModule()
 else
     local f = CreateFrame("Frame")
     f:RegisterEvent("PLAYER_LOGIN")
-    f:SetScript("OnEvent", function()
+    f:SetScript("OnEvent", function(self)
+        self:UnregisterEvent("PLAYER_LOGIN")
         InitTradeHistoryModule()
     end)
 end

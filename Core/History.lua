@@ -339,8 +339,17 @@ local function CreateHistoryUI()
 
             BG.UpdateHistoryButton()
 
-            if ns.TeamInfo and ns.TeamInfo.UpdateUI then
-                ns.TeamInfo.UpdateUI()
+            -- 点开历史表格详情时，右侧团队信息面板直接显示并加载历史快照数据
+            if ns.TeamInfo then
+                if ns.TeamInfo.topBtn then
+                    ns.TeamInfo.topBtn:Show()
+                end
+                if ns.TeamInfo.sideFrame then
+                    ns.TeamInfo.sideFrame:Show()
+                end
+                if ns.TeamInfo.UpdateUI then
+                    ns.TeamInfo.UpdateUI()
+                end
             end
         end)
 
@@ -607,8 +616,13 @@ local function CreateHistoryUI()
         if BG.UpdateAuctionLogFrame then BG.UpdateAuctionLogFrame() end
         if BG.PlaySound then BG.PlaySound(1) end
         BG.UpdateHistoryButton()
-        if ns.TeamInfo and ns.TeamInfo.UpdateUI then
-            ns.TeamInfo.UpdateUI()
+        if ns.TeamInfo then
+            if BiaoGe and BiaoGe.options and BiaoGe.options.showTeamInfoFrame == 1 then
+                if ns.TeamInfo.sideFrame then ns.TeamInfo.sideFrame:Show() end
+            end
+            if ns.TeamInfo.UpdateUI then
+                ns.TeamInfo.UpdateUI()
+            end
         end
     end
     escBtn:SetScript("OnClick", BG.EscHistoryFrame)
@@ -994,8 +1008,17 @@ function BG.CreatHistoryListButton(FB)
             bt:Disable()
             if BG.History.List then BG.History.List:Hide() end
             if BG.PlaySound then BG.PlaySound(1) end
-            if ns.TeamInfo and ns.TeamInfo.UpdateUI then
-                ns.TeamInfo.UpdateUI()
+            -- 点开历史表格详情时，右侧团队信息面板直接显示并加载历史快照数据
+            if ns.TeamInfo then
+                if ns.TeamInfo.topBtn then
+                    ns.TeamInfo.topBtn:Show()
+                end
+                if ns.TeamInfo.sideFrame then
+                    ns.TeamInfo.sideFrame:Show()
+                end
+                if ns.TeamInfo.UpdateUI then
+                    ns.TeamInfo.UpdateUI()
+                end
             end
         end)
     end

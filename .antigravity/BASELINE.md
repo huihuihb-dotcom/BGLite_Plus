@@ -203,11 +203,37 @@
   - **修复实施**:
     - 在 [History.lua](file:///e:/World%20of%20Warcraft/_classic_titan_/Interface/AddOns/BGLite_Plus/Core/History.lua) 常规表格装备格悬停回调中，完整补充原生装备 Tooltip 绘制链路（`GameTooltip:SetOwner`、`GameTooltip:SetHyperlink`、`BG.SetZUGSetTooltip` 以及 `BG.FrameDs` 底色高亮）；
     - 鼠标悬停时：**鼠标处即时弹出完整的魔兽原生装备属性 Tooltip，右下角同步弹出带有渐变彩色柱状图的历史价格走势图**；移出时两者同步关闭，双浮窗完美协同共存。
+* **历史表格详情右侧团队信息面板直显优化 (2026-09-03)**:
+  - **故障成因**:
+    - 点开历史表格详情（`BG.HistoryMainFrame:Show()`）时，`FBMainFrame` 被隐藏（Hide）；
+    - 原 `FBMainFrame` 的 `OnHide` 钩子无条件调用了 `SafeHide(ns.TeamInfo.sideFrame)`，导致右侧团队信息面板被联动关闭；
+    - 虽在底层刷新了历史快照数据，但由于面板已处于隐藏状态，玩家必须手动再次点击顶栏【团队信息】按钮才会出现。
+  - **修复实施**:
+    - 在 [Init.lua](file:///e:/World%20of%20Warcraft/_classic_titan_/Interface/AddOns/BGLite_Plus/Core/Init.lua) 的 `FBMainFrame:HookScript("OnHide")` 中增加豁免判断：若当前正在查看历史表格（`BG.HistoryMainFrame:IsShown()`），则不隐藏团队信息面板；
+    - 在 [History.lua](file:///e:/World%20of%20Warcraft/_classic_titan_/Interface/AddOns/BGLite_Plus/Core/History.lua) 的 `HistoryMainFrame` `OnShow` 及点击历史列表项载入详情时，显式调用 `ns.TeamInfo.sideFrame:Show()` 与 `ns.TeamInfo.UpdateUI()`，确保右侧团队信息面板直接展开并呈现该历史账单快照留存的团队数据（YY号、团长、招募记录）；
+    - 退出历史表格时（点击【返回】），恢复常规活跃表格的团队信息面板显隐与数据状态。
+* **交易记录 Tab 按钮恢复与生命周期自启动修复 (2026-09-03)**:
+  - **故障成因**:
+    1. **BGLite 上游裁剪切断 UI 入口**: `BGLite/Core/BiaoGe.lua` 在创建完交易记录 Tab 按钮后，上游作者为了精简而显式调用了 `bt:Hide()`，并将其从 `BG.tabButtons` 锚点链表直接 `tremove`，切断了底部 Tab 栏的点击与展示入口；
+    2. **生命周期队列错过失效**: `BGLite_Plus/Core/TradeHistory.lua` 底部调用了 `BG.Init(InitTradeHistoryModule)`，但 `BGLite` 的 `BG.Init` 回调队列早在 `BGLite` 自身的 `ADDON_LOADED` 事件期间就已经执行完毕并注销了事件。作为后加载模块的 `TradeHistory.lua` 把函数塞入队列后**从未被触发执行**，导致交易记录的事件监听未注册、UI 与滚动列表从未初始化；
+    3. **增强包集成遗漏**: `Init.lua` 中未将 `TradeHistory` 纳入增强模块初始化与 `ClickTabButton` 显隐调度体系。
+  - **修复实施**:
+    1. **自启动与显式调用**: 在 [TradeHistory.lua](file:///e:/World%20of%20Warcraft/_classic_titan_/Interface/AddOns/BGLite_Plus/Core/TradeHistory.lua) 中导出 `ns.InitTradeHistoryModule`，并改写底部自启动逻辑（利用 `IsLoggedIn()` 与 `PLAYER_LOGIN` 自愈执行，不再依赖失效的 `BG.Init` 队列）；并在 [Init.lua](file:///e:/World%20of%20Warcraft/_classic_titan_/Interface/AddOns/BGLite_Plus/Core/Init.lua) 的 `InitPlusUI()` 中显式调度初始化；
+    2. **底部 Tab 按钮恢复**: 在 `Init.lua` 中为 `BG.TradeHistoryMainFrameTabNum`（101）补建【交易记录】Tab 按钮（`BG.ButtonTabTrade`），并为其注入带说明的悬停 Tooltip 提示；
+    3. **切 Tab 生命周期联动**: 在 `HideAllSubFrames` 及 `BG.ClickTabButton` Hook 中完整纳入 `BG.TradeHistoryMainFrame`，确保切 Tab 时正常显隐与 OnShow 列表数据自刷新。
+
+* **交易选项设置隐藏与 Tab 挂载顺序精简 (2026-09-03)**:
+  - **隐藏交易选项设置**: 动态遍历 `BG.TradeHistoryMainFrame` 子组件，精确定位「交易选项设置」按钮并实施彻底隐藏与移出视口处理（移至 -9999, -9999 并挂载 `OnShow` 抑制），杜绝无关设置按钮干扰；
+  - **保持自然挂载排列**: 移除了冗余的 Tab 链表强制重排与对调逻辑，保持原生态自然的加载追加链路，精简代码体量与运行开销。
 
 ## 9. 下一步计划 / 待办事项
 - 持续收集时光服玩家在实战团本中的喊话样本，丰富特征词库。
 - 跟踪测试进本传送门切换与历史表格归档载入的流畅度。
 - 观察玩家在不同客户端语言环境下的职业方案切换表现。
+- 观察大批量交易记录写入时滚动列表的渲染性能与数据清理表现。
+
+
+
 
 
 
