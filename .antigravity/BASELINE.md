@@ -241,8 +241,39 @@
   - **多语言词条补齐**: 在 [zhCN.lua](file:///e:/World%20of%20Warcraft/_classic_titan_/Interface/AddOns/BGLite_Plus/Locales/zhCN.lua) 与 [zhTW.lua](file:///e:/World%20of%20Warcraft/_classic_titan_/Interface/AddOns/BGLite_Plus/Locales/zhTW.lua) 中同步补全简体/繁体标准本地化词条。
 
 * **团队信息侧边栏默认展开与持久化状态记忆 (2026-09-03)**:
-  - **默认展开机制**: 严格对齐左侧拍卖记录（`showAuctionLogFrame or 1`）的标准设计，在 `TeamInfo.CreateUI()` 初始化中将 `BiaoGe.options.showTeamInfoFrame` 缺省值设为 `1`，实现首次打开与全新环境出厂**默认直接展开**；
+  - **默认展开机制**: 严格对齐左侧拍卖记录（`showAuctionLogFrame or 1`）的标准设计，在 `TeamInfo.CreateUI()` 初始化中将 `BiaoGe.options.showTeamInfoFrame` 缺省值设为 `1`，实现首次打开与全新环境出厂默认直接展开；
   - **状态双向记忆**: 玩家点击右上角【X】关闭时记录为 `0`，点击顶栏按钮展开时记录为 `1`，自动持久化至 WTF，切 Tab、切副本及重载游戏时严格遵循玩家上一次的手动设置状态。
+
+* **预设心理价格 (BestPrice) 模块恢复与全自动竞拍联动 (2026-09-03)**:
+  - **模块背景与定位**: 完整重构并移植原版 BiaoGe 被裁剪的买家预算管理功能，完全在 `BGLite_Plus` 内部独立封装，对上游只读依赖零侵入；
+  - **存储与槽位机制**: 数据结构对齐 `BiaoGe.bestPrice[realmID][player]`，支持 10 个预设装备槽位，记录 `{ enabled, equipment, price }`；
+  - **双重交互入口**:
+    1. **快捷入口**: 全局重写 `BG.IsSetBestPriceKeyDown`，在表格、心愿单、装备库中按住 `Alt` 并右键点击装备，直接弹出快捷价格设置弹窗；
+    2. **主管理面板**: 在主界面方案栏挂载动态更新的【心理价格(x)】常驻按钮，支持 10 格清单配置、独立启用/停用、数值修改与一键清空；
+  - **开拍全自动接管**: 挂钩 `BG.HookCreateAuction(auctionFrame)`，当拍卖清单中的装备时，自动填入心理上限并触发 `AuctionWA` 的自动出价流程，执行加一手逐级跟进、能捡漏绝不多花、封顶智能保护。版本提升至 `1.0.7`；
+  - **表格单元格 Alt+右键 点击拦截修复**: 针对 BGLite 精简时移除了 `FBUIfunction.lua` 中装备格子点击分支的缺陷，在 `BestPrice.lua` 中通过 `BestPrice.HookAllTableButtons()` 包装全局表格装备格子的 `OnMouseDown` 事件，优先截获 `Alt + 右键` 并直接触发 `BG.SetBestPrice`，彻底打通表格与心愿清单的快捷加价通路。
+
+* **预设价格 (AuctionPreset) 模块落成与团长拍卖发起深度联动 (2026-09-04)**:
+  - **模块背景与定位**: 完整重构并移植原版 BiaoGe 专为团长及拍卖发起人打造的底价批量管理系统，完全在 `BGLite_Plus` 内部独立封装，对上游只读依赖零侵入；
+  - **底部分页 Tab 挂载**: 注册全局 `BG.AuctionPresetMainFrameTabNum = 104`，通过 `BG.Create_TabButton` 挂载底部【预设价格】独立 Tab，与主界面原生生命周期无缝衔接；
+  - **存储与数据结构**: 对齐原版 `BiaoGe.auctionPreset[FB].money[itemID]`（起拍价）与 `[itemID .. "tips"]`（起拍语说明），支持历史配置自动继承；
+  - **列表与批量工具**: 包含副本下拉切换、装备名搜索、按装等/品质/价格排序、批量底价设定与全部清空；
+  - **副本名称中文转换**: 针对底层数据键名仅为英文字母代码（MC、BWL、TAQ等）的问题，接入 `BG.GetFBinfo(FB, "localName")` 自动转换为魔兽客户端官方中文全称（如“熔火之心 (MC)”、“黑翼之巢 (BWL)”），下拉菜单与提示文案更直观清晰；
+  - **排序严格弱序与弹窗编辑框兼容性修复 (2026-09-04)**:
+    1. 针对 `table.sort` 报错 `attempt to index local 'b' (a nil value)`：彻底重构比较函数，修复了三元逻辑在升序时导致偏序破坏进而引发快排哨兵越界的核心 Bug，改用严格的 `if sortAsc ... else ...` 判定并加入完整 `nil` 防御；
+    2. 针对点击【批量底价】弹窗确定时 `attempt to index field 'editBox' (a nil value)`：规范 `hasEditBox = 1`，并加入对 `self.editBox`、`self.EditBox`、`_G[name .. 'EditBox']` 以及父级容器的多层 fallback 获取，兼容时光服与探索服新旧弹窗系统。
+  - **交易记录模块架构重构：直接复用上游原生框架 (2026-09-04)**:
+    - **设计决策与精简**: 用户指出上游 BGLite 已内置完整的 `TradeHistory.lua` 逻辑与 UI，重写整个模块会导致两套子框架叠加；
+    - **重构实施**: 将 [TradeHistory.lua](file:///e:/World%20of%20Warcraft/_classic_titan_/Interface/AddOns/BGLite_Plus/Core/TradeHistory.lua) 代码从 1150 行精简至 65 行纯胶水层，不再重复 `CreateFrame`，直接调用 `BG.Create_TabButton(BG.TradeHistoryMainFrameTabNum, L["交易记录"], BG.TradeHistoryMainFrame, 100)` 恢复上游底部 Tab 入口；
+    - **彻底根治透光**: 移除了重复生成的第二套 Frame，上游 UI 原生管理唯一的 `notText`，彻底消除了重叠透光与数据渲染异常。
+  - **项目说明文档全面焕新 (README.md) (2026-09-04)**:
+    - 完整同步补充了预设心理价格 (BestPrice)、预设起拍底价 (AuctionPreset)、团队信息侧边栏 (TeamInfo)、交易记录等重磅功能的交互与使用指南；
+    - 补齐了最新的文件目录拓扑与快捷按键交互清单，与当前代码库架构完全对齐；
+    - 增设**【💡 我们的开发理念：最纯粹、最专注、最优雅】**核心板块，明确强调“社区最纯洁（零广告/零捆绑）、最专注功能（实战为王）、UI主打简洁（暗黑原生）、专业开发者匠心打磨”的产品定位。
+  - **拍卖发起智能联动**:
+    1. **单件开拍自动带入**: 挂钩 `BG.StartAuction`，弹出开拍小框时自动检索并填入该装备预设起拍底价；
+    2. **Boss 点击全开拍**: 团长按住 `Alt + 点击 Boss 名字`，自动逐一拉起该 Boss 掉落的所有预设装备开拍；
+    3. **Tooltip 悬停增强**: 悬停装备按住 Alt 时自动展示【预设起拍价】与【预设起拍语】。版本提升至 `1.0.8`。
 
 ## 9. 下一步计划 / 待办事项
 - 持续收集时光服玩家在实战团本中的喊话样本，丰富特征词库。
@@ -250,6 +281,8 @@
 - 观察玩家在不同客户端语言环境下的职业方案切换表现。
 - 观察大批量交易记录写入时滚动列表的渲染性能与数据清理表现。
 - 跟踪测试多角色切换后声望数据的采集与角色总览刷新流畅度。
+- 跟踪实战团本中开拍带有心理价格的装备时自动接管出价的流畅度。
+- 跟踪团长实战中通过【预设价格】批量开拍各副本掉落的稳定性。
 
 
 

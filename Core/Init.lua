@@ -109,6 +109,15 @@ local function InitPlusUI()
     if ns.InitReputationModule then
         securecall(ns.InitReputationModule)
     end
+    if ns.InitBestPriceModule then
+        securecall(ns.InitBestPriceModule)
+    end
+    if ns.InitAuctionPresetModule then
+        securecall(ns.InitAuctionPresetModule)
+        if ns.AuctionPreset and ns.AuctionPreset.CreateMainFrame then
+            ns.AuctionPreset.CreateMainFrame(BG.MainFrame)
+        end
+    end
     if BG.OpenOption and not ns.hasHookedOpenOptionForRaidTool then
         ns.hasHookedOpenOptionForRaidTool = true
         hooksecurefunc(BG, "OpenOption", function()
@@ -391,6 +400,15 @@ local function InitPlusUI()
                     BG.FilterClassItemMainFrame.Buttons2:UpdatePoint()
                 end
                 SafeHide(BG.FilterClassItemMainFrame)
+
+                -- 挂载心理价格入口按钮
+                if ns.BestPrice and ns.BestPrice.CreateEntryButton then
+                    local entryBtn = ns.BestPrice.CreateEntryButton(BG.FilterClassItemMainFrame.Buttons2)
+                    if entryBtn then SafeShow(entryBtn) end
+                end
+            end
+            if ns.BestPrice and ns.BestPrice.HookAllTableButtons then
+                ns.BestPrice.HookAllTableButtons()
             end
             if BG.UpdateAllFilter then
                 BG.UpdateAllFilter()
@@ -464,11 +482,13 @@ local function InitPlusUI()
                         SafeShow(b2)
                         if b2.UpdatePoint then b2:UpdatePoint() end
                         if BG.UpdateAllFilter then BG.UpdateAllFilter() end
+                        if ns.BestPrice and ns.BestPrice.entryButton then SafeShow(ns.BestPrice.entryButton) end
                     elseif num == BG.HopeMainFrameTabNum and BG.HopeMainFrame then
                         b2:SetParent(BG.HopeMainFrame)
                         SafeShow(b2)
                         if b2.UpdatePoint then b2:UpdatePoint() end
                         if BG.UpdateAllFilter then BG.UpdateAllFilter() end
+                        if ns.BestPrice and ns.BestPrice.entryButton then SafeShow(ns.BestPrice.entryButton) end
                     elseif num == BG.ItemLibMainFrameTabNum and BG.ItemLibMainFrame then
                         b2:SetParent(BG.ItemLibMainFrame)
                         SafeShow(b2)
@@ -476,10 +496,12 @@ local function InitPlusUI()
                         if BG.ItemLibMainFrame.filtleText then
                             b2:SetPoint("LEFT", BG.ItemLibMainFrame.filtleText, "RIGHT", 10, 0)
                         end
+                        if ns.BestPrice and ns.BestPrice.entryButton then SafeHide(ns.BestPrice.entryButton) end
                     else
-                        -- 其他 Tab (对账/历史/团队工具等) 隐藏装备过滤按钮栏
+                        -- 其他 Tab (对账/历史/团队工具等) 隐藏装备过滤按钮栏与心理价格按钮
                         SafeHide(b2)
                         SafeHide(BG.FilterClassItemMainFrame)
+                        if ns.BestPrice and ns.BestPrice.entryButton then SafeHide(ns.BestPrice.entryButton) end
                     end
                 end
             end

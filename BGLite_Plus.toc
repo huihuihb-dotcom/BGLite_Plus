@@ -27,6 +27,8 @@ Core\TeamInfo.lua
 Core\History.lua
 Core\TradeHistory.lua
 Core\Reputation.lua
+Core\BestPrice.lua
+Core\AuctionPreset.lua
 Core\Init.lua
 
 ## Title-zhCN: |cff880303[增强]|r BGLite 增强功能包 (|cff00BFFF心愿单+装备库+角色总览+团队工具|r)
