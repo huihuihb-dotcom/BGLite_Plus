@@ -226,11 +226,33 @@
   - **隐藏交易选项设置**: 动态遍历 `BG.TradeHistoryMainFrame` 子组件，精确定位「交易选项设置」按钮并实施彻底隐藏与移出视口处理（移至 -9999, -9999 并挂载 `OnShow` 抑制），杜绝无关设置按钮干扰；
   - **保持自然挂载排列**: 移除了冗余的 Tab 链表强制重排与对调逻辑，保持原生态自然的加载追加链路，精简代码体量与运行开销。
 
+* **超低频、极轻量声望工具类 Reputation.lua 设计与集成 (2026-09-03)**:
+  - **背景与合法性**: 上游 BGLite 在精简时裁掉了原版 BiaoGe 的 `bagSync.lua`，导致声望失去实时采集与保存。声望 API（`GetFactionInfoByID`、`UPDATE_FACTION`、`SavedVariables`）为魔兽官方 100% 公开且无保护的合法只读接口，无任何违规封禁风险；
+  - **极致性能与慢速策略**:
+    1. **超长延迟初次扫描**: 角色登录或重载后静默等待 30 秒（`INITIAL_DELAY = 30`），避开加载高峰；
+    2. **战斗状态完全避让**: 若处于战斗中（`InCombatLockdown()`）绝对不执行任何声望读取，仅挂载脱战待办，脱战 5 秒后再执行；
+    3. **10 秒超长防抖合并**: 收到 `UPDATE_FACTION`（刷怪/批量交任务）时不立即扫描，重置 10 秒定时器，全部刷完 10 秒后仅执行一次，彻底杜绝高频 CPU 消耗；
+    4. **数据与无缝渲染**: 严格对齐原版结构写入 `BiaoGe.bag[realmID][player].faction[ID]`，无缝点亮角色总览的跨号声望查看；
+    5. **对外提供标准工具 API**: 暴露 `ns.Reputation.GetReputation(id, player, realm)`、`ns.Reputation.GetAllReputations()` 等只读接口供全局调用。
+
+* **团队信息 UI 敏感词治理与语音(DD)全模式扩充 (2026-09-03)**:
+  - **合规防封治理**: 将 [TeamInfo.lua](file:///e:/World%20of%20Warcraft/_classic_titan_/Interface/AddOns/BGLite_Plus/Core/TeamInfo.lua) 中所有暴露给玩家视觉与游戏内聊天频道的敏感关键字“YY”全面替换为中性合规的**“语音频道”**（包括侧边栏操作行标签、Tooltip 提示、系统绑定通知、捕获记录与空提示），彻底杜绝游戏内审查违规与封禁风险；
+  - **底层识别能力全量扩充**: 扩充 `TITAN_KEYWORDS` 特征库与 `YY_PATTERNS` 正则捕获器，同步支持 `DD`、`dd`、`进DD`、`上DD`、`语音`、`滴滴` 等时光服团长各类防封缩写喊话，实现毫秒级自适应提取；
+  - **多语言词条补齐**: 在 [zhCN.lua](file:///e:/World%20of%20Warcraft/_classic_titan_/Interface/AddOns/BGLite_Plus/Locales/zhCN.lua) 与 [zhTW.lua](file:///e:/World%20of%20Warcraft/_classic_titan_/Interface/AddOns/BGLite_Plus/Locales/zhTW.lua) 中同步补全简体/繁体标准本地化词条。
+
+* **团队信息侧边栏默认展开与持久化状态记忆 (2026-09-03)**:
+  - **默认展开机制**: 严格对齐左侧拍卖记录（`showAuctionLogFrame or 1`）的标准设计，在 `TeamInfo.CreateUI()` 初始化中将 `BiaoGe.options.showTeamInfoFrame` 缺省值设为 `1`，实现首次打开与全新环境出厂**默认直接展开**；
+  - **状态双向记忆**: 玩家点击右上角【X】关闭时记录为 `0`，点击顶栏按钮展开时记录为 `1`，自动持久化至 WTF，切 Tab、切副本及重载游戏时严格遵循玩家上一次的手动设置状态。
+
 ## 9. 下一步计划 / 待办事项
 - 持续收集时光服玩家在实战团本中的喊话样本，丰富特征词库。
 - 跟踪测试进本传送门切换与历史表格归档载入的流畅度。
 - 观察玩家在不同客户端语言环境下的职业方案切换表现。
 - 观察大批量交易记录写入时滚动列表的渲染性能与数据清理表现。
+- 跟踪测试多角色切换后声望数据的采集与角色总览刷新流畅度。
+
+
+
 
 
 

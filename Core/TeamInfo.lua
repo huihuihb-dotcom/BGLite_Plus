@@ -22,15 +22,19 @@ local TITAN_KEYWORDS = {
     "宝库", "土王", "双龙", "黑曜石", "奥杜尔", "ULD", "uld",
     -- 职业
     "FQ", "NQ", "CJQ", "BDK", "KBZ", "WQZ", "AM", "JLM", "SS", "DZ", "LR", "SM", "猫德", "鸟德", "奶德",
-    -- 语音/YY
-    "YY", "yy", "歪歪", "语音", "上YY", "挂YY",
+    -- 语音/DD/YY
+    "YY", "yy", "歪歪", "语音", "上YY", "挂YY", "DD", "dd", "进DD", "上DD", "进dd", "上dd", "滴滴",
 }
 
--- 2. YY 正则匹配模式
+-- 2. 语音/DD/YY 正则匹配模式
 local YY_PATTERNS = {
     "[yY]*[yY][：:_/%-%s]*([%d%s][%d%s][%d%s][%d%s]*%d+)",
     "(%d+[%d%s][%d%s][%d%s][%d%s]*)[：:_/%-%s]*[yY][yY]*",
+    "[dD]*[dD][：:_/%-%s]*([%d%s][%d%s][%d%s][%d%s]*%d+)",
+    "(%d+[%d%s][%d%s][%d%s][%d%s]*)[：:_/%-%s]*[dD][dD]*",
     "[歪]*歪[：:_/%-%s]*([%d%s][%d%s][%d%s][%d%s]*%d+)",
+    "语音[：:_/%-%s]*([%d%s][%d%s][%d%s][%d%s]*%d+)",
+    "滴滴[：:_/%-%s]*([%d%s][%d%s][%d%s][%d%s]*%d+)",
 }
 
 -- 名字标准化（同时支持带服名与纯名字比对）
@@ -448,7 +452,7 @@ function TeamInfo.BindCurrentGroupToFB(targetFB)
     TeamInfo.currentGroupData.boundFB = targetFB
 
     local fbShort = BG.GetFBinfo and BG.GetFBinfo(targetFB, "shortName") or targetFB
-    DEFAULT_CHAT_FRAME:AddMessage("|cff00BFFF[BGLite]|r " .. string.format(L["已将当前团队招募语与 YY 成功绑定至 <%s> 表格！"], fbShort))
+    DEFAULT_CHAT_FRAME:AddMessage("|cff00BFFF[BGLite]|r " .. string.format(L["已将当前团队招募语与语音频道成功绑定至 <%s> 表格！"], fbShort))
     if BG.PlaySound then BG.PlaySound(1) end
     TeamInfo.UpdateUI()
 end
@@ -737,8 +741,8 @@ eventFrame:SetScript("OnEvent", function(self, event, msg, sender, ...)
         local numOnly = msg:gsub("%s", ""):match("^(%d+)$")
         if numOnly and #numOnly >= 4 and #numOnly <= 12 and (GetServerTime() - groupJoinTime < 600) then
             TeamInfo.SetYY(numOnly)
-            TeamInfo.AddRecruitEntry(L["团队频道"], L["团长发布YY号: "] .. numOnly)
-            -- DEFAULT_CHAT_FRAME:AddMessage("|cff00BFFF[BGLite]|r " .. L["已自动记录团长YY: "] .. "|cff00FF00" .. numOnly .. "|r")
+            TeamInfo.AddRecruitEntry(L["团队频道"], L["团长发布语音频道: "] .. numOnly)
+            -- DEFAULT_CHAT_FRAME:AddMessage("|cff00BFFF[BGLite]|r " .. L["已自动记录团长语音频道: "] .. "|cff00FF00" .. numOnly .. "|r")
             return
         end
 
@@ -759,6 +763,13 @@ end)
 function TeamInfo.CreateUI()
     local parent = BG and BG.MainFrame
     if not parent or TeamInfo.sideFrame then return end
+
+    -- 默认展开侧边栏（与左侧拍卖记录 showAuctionLogFrame or 1 保持一致）
+    BiaoGe = BiaoGe or {}
+    BiaoGe.options = BiaoGe.options or {}
+    if BiaoGe.options.showTeamInfoFrame == nil then
+        BiaoGe.options.showTeamInfoFrame = 1
+    end
 
     -- 9.1 顶部栏入口切换按钮 (挂载在拍卖记录按钮旁边，全局 Tab 常驻)
     local topBtn = CreateFrame("Button", "BGLite_ButtonTeamInfo", parent)
@@ -802,9 +813,9 @@ function TeamInfo.CreateUI()
         GameTooltip:AddLine(L["点击展开/收起右侧团队信息面板。"], 1, 0.82, 0, true)
         GameTooltip:AddLine(" ")
         GameTooltip:AddLine(L["功能特性："], 0, 0.9, 1)
-        GameTooltip:AddLine(L["自动捕获集结号、世界喊话与开团规则，支持YY号一键复制及副本账单自动绑定。"], 0.85, 0.85, 0.85, true)
+        GameTooltip:AddLine(L["自动捕获集结号、世界喊话与开团规则，支持语音频道一键复制及副本账单自动绑定。"], 0.85, 0.85, 0.85, true)
         GameTooltip:AddLine(" ")
-        GameTooltip:AddLine(L["【开发调试中】如遇任何异常或有优化建议，欢迎前往 DD频道: 434056 交流反馈！"], 0.2, 1, 0.6, true)
+        GameTooltip:AddLine(L["【开发调试中】如遇任何异常或有优化建议，欢迎前往 语音频道(DD): 434056 交流反馈！"], 0.2, 1, 0.6, true)
         GameTooltip:Show()
     end)
     topBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
@@ -860,12 +871,12 @@ function TeamInfo.CreateUI()
     leaderText:SetTextColor(1, 0.82, 0)
     f.leaderText = leaderText
 
-    -- 第一操作行：YY 频道与复制
+    -- 第一操作行：语音频道与复制
     local yyLabel = f:CreateFontString(nil, "ARTWORK")
     yyLabel:SetFont(BIAOGE_TEXT_FONT, 12, "OUTLINE")
     yyLabel:SetPoint("TOPLEFT", 12, -54)
     yyLabel:SetTextColor(1, 1, 1)
-    yyLabel:SetText(L["YY 频道:"])
+    yyLabel:SetText(L["语音频道:"])
     f.yyLabel = yyLabel
 
     local yyEdit = CreateFrame("EditBox", nil, f, "InputBoxTemplate")
@@ -895,10 +906,10 @@ function TeamInfo.CreateUI()
             ChatEdit_ActivateChat(editBox)
             editBox:SetText(yy)
             editBox:HighlightText()
-            -- DEFAULT_CHAT_FRAME:AddMessage("|cff00BFFF[BGLite]|r " .. L["已将 YY 频道号放入输入框: "] .. "|cff00FF00" .. yy .. "|r")
+            -- DEFAULT_CHAT_FRAME:AddMessage("|cff00BFFF[BGLite]|r " .. L["已将语音频道放入输入框: "] .. "|cff00FF00" .. yy .. "|r")
             if BG.PlaySound then BG.PlaySound(1) end
         else
-            -- DEFAULT_CHAT_FRAME:AddMessage("|cff00BFFF[BGLite]|r " .. L["当前没有记录到有效的 YY 号"])
+            -- DEFAULT_CHAT_FRAME:AddMessage("|cff00BFFF[BGLite]|r " .. L["当前没有记录到有效的语音频道"])
         end
     end)
     f.btnCopyYY = btnCopyYY
@@ -1027,7 +1038,7 @@ function TeamInfo.UpdateUI()
     if #recruits == 0 then
         if f.emptyHint then
             if state == 1 then
-                f.emptyHint:SetText(L["已开启队伍监听，自动捕获集结号、YY与开团规则..."])
+                f.emptyHint:SetText(L["已开启队伍监听，自动捕获集结号、语音频道与开团规则..."])
             else
                 f.emptyHint:SetText(L["暂无该副本场次的招募通告与开团规则记录"])
             end

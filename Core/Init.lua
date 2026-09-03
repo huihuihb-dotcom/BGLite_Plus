@@ -106,6 +106,9 @@ local function InitPlusUI()
     if ns.InitTradeHistoryModule then
         securecall(ns.InitTradeHistoryModule)
     end
+    if ns.InitReputationModule then
+        securecall(ns.InitReputationModule)
+    end
     if BG.OpenOption and not ns.hasHookedOpenOptionForRaidTool then
         ns.hasHookedOpenOptionForRaidTool = true
         hooksecurefunc(BG, "OpenOption", function()
