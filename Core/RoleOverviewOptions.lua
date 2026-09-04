@@ -24,6 +24,9 @@ local defaultOptionsMap = {
     roleOverviewShowBuffCD = 1,
     searchList = 1,
     roleOverviewShortName = 0, -- 默认关闭/否
+    roleOverviewShowNote = 0,  -- 默认关闭/否
+    roleOverviewShowNote_width = 100,
+    roleOverviewShowNote_useClassColor = 1,
 }
 
 local function CreateCheckButton(name, text, parent, x, y, ontext, callback, defaultVal)
@@ -247,7 +250,44 @@ function ns.InitRoleOverviewOptions()
 
     yOffset = yOffset - 35
 
-    -- 基础开关 - 行 5 (右侧：快捷键绑定)
+    -- 基础开关 - 行 5 (左侧：显示角色备注 + 宽度设置，右侧：快捷键绑定)
+    local btNote = CreateCheckButton("roleOverviewShowNote", L["显示角色备注"], content, 15, yOffset, {
+        L["显示角色备注"],
+        L["在角色名字后面，增加显示一段自定义文本。"],
+        " ",
+        L["使用方法：/BGR，把角色总览面板固定，然后鼠标点击角色对应的备注栏即可修改备注。"]
+    }, function(val)
+        RefreshRoleOverview()
+    end, 0)
+
+    local tWidth = content:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
+    tWidth:SetFont(BIAOGE_TEXT_FONT, 13, "OUTLINE")
+    tWidth:SetPoint("LEFT", btNote.text, "RIGHT", 8, 0)
+    tWidth:SetText(L["宽度:"])
+
+    local editWidth = CreateFrame("EditBox", nil, content, "InputBoxTemplate")
+    editWidth:SetSize(36, 20)
+    editWidth:SetPoint("LEFT", tWidth, "RIGHT", 4, 0)
+    editWidth:SetAutoFocus(false)
+    editWidth:SetNumeric(true)
+    editWidth:SetMaxLetters(3)
+    local curW = (BiaoGe and BiaoGe.options and tonumber(BiaoGe.options.roleOverviewShowNote_width)) or 100
+    BiaoGe.options.roleOverviewShowNote_width = curW
+    editWidth:SetText(tostring(curW))
+    editWidth:SetScript("OnTextChanged", function(self)
+        local w = tonumber(self:GetText()) or 100
+        w = math.max(40, math.min(300, w))
+        BiaoGe.options.roleOverviewShowNote_width = w
+        RefreshRoleOverview()
+    end)
+    editWidth:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
+    editWidth:SetScript("OnEnterPressed", function(self) self:ClearFocus() end)
+    editWidth:SetScript("OnEditFocusLost", function(self)
+        local w = tonumber(self:GetText()) or 100
+        w = math.max(40, math.min(300, w))
+        self:SetText(tostring(w))
+    end)
+
     local tBind = content:CreateFontString()
     tBind:SetFont(BIAOGE_TEXT_FONT, 13, "OUTLINE")
     tBind:SetPoint("TOPLEFT", content, 260, yOffset)

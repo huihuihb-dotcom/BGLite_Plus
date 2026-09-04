@@ -905,25 +905,39 @@ function BG.AddRoleOverviewNote(realmID, realmName, player, colorplayer, note)
             hasEditBox = true,
             editBoxWidth = 230,
             OnShow = function(self, currentNote)
-                local edit = self.EditBox or self.editBox
-                edit:SetFocus()
-                edit:SetText(currentNote)
-                edit:HighlightText()
+                local edit = self.EditBox or self.editBox or (self.GetName and _G[self:GetName() .. "EditBox"])
+                if edit then
+                    edit:SetFocus()
+                    local t = (self.data ~= nil and self.data ~= "") and self.data or currentNote or ""
+                    edit:SetText(t)
+                    edit:HighlightText()
+                end
             end,
             EditBoxOnEnterPressed = function(self)
-                self:GetParent():GetButton1():Click()
+                local p = self:GetParent()
+                if p then
+                    local btn = p.button1 or (p.GetButton1 and p:GetButton1())
+                    if btn and btn.Click then
+                        btn:Click()
+                    else
+                        p:Hide()
+                    end
+                end
             end,
             EditBoxOnEscapePressed = function(self)
-                self:GetParent():Hide()
+                local p = self:GetParent()
+                if p then p:Hide() end
             end,
         }
     end
     StaticPopupDialogs[popupName].OnAccept = function(self)
-        local edit = self.EditBox or self.editBox
-        BiaoGe.roleOverviewNote = BiaoGe.roleOverviewNote or {}
-        BiaoGe.roleOverviewNote[realmID] = BiaoGe.roleOverviewNote[realmID] or {}
-        BiaoGe.roleOverviewNote[realmID][player] = edit:GetText()
-        BG.SetFBCD(nil, nil, true, true)
+        local edit = self.EditBox or self.editBox or (self.GetName and _G[self:GetName() .. "EditBox"])
+        if edit then
+            BiaoGe.roleOverviewNote = BiaoGe.roleOverviewNote or {}
+            BiaoGe.roleOverviewNote[realmID] = BiaoGe.roleOverviewNote[realmID] or {}
+            BiaoGe.roleOverviewNote[realmID][player] = edit:GetText()
+            BG.SetFBCD(nil, nil, true, true)
+        end
     end
     StaticPopup_Show(popupName, realmName .. colorplayer, nil, note)
 end
@@ -1236,20 +1250,31 @@ function BG.SetFBCD(self, position, click, refresh)
         local text7 = ""
         local function SafeFormatResetTime(seconds)
             if not seconds or seconds <= 0 then return "" end
-            if BG.SecondsToTime then
-                return BG.SecondsToTime(seconds, true)
-            elseif _G.SecondsToTime then
-                local ok, res = pcall(_G.SecondsToTime, seconds, true, nil, 2)
-                if ok and res then return res end
-                ok, res = pcall(_G.SecondsToTime, seconds, true)
-                if ok and res then return res end
-            end
-            local h = floor(seconds / 3600)
+            local d = floor(seconds / 86400)
+            local h = floor((seconds % 86400) / 3600)
             local m = floor((seconds % 3600) / 60)
-            if h >= 1 then
-                return h .. (L["小时"] or "h")
+
+            local dayStr = L["天"] or "天"
+            local hourStr = L["小时"] or "小时"
+            local minStr = L["分钟"] or "分钟"
+
+            if d >= 1 then
+                if h >= 1 then
+                    return string.format("%d%s%d%s", d, dayStr, h, hourStr)
+                else
+                    return string.format("%d%s", d, dayStr)
+                end
+            elseif h >= 1 then
+                if m >= 1 then
+                    return string.format("%d%s%d%s", h, hourStr, m, minStr)
+                else
+                    return string.format("%d%s", h, hourStr)
+                end
+            elseif m >= 1 then
+                return string.format("%d%s", m, minStr)
+            else
+                return string.format("%d%s", floor(seconds), (L["秒"] or "秒"))
             end
-            return m .. (L["分钟"] or "m")
         end
         local function IsSmallRaid(FBID)
             if BG.IsTitan then return end

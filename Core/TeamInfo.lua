@@ -425,16 +425,30 @@ function TeamInfo.GetCardState()
     local inGroup = IsInGroup() or IsInRaid()
     local fbData = BiaoGe and BiaoGe[currentFB] and BiaoGe[currentFB].teamInfo
 
+    -- 场景 1：单人未组队状态 -> 只读查看当前选定副本的历史存档 (状态 3)
     if not inGroup then
         return 3, fbData or { yy = "", leader = "", recruits = {} }, currentFB
     end
 
-    -- 组队状态下：如果已绑定当前副本，或者当前副本有持久化记录
-    if (TeamInfo.currentGroupData.isBound and TeamInfo.currentGroupData.boundFB == currentFB)
-       or (fbData and fbData.leader and fbData.leader ~= "") then
-        return 2, fbData or TeamInfo.currentGroupData, currentFB
+    -- 场景 2：组队状态下，严格检查是否真正在当前副本内，或已将当前队伍绑定至当前副本
+    local isInstance, instanceType = IsInInstance()
+    local inCurrentInstance = false
+    if isInstance and (instanceType == "raid" or instanceType == "party") then
+        local FBID = select(8, GetInstanceInfo())
+        if FBID and BG and BG.FBIDtable and BG.FBIDtable[FBID] == currentFB then
+            inCurrentInstance = true
+        end
     end
 
+    -- 仅当已明确绑定当前副本，或已身处该副本中时，才进入状态 2 (已绑定态)
+    if (TeamInfo.currentGroupData.isBound and TeamInfo.currentGroupData.boundFB == currentFB)
+       or inCurrentInstance then
+        local activeData = (fbData and fbData.leader and fbData.leader ~= "") and fbData or TeamInfo.currentGroupData
+        return 2, activeData, currentFB
+    end
+
+    -- 场景 3：进本前 / 组队未绑定态 (状态 1)
+    -- 玩家在副本外面，必须 100% 展示当前正在进行的真实队伍数据，绝不允许被未进本的旧副本存档遮挡劫持！
     return 1, TeamInfo.currentGroupData, currentFB
 end
 
@@ -630,16 +644,30 @@ function TeamInfo.OnGroupUpdate(forceScan)
         TeamInfo.Log(string.format(L["开始手动抓取队伍信息... 当前团长: |cffFFFF00%s|r"], (cleanLeader ~= "" and cleanLeader or L["未知"])), "00FF88")
     end
 
-    -- 团长换人追踪 (Leader Change Tracking)
-    if cleanLeader ~= "" and data.leader and data.leader ~= "" and data.leader ~= cleanLeader then
-        local oldLeader = data.leader
-        data.leader = cleanLeader
-        local changeMsg = string.format(L["团长变更为: %s (原团长: %s)"], cleanLeader, oldLeader)
-        TeamInfo.AddRecruitEntry(L["团队变动"], changeMsg)
-        TeamInfo.Log(changeMsg, "FF9900")
-        DEFAULT_CHAT_FRAME:AddMessage("|cff00BFFF[BGLite]|r |cffFF9900" .. changeMsg .. "|r")
-    elseif cleanLeader ~= "" and (not data.leader or data.leader == "") then
-        data.leader = cleanLeader
+    -- 团长换人追踪与新团队自愈 (Leader Change Tracking & New Team Auto-Reset)
+    if cleanLeader ~= "" then
+        if data.leader and data.leader ~= "" and not IsSamePlayer(data.leader, cleanLeader) then
+            local isInstance = IsInInstance()
+            if not isInstance then
+                -- 副本外面团长变更：明确判定为加入了全新团队！重置当前队伍数据
+                TeamInfo.Log(string.format(L["检测到加入新团队（新团长: %s，原团长: %s），重置队伍数据并重新捕获"], cleanLeader, data.leader), "00FF88")
+                data.yy = ""
+                data.leader = cleanLeader
+                data.recruits = {}
+                data.isBound = false
+                data.boundFB = nil
+            else
+                -- 副本内团长转让
+                local oldLeader = data.leader
+                data.leader = cleanLeader
+                local changeMsg = string.format(L["团长变更为: %s (原团长: %s)"], cleanLeader, oldLeader)
+                TeamInfo.AddRecruitEntry(L["团队变动"], changeMsg)
+                TeamInfo.Log(changeMsg, "FF9900")
+                DEFAULT_CHAT_FRAME:AddMessage("|cff00BFFF[BGLite]|r |cffFF9900" .. changeMsg .. "|r")
+            end
+        elseif not data.leader or data.leader == "" then
+            data.leader = cleanLeader
+        end
     end
 
     -- 自动进本检测：若进入了团队副本且尚未绑定，则自动绑定到对应副本
@@ -760,7 +788,18 @@ eventFrame:SetScript("OnEvent", function(self, event, msg, sender, ...)
         C_Timer.After(3.0, function() TeamInfo.OnGroupUpdate() end)
         return
     elseif event == "GROUP_JOINED" then
+        -- 加入新队伍：如果在副本外，预先重置当前队伍状态并解绑，迎接全新团队
+        if not IsInInstance() then
+            if TeamInfo.currentGroupData then
+                TeamInfo.currentGroupData.yy = ""
+                TeamInfo.currentGroupData.leader = ""
+                TeamInfo.currentGroupData.recruits = {}
+                TeamInfo.currentGroupData.isBound = false
+                TeamInfo.currentGroupData.boundFB = nil
+            end
+        end
         TriggerMultiWaveScan()
+        TeamInfo.UpdateUI()
         return
     elseif event == "GROUP_LEFT" then
         if BiaoGe and BiaoGe.currentGroupData then
@@ -771,7 +810,9 @@ eventFrame:SetScript("OnEvent", function(self, event, msg, sender, ...)
         return
     elseif event == "GROUP_ROSTER_UPDATE" or event == "RAID_ROSTER_UPDATE" then
         if IsInGroup() or IsInRaid() then
-            C_Timer.After(0.3, function() TeamInfo.OnGroupUpdate() end)
+            TeamInfo.OnGroupUpdate()
+            C_Timer.After(0.4, function() TeamInfo.OnGroupUpdate() end)
+            C_Timer.After(1.2, function() TeamInfo.OnGroupUpdate() end)
         else
             TeamInfo.UpdateUI()
         end
