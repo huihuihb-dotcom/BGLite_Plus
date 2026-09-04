@@ -404,18 +404,20 @@ end
 
 local function InitDataPersistence()
     if not BiaoGe then return end
-    BiaoGe.currentGroupData = BiaoGe.currentGroupData or {
+    -- 全局独立队伍暂存区 (Staging Area，跟随组队生命周期，绝不随副本清空而丢失)
+    BiaoGe.teamInfoStaging = BiaoGe.teamInfoStaging or BiaoGe.currentGroupData or {
         yy = "",
         leader = "",
         recruits = {},
         isBound = false,
         boundFB = nil,
     }
-    TeamInfo.currentGroupData = BiaoGe.currentGroupData
+    TeamInfo.stagingData = BiaoGe.teamInfoStaging
+    TeamInfo.currentGroupData = BiaoGe.teamInfoStaging -- 保持向下兼容
 end
 
 -- 获取当前面板所处的展示状态
--- 1: STATE_UNBOUND (进本前/组队未绑定态)
+-- 1: STATE_UNBOUND (进本前/组队暂存态)
 -- 2: STATE_BOUND   (已进本/表格已绑定态)
 -- 3: STATE_ARCHIVE (单人查账/历史存档态)
 function TeamInfo.GetCardState()
@@ -425,13 +427,14 @@ function TeamInfo.GetCardState()
     local inGroup = IsInGroup() or IsInRaid()
     local fbData = BiaoGe and BiaoGe[currentFB] and BiaoGe[currentFB].teamInfo
     local hasFBData = fbData and ((fbData.leader and fbData.leader ~= "") or (fbData.recruits and #fbData.recruits > 0) or (fbData.yy and fbData.yy ~= ""))
+    local staging = TeamInfo.stagingData
 
-    -- 场景 1：单人未组队状态 -> 严格查看当前选定副本的历史存档 (状态 3)
+    -- 场景 1：单人未组队状态 -> 严格查看当前选定副本绑定的存档 (状态 3)
     if not inGroup then
         return 3, fbData or { yy = "", leader = "", recruits = {} }, currentFB
     end
 
-    -- 场景 2：组队状态下，检查当前队伍是否已绑定当前副本，或角色正身处该副本中
+    -- 场景 2：组队状态下，检查当前队伍是否已绑定该副本，或角色正身处该副本中
     local isInstance, instanceType = IsInInstance()
     local inCurrentInstance = false
     if isInstance and (instanceType == "raid" or instanceType == "party") then
@@ -441,26 +444,32 @@ function TeamInfo.GetCardState()
         end
     end
 
-    local isBoundToCurrentFB = (TeamInfo.currentGroupData.isBound and TeamInfo.currentGroupData.boundFB == currentFB)
+    local isBoundToCurrentFB = (staging.isBound and staging.boundFB == currentFB)
     if isBoundToCurrentFB or inCurrentInstance then
-        local activeData = (fbData and fbData.leader and fbData.leader ~= "") and fbData or TeamInfo.currentGroupData
-        return 2, activeData, currentFB
+        -- 核心机制：进本或绑定时，若副本缺少 yy 而暂存区有 yy，从暂存区无缝克隆带入并固化！
+        if not fbData or (not fbData.yy or fbData.yy == "") then
+            if staging.yy and staging.yy ~= "" then
+                TeamInfo.BindStagingToFB(currentFB)
+                fbData = BiaoGe[currentFB] and BiaoGe[currentFB].teamInfo
+            end
+        end
+        return 2, fbData or staging, currentFB
     end
 
     -- 场景 3：当前队伍已经绑定了其他副本（例如当前队伍绑定了 TOC，玩家在主界面切换到了 NAXX 查看账目）
-    -- 必须严格展示 NAXX 自己的存档，绝不能把 TOC 的队伍信息串台显示到 NAXX！
-    if TeamInfo.currentGroupData.isBound and TeamInfo.currentGroupData.boundFB and TeamInfo.currentGroupData.boundFB ~= currentFB then
+    -- 严格展示 NAXX 自己的副本绑定存档，绝不能把 TOC 的暂存/绑定串台到 NAXX！
+    if staging.isBound and staging.boundFB and staging.boundFB ~= currentFB then
         return 3, fbData or { yy = "", leader = "", recruits = {} }, currentFB
     end
 
     -- 场景 4：当前队伍尚未绑定任何副本
-    -- 如果当前选中的副本本身有保存的历史团队信息，优先展示该副本的存档记录 (状态 3)
+    -- 如果当前选中的副本本身有历史绑定的团队存档，展示该副本的存档记录 (状态 3)
     if hasFBData then
         return 3, fbData, currentFB
     end
 
-    -- 场景 5：当前队伍尚未绑定，且当前选中的副本也是空表 -> 展示当前活跃队伍数据，等待绑定开团 (状态 1)
-    return 1, TeamInfo.currentGroupData, currentFB
+    -- 场景 5：当前队伍尚未绑定，且当前选中的副本也是空表 -> 展示全局队伍暂存区，等待团长开团绑定 (状态 1)
+    return 1, staging, currentFB
 end
 
 -- 获取适合写入的数据源
@@ -468,7 +477,7 @@ function TeamInfo.GetActiveDataForWrite()
     InitDataPersistence()
     local inGroup = IsInGroup() or IsInRaid()
     if inGroup then
-        return TeamInfo.currentGroupData
+        return TeamInfo.stagingData
     else
         local fb = GetCurrentFB()
         if BiaoGe and BiaoGe[fb] then
@@ -476,29 +485,44 @@ function TeamInfo.GetActiveDataForWrite()
             return BiaoGe[fb].teamInfo
         end
     end
-    return TeamInfo.currentGroupData
+    return TeamInfo.stagingData
 end
 
--- 将当前暂存的组队信息「固化绑定」到指定副本表格中
-function TeamInfo.BindCurrentGroupToFB(targetFB)
+-- 将全局暂存区数据「快照绑定」至指定副本
+function TeamInfo.BindStagingToFB(targetFB)
     InitDataPersistence()
     targetFB = targetFB or GetCurrentFB()
     if not BiaoGe or not BiaoGe[targetFB] then return end
 
-    BiaoGe[targetFB].teamInfo = {
-        yy = TeamInfo.currentGroupData.yy or "",
-        leader = TeamInfo.currentGroupData.leader or "",
-        recruits = BG.Copy and BG.Copy(TeamInfo.currentGroupData.recruits) or {},
-        bindTime = GetServerTime(),
-    }
-    TeamInfo.currentGroupData.isBound = true
-    TeamInfo.currentGroupData.boundFB = targetFB
+    local staging = TeamInfo.stagingData
+    BiaoGe[targetFB].teamInfo = BiaoGe[targetFB].teamInfo or {}
+    local dest = BiaoGe[targetFB].teamInfo
+
+    if staging.yy and staging.yy ~= "" then
+        dest.yy = staging.yy
+    end
+    if staging.leader and staging.leader ~= "" then
+        dest.leader = staging.leader
+    end
+    if staging.recruits and #staging.recruits > 0 then
+        dest.recruits = BG.Copy and BG.Copy(staging.recruits) or staging.recruits
+    end
+    dest.bindTime = GetServerTime()
+
+    staging.isBound = true
+    staging.boundFB = targetFB
+
+    -- 反向补全：若副本有 yy 而暂存区为空，同步至暂存区
+    if (not staging.yy or staging.yy == "") and (dest.yy and dest.yy ~= "") then
+        staging.yy = dest.yy
+    end
 
     local fbShort = BG.GetFBinfo and BG.GetFBinfo(targetFB, "shortName") or targetFB
-    DEFAULT_CHAT_FRAME:AddMessage("|cff00BFFF[BGLite]|r " .. string.format(L["已将当前团队招募语与语音频道成功绑定至 <%s> 表格！"], fbShort))
+    DEFAULT_CHAT_FRAME:AddMessage("|cff00BFFF[BGLite]|r " .. string.format(L["已将当前队伍暂存信息成功绑定至 <%s> 副本！"], fbShort))
     if BG.PlaySound then BG.PlaySound(1) end
     TeamInfo.UpdateUI()
 end
+TeamInfo.BindCurrentGroupToFB = TeamInfo.BindStagingToFB -- 保持兼容别名
 
 -- 记录一条通告（自动去重、容量管理，并同步到绑定副本）
 function TeamInfo.AddRecruitEntry(channel, text, customTime, FB)
@@ -681,7 +705,63 @@ function TeamInfo.OnGroupUpdate(forceScan)
         end
     end
 
-    -- 自动进本检测：若进入了团队副本且尚未绑定，则自动绑定到对应副本
+    -- 1. 扫描集结号活动 (优先于进本绑定)
+    local title, comment = FetchFromMeetingHorn(leaderName or "")
+    if title or comment then
+        local fullText = ""
+        if title and title ~= "" then
+            fullText = "《" .. title .. "》 "
+        end
+        if comment and comment ~= "" then
+            fullText = fullText .. comment
+        end
+        if fullText ~= "" then
+            local added = TeamInfo.AddRecruitEntry(L["集结号"], fullText)
+            TeamInfo.Log(string.format(L["【集结号】成功抓取活动: %s"], fullText), "00FF00")
+            local extractedYY = ExtractYYFromText(fullText)
+            if extractedYY and (not data.yy or data.yy == "") then
+                TeamInfo.SetYY(extractedYY)
+            end
+        end
+    else
+        if forceScan then
+            TeamInfo.Log(L["【集结号】未检索到当前团长发布的有效活动"], "AAAAAA")
+        end
+    end
+
+    -- 2. 扫描世界频道/集结号MHH近期缓存 (多级容错匹配团长名字)
+    local cachedRecruit = nil
+    if cleanLeader ~= "" then
+        if WorldRecruitCache[cleanLeader] then
+            cachedRecruit = WorldRecruitCache[cleanLeader]
+        elseif leaderName and WorldRecruitCache[leaderName] then
+            cachedRecruit = WorldRecruitCache[leaderName]
+        else
+            for name, item in pairs(WorldRecruitCache) do
+                if IsSamePlayer(name, cleanLeader) then
+                    cachedRecruit = item
+                    break
+                end
+            end
+        end
+    end
+
+    if cachedRecruit then
+        local timeStr = date("%H:%M:%S", cachedRecruit.time)
+        local channelName = cachedRecruit.isMHH and L["集结号"] or L["世界频道"]
+        local added = TeamInfo.AddRecruitEntry(channelName, cachedRecruit.msg, timeStr)
+        TeamInfo.Log(string.format(L["【世界频道缓存】匹配到团长喊话: %s"], cachedRecruit.msg), "00FF00")
+        local extractedYY = ExtractYYFromText(cachedRecruit.msg)
+        if extractedYY and (not data.yy or data.yy == "") then
+            TeamInfo.SetYY(extractedYY)
+        end
+    else
+        if forceScan then
+            TeamInfo.Log(L["【世界频道缓存】近 15 分钟内未发现该团长的开团喊话"], "AAAAAA")
+        end
+    end
+
+    -- 3. 自动进本检测与绑定：进入副本时自动绑定，并把外面捕获的频道号与通告无缝写入该副本
     local currentFBKey = nil
     if BG and BG.FB2 then
         currentFBKey = BG.FB2
@@ -697,47 +777,16 @@ function TeamInfo.OnGroupUpdate(forceScan)
 
     if currentFBKey and currentFBKey ~= "" then
         if not data.isBound or data.boundFB ~= currentFBKey then
-            TeamInfo.Log(string.format(L["检测到已进入副本 <%s>，正在执行自动绑定..."], currentFBKey), "00BFFF")
+            TeamInfo.Log(string.format(L["检测到已进入副本 <%s>，正在执行自动绑定并带入语音与招募通告..."], currentFBKey), "00BFFF")
             TeamInfo.BindCurrentGroupToFB(currentFBKey)
-        end
-    end
-
-    -- 1. 扫描集结号
-    local title, comment = FetchFromMeetingHorn(leaderName or "")
-    if title or comment then
-        local fullText = ""
-        if title and title ~= "" then
-            fullText = "《" .. title .. "》 "
-        end
-        if comment and comment ~= "" then
-            fullText = fullText .. comment
-        end
-        if fullText ~= "" then
-            local added = TeamInfo.AddRecruitEntry(L["集结号"], fullText)
-            TeamInfo.Log(string.format(L["【集结号】成功抓取活动: %s"], fullText), "00FF00")
-            -- if added then
-            --     DEFAULT_CHAT_FRAME:AddMessage("|cff00BFFF[BGLite]|r " .. L["已自动从集结号捕获团队招募: "] .. "|cff00FF00" .. fullText .. "|r")
-            -- end
-        end
-    else
-        if forceScan then
-            TeamInfo.Log(L["【集结号】未检索到当前团长发布的有效活动"], "AAAAAA")
-        end
-    end
-
-    -- 2. 扫描世界频道/集结号MHH近期缓存
-    if cleanLeader ~= "" and WorldRecruitCache[cleanLeader] then
-        local item = WorldRecruitCache[cleanLeader]
-        local timeStr = date("%H:%M:%S", item.time)
-        local channelName = item.isMHH and L["集结号"] or L["世界频道"]
-        local added = TeamInfo.AddRecruitEntry(channelName, item.msg, timeStr)
-        TeamInfo.Log(string.format(L["【世界频道缓存】匹配到团长喊话: %s"], item.msg), "00FF00")
-        -- if added then
-        --     DEFAULT_CHAT_FRAME:AddMessage("|cff00BFFF[BGLite]|r " .. L["已自动捕获团长招募: "] .. "|cff00FF00" .. item.msg .. "|r")
-        -- end
-    else
-        if forceScan then
-            TeamInfo.Log(L["【世界频道缓存】近 15 分钟内未发现该团长的开团喊话"], "AAAAAA")
+        else
+            -- 若已标记绑定，但副本里的 yy 为空而当前队伍有 yy，立即补全写入
+            if BiaoGe and BiaoGe[currentFBKey] and BiaoGe[currentFBKey].teamInfo then
+                local fbTeam = BiaoGe[currentFBKey].teamInfo
+                if (not fbTeam.yy or fbTeam.yy == "") and (data.yy and data.yy ~= "") then
+                    fbTeam.yy = data.yy
+                end
+            end
         end
     end
 
@@ -763,10 +812,12 @@ local function IsValidRecruitOrRuleMessage(msg)
     if ExtractYYFromText(msg) then return true end
     if ContainsTitanKeyword(msg) then return true end
 
-    -- 补充开团规则关键词
+    -- 补充开团规则与小游戏结果关键词
     local RULE_EXTRA_KEYWORDS = {
         "规则", "起拍", "罚款", "补贴", "补助", "打手", "考核", "合剂", "分金", "听指挥",
         "不分金", "灭团", "清buff", "消灭", "装备起", "包团", "降价", "退组",
+        -- 团队小游戏与掷骰结果关键词
+        "团队小游戏", "骰子大比拼", "骰子小游戏", "最佳手气王", "骰子结算", "冠军手气", "亚军手气",
     }
     for _, kw in ipairs(RULE_EXTRA_KEYWORDS) do
         if msg:find(kw, 1, true) then
@@ -784,6 +835,8 @@ eventFrame:RegisterEvent("CHAT_MSG_YELL")
 eventFrame:RegisterEvent("CHAT_MSG_RAID_WARNING")
 eventFrame:RegisterEvent("CHAT_MSG_RAID")
 eventFrame:RegisterEvent("CHAT_MSG_RAID_LEADER")
+eventFrame:RegisterEvent("CHAT_MSG_PARTY")
+eventFrame:RegisterEvent("CHAT_MSG_PARTY_LEADER")
 eventFrame:RegisterEvent("CHAT_MSG_WHISPER")
 eventFrame:RegisterEvent("GROUP_JOINED")
 eventFrame:RegisterEvent("GROUP_LEFT")
@@ -860,6 +913,8 @@ eventFrame:SetScript("OnEvent", function(self, event, msg, sender, ...)
                 channelTag = L["团队警告"]
             elseif event == "CHAT_MSG_WHISPER" then
                 channelTag = L["密语"]
+            elseif event == "CHAT_MSG_PARTY" or event == "CHAT_MSG_PARTY_LEADER" then
+                channelTag = L["小队频道"]
             end
             TeamInfo.AddRecruitEntry(channelTag, msg)
         end
@@ -922,7 +977,7 @@ function TeamInfo.CreateUI()
         GameTooltip:AddLine(L["功能特性："], 0, 0.9, 1)
         GameTooltip:AddLine(L["自动捕获集结号、世界喊话与开团规则，支持语音频道一键复制及副本账单自动绑定。"], 0.85, 0.85, 0.85, true)
         GameTooltip:AddLine(" ")
-        GameTooltip:AddLine(L["【开发调试中】如遇任何异常或有优化建议，欢迎前往 语音频道(DD): 434056 交流反馈！"], 0.2, 1, 0.6, true)
+        GameTooltip:AddLine(L["如遇任何异常或有优化建议，欢迎前往 语音频道(DD): 434056 交流反馈！"], 0.2, 1, 0.6, true)
         GameTooltip:Show()
     end)
     topBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
@@ -1046,14 +1101,20 @@ function TeamInfo.CreateUI()
     btnClear:SetPoint("TOPRIGHT", f, "TOPRIGHT", -14, -80)
     btnClear:SetText("|cffFF5555" .. L["清空"] .. "|r")
     btnClear:SetScript("OnClick", function()
-        TeamInfo.ClearTeamInfo()
-        if BG.PlaySound then BG.PlaySound(1) end
+        TeamInfo.ClearCurrentCard()
     end)
     btnClear:SetScript("OnEnter", function(self)
+        local state, _, currentFB = TeamInfo.GetCardState()
         GameTooltip:SetOwner(self, "ANCHOR_TOPLEFT", 0, 0)
         GameTooltip:ClearLines()
-        GameTooltip:AddLine(L["清空团队信息"], 1, 1, 1)
-        GameTooltip:AddLine(L["一键清空当前面板记录的语音频道、招募喊话与开团规则。"], 1, 0.82, 0, true)
+        if state == 1 then
+            GameTooltip:AddLine(L["清空队伍暂存区"], 1, 0.3, 0.3)
+            GameTooltip:AddLine(L["清空当前尚未绑定的队伍喊话与语音暂存记录。"], 1, 0.82, 0, true)
+        else
+            local fbShort = BG.GetFBinfo and BG.GetFBinfo(currentFB, "shortName") or currentFB
+            GameTooltip:AddLine(string.format(L["清空 <%s> 团队信息"], fbShort), 1, 0.3, 0.3)
+            GameTooltip:AddLine(L["仅清空当前副本绑定的团队信息存档，绝不影响当前队伍暂存区。"], 1, 0.82, 0, true)
+        end
         GameTooltip:Show()
     end)
     btnClear:SetScript("OnLeave", function() GameTooltip:Hide() end)
@@ -1121,13 +1182,14 @@ function TeamInfo.UpdateUI()
     f:SetHeight(h)
 
     if state == 1 then
-        -- 状态 1：进本前 / 组队未绑定态 (翠绿边框)
+        -- 状态 1：进本前 / 队伍独立暂存态 (翠绿边框)
         f:SetBackdropBorderColor(0.0, 1.0, 0.4, 0.95)
-        f.statusTag:SetText("|cff00FF66[当前队伍(未绑定)]|r")
+        f.statusTag:SetText("|cff00FF66[" .. L["队伍暂存区(未绑定)"] .. "]|r")
         if f.btnBind then
             f.btnBind:Show()
             f.btnBind:ClearAllPoints()
             f.btnBind:SetPoint("TOPLEFT", 12, -80)
+            f.btnBind:SetText("|cffFF9900" .. L["绑定开团"] .. "|r")
         end
         if f.btnScan then
             f.btnScan:Show()
@@ -1136,7 +1198,7 @@ function TeamInfo.UpdateUI()
         end
         if f.btnClear then f.btnClear:Show() end
     elseif state == 2 then
-        -- 状态 2：已进本 / 表格已绑定态 (亮蓝边框)
+        -- 状态 2：已进本 / 副本已绑定态 (亮蓝边框)
         f:SetBackdropBorderColor(0.2, 0.8, 1.0, 0.95)
         f.statusTag:SetText(string.format("|cff00BFFF[%s已绑定]|r", fbShort))
         if f.btnBind then f.btnBind:Hide() end
@@ -1147,7 +1209,7 @@ function TeamInfo.UpdateUI()
         end
         if f.btnClear then f.btnClear:Show() end
     else
-        -- 状态 3：单人 / 历史存档态 (暗灰边框)
+        -- 状态 3：单人 / 副本绑定存档态 (暗灰边框)
         f:SetBackdropBorderColor(0.5, 0.5, 0.5, 0.7)
         f.statusTag:SetText(string.format("|cff888888[%s存档]|r", fbShort))
         if f.btnBind then f.btnBind:Hide() end
@@ -1293,60 +1355,79 @@ function TeamInfo.UpdateUI()
 end
 
 -- 11. 清空团队信息 (副本持久化存档 + 内存实时队伍通告缓存)
-function TeamInfo.ClearTeamInfo(targetFB)
+-- 11. 清空副本绑定的团队信息 (与副本完全捆绑，绝不误伤独立暂存区！)
+function TeamInfo.ClearFBBinding(targetFB)
     InitDataPersistence()
     targetFB = targetFB or GetCurrentFB()
 
-    -- 1. 清空对应副本持久化存档
+    -- 1. 仅清空该副本绑定存档
     if targetFB and BiaoGe and BiaoGe[targetFB] then
         BiaoGe[targetFB].teamInfo = nil
     end
 
-    -- 2. 清空当前活跃队伍实时通告与语音缓存
-    if TeamInfo.currentGroupData then
-        TeamInfo.currentGroupData.yy = ""
-        TeamInfo.currentGroupData.recruits = {}
-        TeamInfo.currentGroupData.isBound = false
-        TeamInfo.currentGroupData.boundFB = nil
-    end
-    if BiaoGe and BiaoGe.currentGroupData then
-        BiaoGe.currentGroupData.yy = ""
-        BiaoGe.currentGroupData.recruits = {}
-        BiaoGe.currentGroupData.isBound = false
-        BiaoGe.currentGroupData.boundFB = nil
+    -- 2. 若暂存区当前已绑定到该副本，解除绑定状态（恢复为未绑定暂存态，保留暂存区内容！）
+    local staging = TeamInfo.stagingData
+    if staging and staging.boundFB == targetFB then
+        staging.isBound = false
+        staging.boundFB = nil
     end
 
-    -- 3. 若当前不在队伍/团队中，清空团长名字
-    if not IsInGroup() and not IsInRaid() then
-        if TeamInfo.currentGroupData then TeamInfo.currentGroupData.leader = "" end
-        if BiaoGe and BiaoGe.currentGroupData then BiaoGe.currentGroupData.leader = "" end
+    if TeamInfo.UpdateUI then
+        TeamInfo.UpdateUI()
     end
+end
+TeamInfo.ClearTeamInfo = TeamInfo.ClearFBBinding -- 保持向后兼容
 
-    -- 4. 清理输入框与当前界面临时显示
+-- 清空全局独立暂存区
+function TeamInfo.ClearStaging()
+    InitDataPersistence()
+    local staging = TeamInfo.stagingData
+    if staging then
+        staging.yy = ""
+        staging.recruits = {}
+        staging.isBound = false
+        staging.boundFB = nil
+        if not IsInGroup() and not IsInRaid() then
+            staging.leader = ""
+        end
+    end
     local f = TeamInfo.sideFrame
-    if f then
-        if f.yyEdit and not f.yyEdit:HasFocus() then
-            f.yyEdit:SetText("")
-        end
-        if f.leaderText and (not IsInGroup() and not IsInRaid()) then
-            f.leaderText:SetText("")
-        end
+    if f and f.yyEdit and not f.yyEdit:HasFocus() then
+        f.yyEdit:SetText("")
     end
-
-    -- 5. 即时刷新右侧抽屉 UI
     if TeamInfo.UpdateUI then
         TeamInfo.UpdateUI()
     end
 end
 
--- Hook 清空表格 (ClearBiaoGe)：整表全清或手动清空时，同步清空团队信息
-if BG and BG.ClearBiaoGe then
-    hooksecurefunc(BG, "ClearBiaoGe", function(clearType, FB)
-        if clearType == "biaoge" then
-            TeamInfo.ClearTeamInfo(FB)
-        end
-    end)
+-- 智能清空当前卡片 (由右上角【清空】按钮调用)
+function TeamInfo.ClearCurrentCard()
+    local state, data, currentFB = TeamInfo.GetCardState()
+    if state == 1 then
+        TeamInfo.ClearStaging()
+        DEFAULT_CHAT_FRAME:AddMessage("|cff00BFFF[BGLite]|r " .. L["已清空当前队伍暂存区记录"])
+    else
+        TeamInfo.ClearFBBinding(currentFB)
+        local fbShort = BG.GetFBinfo and BG.GetFBinfo(currentFB, "shortName") or currentFB
+        DEFAULT_CHAT_FRAME:AddMessage("|cff00BFFF[BGLite]|r " .. string.format(L["已清空 <%s> 副本绑定的团队信息"], fbShort))
+    end
+    if BG.PlaySound then BG.PlaySound(1) end
 end
+
+-- 仅在玩家手动点击确认【清空表格】弹窗时，才联动清空团队信息 (杜绝进本自动清空表格误杀外面的队伍缓存)
+local function HookManualClearBiaoGe()
+    if StaticPopupDialogs and StaticPopupDialogs["QINGKONGBIAOGE"] and not StaticPopupDialogs["QINGKONGBIAOGE"].hasHookedTeamInfo then
+        StaticPopupDialogs["QINGKONGBIAOGE"].hasHookedTeamInfo = true
+        local orig_OnAccept = StaticPopupDialogs["QINGKONGBIAOGE"].OnAccept
+        StaticPopupDialogs["QINGKONGBIAOGE"].OnAccept = function(...)
+            TeamInfo.ClearTeamInfo(BG and BG.FB1)
+            if orig_OnAccept then
+                return orig_OnAccept(...)
+            end
+        end
+    end
+end
+HookManualClearBiaoGe()
 
 -- 12. 全局 Tab / 副本切换与主界面常驻生命周期联动 (保持右侧框体与顶部按钮始终存在)
 local function SyncTeamInfoStateWithMainFrame()
@@ -1394,6 +1475,7 @@ initFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
 initFrame:RegisterEvent("PLAYER_LOGIN")
 initFrame:SetScript("OnEvent", function()
     C_Timer.After(0.5, function()
+        HookManualClearBiaoGe()
         if BG and BG.MainFrame and not TeamInfo.sideFrame then
             TeamInfo.CreateUI()
         end

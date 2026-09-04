@@ -45,15 +45,7 @@ function ns.InitRaidGameDB()
     if db.autoAnnounce == nil then db.autoAnnounce = true end
     if db.sound == nil then db.sound = true end
     if db.startMessage == nil or db.startMessage == "" then
-        db.startMessage = "【团队小游戏】骰子大比拼开始啦！规则：[{rule}]，限时 {time} 秒！请点击骰子按钮或输入 /roll 100 参与！{rule_tip}"
-    end
-
-    -- 一次性自愈清洗历史可能残留的 Unicode Emoji 乱码方块与默认选项迁移
-    if BG.Once then
-        BG.Once("RaidGameCleanEmoji_v110", 2026090401, function()
-            db.startMessage = "【团队小游戏】骰子大比拼开始啦！规则：[{rule}]，限时 {time} 秒！请点击骰子按钮或输入 /roll 100 参与！{rule_tip}"
-            db.disallowMultiple = false
-        end)
+        db.startMessage = "【团队小游戏】骰子大比拼开始啦！规则：[{rule}]，限时 {time} 秒！请点击骰子按钮或输入 /roll 参与！{rule_tip}"
     end
 end
 
@@ -186,6 +178,11 @@ end
 -- 5. 团队发言通报模块 (Announce Engine)
 --------------------------------------------------------------------------------
 function RaidGame.AnnounceResults()
+    if not IsLeaderOrAssistant() then
+        DEFAULT_CHAT_FRAME:AddMessage("|cffff2020[BGLite 团队小游戏] 仅团长或助理有权限向团队通报结果。|r")
+        return
+    end
+
     local winners, disqList, validList = RaidGame.CalculateResults()
     local channel = (IsInRaid and IsInRaid()) and "RAID" or (IsInGroup and IsInGroup() and "PARTY" or "SAY")
     local totalParticipants = #validList + #disqList
@@ -213,6 +210,32 @@ function RaidGame.AnnounceResults()
             tinsert(names, d.name .. "(" .. d.roll .. "点/投" .. d.count .. "次)")
         end
         SendChatMessage("[提示] 违规取消资格名单：" .. table.concat(names, "、") .. " (因多次R点已被剔除资格，名额顺延)", channel)
+    end
+
+    -- 主动将结算结果录入右侧抽屉「团队信息」
+    if ns.TeamInfo and ns.TeamInfo.AddRecruitEntry then
+        local summaryText
+        if totalParticipants == 0 then
+            summaryText = "【团队小游戏】骰子比拼结束，本次无人参与投掷。"
+        else
+            local winnerDetails = {}
+            if #winners > 0 then
+                for _, w in ipairs(winners) do
+                    tinsert(winnerDetails, string.format("%s %s(%d点)", w.title, w.entry.name, w.entry.roll))
+                end
+            else
+                tinsert(winnerDetails, "无有效胜出者")
+            end
+            summaryText = string.format("【团队小游戏】骰子结算 [%s] 共%d人参与：%s", ruleName, totalParticipants, table.concat(winnerDetails, "、"))
+            if #disqList > 0 then
+                local dNames = {}
+                for _, d in ipairs(disqList) do
+                    tinsert(dNames, d.name)
+                end
+                summaryText = summaryText .. " (违规剔除: " .. table.concat(dNames, "、") .. ")"
+            end
+        end
+        ns.TeamInfo.AddRecruitEntry(L["团队小游戏"] or "团队小游戏", summaryText)
     end
 end
 
@@ -272,7 +295,7 @@ function RaidGame.StartGame()
 
     -- 1. 团队聊天发言开场白
     local ruleName = GetModeName(currentGame.mode)
-    local msg = db.startMessage or "【团队小游戏】骰子大比拼开始啦！规则：[{rule}]，限时 {time} 秒！请点击骰子按钮或输入 /roll 100 参与！{rule_tip}"
+    local msg = db.startMessage or "【团队小游戏】骰子大比拼开始啦！规则：[{rule}]，限时 {time} 秒！请点击骰子按钮或输入 /roll 参与！{rule_tip}"
     local ruleTip = currentGame.disallowMultiple and "(严禁多次R点，多次参与直接取消资格)" or "(仅首次R点成绩有效)"
     if msg:find("{rule_tip}") then
         msg = msg:gsub("{rule_tip}", ruleTip)
@@ -343,10 +366,15 @@ function RaidGame.EndGame(isAutoTimeout)
     end
 
     RaidGame.UpdateUIStatus()
-    RaidGame.UpdatePopupTimer()
+    RaidGame.StartAutoClosePopup(5)
 end
 
 function RaidGame.CancelGame()
+    if not IsLeaderOrAssistant() then
+        DEFAULT_CHAT_FRAME:AddMessage("|cffff2020[BGLite 团队小游戏] 仅团长或助理有权限中止团队小游戏。|r")
+        return
+    end
+
     if not currentGame.active then return end
     currentGame.active = false
 
@@ -359,7 +387,7 @@ function RaidGame.CancelGame()
     SendChatMessage("【团队小游戏】团长已中止本次骰子小游戏。", channel)
 
     RaidGame.UpdateUIStatus()
-    RaidGame.UpdatePopupTimer()
+    RaidGame.CancelAutoClosePopup()
     if RaidGame.dicePopup then
         RaidGame.dicePopup:Hide()
     end
@@ -370,6 +398,10 @@ end
 --------------------------------------------------------------------------------
 commFrame:RegisterEvent("CHAT_MSG_SYSTEM")
 commFrame:RegisterEvent("CHAT_MSG_ADDON")
+commFrame:RegisterEvent("GROUP_ROSTER_UPDATE")
+commFrame:RegisterEvent("RAID_ROSTER_UPDATE")
+commFrame:RegisterEvent("PARTY_LEADER_CHANGED")
+commFrame:RegisterEvent("PLAYER_ROLES_ASSIGNED")
 
 commFrame:SetScript("OnEvent", function(self, event, ...)
     if event == "CHAT_MSG_SYSTEM" then
@@ -477,15 +509,14 @@ commFrame:SetScript("OnEvent", function(self, event, ...)
 
         elseif cmd == "END" then
             currentGame.active = false
-            RaidGame.UpdatePopupTimer()
-            if RaidGame.dicePopup and RaidGame.dicePopup:IsShown() then
-                RaidGame.dicePopup.rollBtn:Disable()
-                RaidGame.dicePopup.rollBtn:SetText(L["已截止"])
-            end
+            RaidGame.StartAutoClosePopup(5)
         elseif cmd == "CANCEL" then
             currentGame.active = false
+            RaidGame.CancelAutoClosePopup()
             if RaidGame.dicePopup then RaidGame.dicePopup:Hide() end
         end
+    elseif event == "GROUP_ROSTER_UPDATE" or event == "RAID_ROSTER_UPDATE" or event == "PARTY_LEADER_CHANGED" or event == "PLAYER_ROLES_ASSIGNED" then
+        RaidGame.UpdateUIStatus()
     end
 end)
 
@@ -530,8 +561,13 @@ function RaidGame.InitUI(parent)
     btnMode:SetPoint("LEFT", modeLabel, "RIGHT", 6, 0)
     btnMode:SetText(GetModeName(db.mode))
     bar.btnMode = btnMode
+    btnMode:SetMotionScriptsWhileDisabled(true)
 
     btnMode:SetScript("OnClick", function(self)
+        if not IsLeaderOrAssistant() then
+            DEFAULT_CHAT_FRAME:AddMessage("|cffff2020[BGLite 团队小游戏] 仅团长或助理可更改胜出规则。|r")
+            return
+        end
         local menu = {}
         for _, m in ipairs(RaidGame.MODES) do
             tinsert(menu, {
@@ -552,6 +588,15 @@ function RaidGame.InitUI(parent)
             EasyMenu(menu, dropDown, self, 0, 0, "MENU", 2)
         end
     end)
+    btnMode:SetScript("OnEnter", function(self)
+        if self.permissionTip then
+            GameTooltip:SetOwner(self, "ANCHOR_TOP")
+            GameTooltip:ClearLines()
+            GameTooltip:AddLine(self.permissionTip, 1, 0.2, 0.2, true)
+            GameTooltip:Show()
+        end
+    end)
+    btnMode:SetScript("OnLeave", GameTooltip_Hide)
 
     -- 倒计时时长配置
     local timeLabel = bar:CreateFontString(nil, "OVERLAY")
@@ -564,8 +609,13 @@ function RaidGame.InitUI(parent)
     btnTime:SetPoint("LEFT", timeLabel, "RIGHT", 5, 0)
     btnTime:SetText(tostring(db.countdown or 30) .. "秒")
     bar.btnTime = btnTime
+    btnTime:SetMotionScriptsWhileDisabled(true)
 
     btnTime:SetScript("OnClick", function(self)
+        if not IsLeaderOrAssistant() then
+            DEFAULT_CHAT_FRAME:AddMessage("|cffff2020[BGLite 团队小游戏] 仅团长或助理可更改限时。|r")
+            return
+        end
         local menu = {}
         local durations = { 15, 20, 30, 45, 60 }
         for _, dur in ipairs(durations) do
@@ -587,6 +637,15 @@ function RaidGame.InitUI(parent)
             EasyMenu(menu, dropDown, self, 0, 0, "MENU", 2)
         end
     end)
+    btnTime:SetScript("OnEnter", function(self)
+        if self.permissionTip then
+            GameTooltip:SetOwner(self, "ANCHOR_TOP")
+            GameTooltip:ClearLines()
+            GameTooltip:AddLine(self.permissionTip, 1, 0.2, 0.2, true)
+            GameTooltip:Show()
+        end
+    end)
+    btnTime:SetScript("OnLeave", GameTooltip_Hide)
 
     -- 禁止多次投掷复选框 (默认不勾选)
     local cbDisallow = CreateFrame("CheckButton", nil, bar, "UICheckButtonTemplate")
@@ -595,18 +654,30 @@ function RaidGame.InitUI(parent)
     cbDisallow.text = cbDisallow:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
     cbDisallow.text:SetPoint("LEFT", cbDisallow, "RIGHT", 3, 0)
     cbDisallow.text:SetFont(BIAOGE_TEXT_FONT, 12, "OUTLINE")
-    cbDisallow.text:SetText(L["禁止多次R点 (多次剔除资格)"])
+    cbDisallow.text:SetText(L["禁止多次R点 (未勾选默认只取首次)"])
     cbDisallow:SetChecked(db.disallowMultiple == true)
     cbDisallow:SetHitRectInsets(-2, -cbDisallow.text:GetStringWidth() - 4, -2, -2)
+    bar.cbDisallow = cbDisallow
     cbDisallow:SetScript("OnClick", function(self)
+        if not IsLeaderOrAssistant() then
+            self:SetChecked(db.disallowMultiple == true)
+            DEFAULT_CHAT_FRAME:AddMessage("|cffff2020[BGLite 团队小游戏] 仅团长或助理可配置规则。|r")
+            return
+        end
         BiaoGe.RaidGame.disallowMultiple = self:GetChecked()
         BG.PlaySound(1)
     end)
+    cbDisallow:SetMotionScriptsWhileDisabled(true)
     cbDisallow:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_TOPLEFT", 0, 0)
         GameTooltip:ClearLines()
-        GameTooltip:AddLine(L["禁止多次参与 (公平防作弊)"], 1, 1, 1, true)
-        GameTooltip:AddLine(L["勾选后，若有玩家在一次游戏中投掷了2次或以上，直接取消其获胜资格，胜出名额严格按规则顺延给下一位合法玩家，并在通报中公示违规名单。"], 1, 0.82, 0, true)
+        if self.permissionTip then
+            GameTooltip:AddLine(self.permissionTip, 1, 0.2, 0.2, true)
+        end
+        GameTooltip:AddLine(L["多次R点规则设置"], 1, 1, 1, true)
+        GameTooltip:AddLine(L["【未勾选 (默认)】：不限制重复投掷，系统自动仅采纳每位玩家的第一次R点成绩，后续投掷全部忽略。"], 0.2, 0.9, 1, true)
+        GameTooltip:AddLine(" ")
+        GameTooltip:AddLine(L["【勾选此项 (严格防作弊)】：若有玩家投掷了 2 次或以上，直接取消其获胜资格，胜出名额严格按规则顺延，并在通报中公示违规名单。"], 1, 0.82, 0, true)
         GameTooltip:Show()
     end)
     cbDisallow:SetScript("OnLeave", GameTooltip_Hide)
@@ -616,7 +687,13 @@ function RaidGame.InitUI(parent)
     btnEditMsg:SetSize(86, 20)
     btnEditMsg:SetPoint("LEFT", cbDisallow.text, "RIGHT", 14, 0)
     btnEditMsg:SetText(L["编辑开场语"])
+    bar.btnEditMsg = btnEditMsg
+    btnEditMsg:SetMotionScriptsWhileDisabled(true)
     btnEditMsg:SetScript("OnClick", function()
+        if not IsLeaderOrAssistant() then
+            DEFAULT_CHAT_FRAME:AddMessage("|cffff2020[BGLite 团队小游戏] 仅团长或助理可配置开场语。|r")
+            return
+        end
         RaidGame.OpenStartMessageEditor()
     end)
 
@@ -676,8 +753,13 @@ function RaidGame.InitUI(parent)
     btnAction:SetPoint("TOPLEFT", 685, -14)
     btnAction:SetText(BG.STC_g1("发起游戏"))
     bar.btnAction = btnAction
+    btnAction:SetMotionScriptsWhileDisabled(true)
 
     btnAction:SetScript("OnClick", function()
+        if not IsLeaderOrAssistant() then
+            DEFAULT_CHAT_FRAME:AddMessage("|cffff2020[BGLite 团队小游戏] 仅团长或助理有权限发起或中止团队小游戏。|r")
+            return
+        end
         if currentGame.active then
             RaidGame.CancelGame()
         else
@@ -685,6 +767,15 @@ function RaidGame.InitUI(parent)
         end
         BG.PlaySound(1)
     end)
+    btnAction:SetScript("OnEnter", function(self)
+        if self.permissionTip then
+            GameTooltip:SetOwner(self, "ANCHOR_TOP")
+            GameTooltip:ClearLines()
+            GameTooltip:AddLine(self.permissionTip, 1, 0.2, 0.2, true)
+            GameTooltip:Show()
+        end
+    end)
+    btnAction:SetScript("OnLeave", GameTooltip_Hide)
 
     -- 手动呼出自己弹窗按钮
     local btnMyDice = BG.CreateButton(bar)
@@ -702,10 +793,25 @@ function RaidGame.InitUI(parent)
     btnAnnounce:SetPoint("TOPLEFT", 785, -14)
     btnAnnounce:SetText(BG.STC_y1("团队通报"))
     bar.btnAnnounce = btnAnnounce
+    btnAnnounce:SetMotionScriptsWhileDisabled(true)
+
     btnAnnounce:SetScript("OnClick", function()
+        if not IsLeaderOrAssistant() then
+            DEFAULT_CHAT_FRAME:AddMessage("|cffff2020[BGLite 团队小游戏] 仅团长或助理有权限向团队通报结果。|r")
+            return
+        end
         RaidGame.AnnounceResults()
         BG.PlaySound(1)
     end)
+    btnAnnounce:SetScript("OnEnter", function(self)
+        if self.permissionTip then
+            GameTooltip:SetOwner(self, "ANCHOR_TOP")
+            GameTooltip:ClearLines()
+            GameTooltip:AddLine(self.permissionTip, 1, 0.2, 0.2, true)
+            GameTooltip:Show()
+        end
+    end)
+    btnAnnounce:SetScript("OnLeave", GameTooltip_Hide)
 
     -- 完整排行榜按钮
     local btnRank = BG.CreateButton(bar)
@@ -729,14 +835,18 @@ function RaidGame.InitUI(parent)
         GameTooltip:SetOwner(self, "ANCHOR_TOPRIGHT")
         GameTooltip:ClearLines()
         GameTooltip:AddLine(BG.STC_g1("团队小游戏 (R点/骰子) 说明"), 1, 1, 1, true)
-        GameTooltip:AddLine("1. 团长或助理配置好胜出规则和限时后，点击【发起游戏】即可启动全团小游戏。", 1, 0.82, 0, true)
+        GameTooltip:AddLine("1. 团长或助理配置好胜出规则和限时后，点击【发起游戏】即可启动全团小游戏 (普通团员无发起权限)。", 1, 0.82, 0, true)
         GameTooltip:AddLine("2. 全团装有插件的成员将自动弹出【幸运掷骰】面板，点击按钮即可一键投掷。", 1, 0.82, 0, true)
         GameTooltip:AddLine("3. 若玩家关闭了弹窗，可输入命令 /bgroll 或 /bggame 重新呼出。", 1, 0.82, 0, true)
-        GameTooltip:AddLine("4. 未安装插件的队员直接在聊天框输入 /roll 100 同样会自动纳入统计与排名。", 1, 0.82, 0, true)
+        GameTooltip:AddLine("4. 未安装插件的队员直接在聊天框输入 /roll 同样会自动纳入统计与排名。", 1, 0.82, 0, true)
         GameTooltip:AddLine("5. 倒计时结束后自动截止，并自动在团队频道通报获奖名单。", 1, 0.82, 0, true)
         GameTooltip:Show()
     end)
     helpBtn:SetScript("OnLeave", GameTooltip_Hide)
+
+    bar:SetScript("OnShow", function()
+        RaidGame.UpdateUIStatus()
+    end)
 
     RaidGame.UpdateUIStatus()
 end
@@ -748,8 +858,18 @@ function RaidGame.UpdateUIStatus()
     local bar = RaidGame.bottomBar
     if not bar or not bar:IsVisible() then return end
 
+    local hasPermission = IsLeaderOrAssistant()
+
     if currentGame.active then
-        bar.btnAction:SetText(BG.STC_r1("中止游戏"))
+        if hasPermission then
+            bar.btnAction:Enable()
+            bar.btnAction:SetText(BG.STC_r1("中止游戏"))
+            bar.btnAction.permissionTip = nil
+        else
+            bar.btnAction:Disable()
+            bar.btnAction:SetText(BG.STC_dis("进行中"))
+            bar.btnAction.permissionTip = "|cffff2020仅团长或团队助理有权限中止团队小游戏|r"
+        end
         bar.statusTitle:SetText(BG.STC_w1("游戏状态: ") .. BG.STC_g1("正在进行中..."))
 
         local remain = math.max(0, math.ceil(currentGame.endTime - GetTime()))
@@ -763,11 +883,70 @@ function RaidGame.UpdateUIStatus()
             bar.pBar:SetStatusBarColor(0.2, 0.8, 1, 0.9)
         end
     else
-        bar.btnAction:SetText(BG.STC_g1("发起游戏"))
+        if hasPermission then
+            bar.btnAction:Enable()
+            bar.btnAction:SetText(BG.STC_g1("发起游戏"))
+            bar.btnAction.permissionTip = nil
+        else
+            bar.btnAction:Disable()
+            bar.btnAction:SetText(BG.STC_dis("发起游戏"))
+            bar.btnAction.permissionTip = "|cffff2020仅团长或团队助理有权限发起团队小游戏|r"
+        end
         bar.statusTitle:SetText(BG.STC_w1("游戏状态: ") .. BG.STC_dis("等待发起"))
         bar.pBar:SetValue(0)
         bar.pBarText:SetText("未在进行中")
         bar.pBar:SetStatusBarColor(0.3, 0.3, 0.3, 0.5)
+    end
+
+    -- 团队通报按钮联动
+    if bar.btnAnnounce then
+        if hasPermission then
+            bar.btnAnnounce:Enable()
+            bar.btnAnnounce:SetText(BG.STC_y1("团队通报"))
+            bar.btnAnnounce.permissionTip = nil
+        else
+            bar.btnAnnounce:Disable()
+            bar.btnAnnounce:SetText(BG.STC_dis("团队通报"))
+            bar.btnAnnounce.permissionTip = "|cffff2020仅团长或团队助理有权限向团队频道通报结果|r"
+        end
+    end
+
+    -- 规则模式、限时、防作弊配置选项联动
+    if bar.btnMode then
+        if hasPermission then
+            bar.btnMode:Enable()
+            bar.btnMode.permissionTip = nil
+        else
+            bar.btnMode:Disable()
+            bar.btnMode.permissionTip = "|cffff2020仅团长或团队助理有权限更改胜出规则|r"
+        end
+    end
+    if bar.btnTime then
+        if hasPermission then
+            bar.btnTime:Enable()
+            bar.btnTime.permissionTip = nil
+        else
+            bar.btnTime:Disable()
+            bar.btnTime.permissionTip = "|cffff2020仅团长或团队助理有权限更改限时|r"
+        end
+    end
+    if bar.cbDisallow then
+        if hasPermission then
+            bar.cbDisallow:Enable()
+            bar.cbDisallow.permissionTip = nil
+        else
+            bar.cbDisallow:Disable()
+            bar.cbDisallow.permissionTip = "|cffff2020仅团长或团队助理有权限更改防作弊选项|r"
+        end
+    end
+    if bar.btnEditMsg then
+        if hasPermission then
+            bar.btnEditMsg:Enable()
+            bar.btnEditMsg.permissionTip = nil
+        else
+            bar.btnEditMsg:Disable()
+            bar.btnEditMsg.permissionTip = "|cffff2020仅团长或团队助理有权限配置开场发言|r"
+        end
     end
 
     -- 统计参与人数与极值
@@ -886,16 +1065,64 @@ function RaidGame.CreateDicePopup()
             local eb = ChatEdit_GetActiveWindow and ChatEdit_GetActiveWindow() or ChatFrame1EditBox
             if eb then
                 local old = eb:GetText()
-                eb:SetText("/roll 100")
+                eb:SetText("/roll")
                 ChatEdit_SendText(eb, 0)
                 eb:SetText(old or "")
             end
+        end
+    end)
+
+    f:SetScript("OnHide", function()
+        RaidGame.CancelAutoClosePopup()
+    end)
+end
+
+function RaidGame.CancelAutoClosePopup()
+    if RaidGame.dicePopup then
+        local f = RaidGame.dicePopup
+        if f.autoCloseTicker then f.autoCloseTicker:Cancel(); f.autoCloseTicker = nil end
+        f.isClosing = false
+    end
+end
+
+function RaidGame.StartAutoClosePopup(duration)
+    duration = duration or 5
+    if not RaidGame.dicePopup or not RaidGame.dicePopup:IsShown() then return end
+    local f = RaidGame.dicePopup
+    f.isClosing = true
+
+    if f.autoCloseTicker then f.autoCloseTicker:Cancel(); f.autoCloseTicker = nil end
+
+    local closeEndTime = GetTime() + duration
+    f.timerBar:SetMinMaxValues(0, duration)
+    f.timerBar:SetValue(duration)
+    f.timerBar:SetStatusBarColor(1, 0.6, 0.1, 0.9)
+    f.timerBarText:SetText(string.format("已截止 (%d秒后自动关闭)", duration))
+    f.rollBtn:Disable()
+    f.rollBtn:SetText(L["已截止"])
+
+    f.autoCloseTicker = C_Timer.NewTicker(0.1, function()
+        if not f:IsShown() then
+            if f.autoCloseTicker then f.autoCloseTicker:Cancel(); f.autoCloseTicker = nil end
+            f.isClosing = false
+            return
+        end
+        local remain = closeEndTime - GetTime()
+        if remain <= 0 then
+            f.timerBar:SetValue(0)
+            if f.autoCloseTicker then f.autoCloseTicker:Cancel(); f.autoCloseTicker = nil end
+            f.isClosing = false
+            f:Hide()
+        else
+            f.timerBar:SetValue(remain)
+            f.timerBarText:SetText(string.format("已截止 (%d秒后自动关闭)", math.ceil(remain)))
         end
     end)
 end
 
 function RaidGame.ShowDicePopup(isStart)
     RaidGame.CreateDicePopup()
+    RaidGame.CancelAutoClosePopup()
     local f = RaidGame.dicePopup
 
     local ruleName = GetModeName(currentGame.mode)
@@ -945,6 +1172,7 @@ end
 function RaidGame.UpdatePopupTimer()
     if not RaidGame.dicePopup or not RaidGame.dicePopup:IsShown() then return end
     local f = RaidGame.dicePopup
+    if f.isClosing then return end
 
     if currentGame.active then
         local remain = math.max(0, math.ceil(currentGame.endTime - GetTime()))
@@ -1139,7 +1367,7 @@ end
 --------------------------------------------------------------------------------
 function RaidGame.OpenStartMessageEditor()
     local m = CreateFrame("Frame", "BG_DiceGameMsgEditorModal", UIParent, "BackdropTemplate")
-    m:SetSize(380, 190)
+    m:SetSize(460, 230)
     m:SetPoint("CENTER", UIParent, "CENTER", 0, 80)
     m:SetFrameStrata("DIALOG")
     m:SetBackdrop({
@@ -1149,48 +1377,77 @@ function RaidGame.OpenStartMessageEditor()
         insets = { left = 3, right = 3, top = 3, bottom = 3 },
     })
     m:SetBackdropColor(0.06, 0.06, 0.06, 0.98)
-    m:SetBackdropBorderColor(0.3, 0.8, 1, 1)
+    m:SetBackdropBorderColor(0.2, 0.7, 1, 1)
     m:EnableMouse(true)
 
     local title = m:CreateFontString(nil, "OVERLAY")
-    title:SetFont(BIAOGE_TEXT_FONT, 14, "OUTLINE")
-    title:SetPoint("TOP", 0, -12)
-    title:SetText(BG.STC_g1("自定义开场客套话"))
+    title:SetFont(BIAOGE_TEXT_FONT, 15, "OUTLINE")
+    title:SetPoint("TOP", 0, -14)
+    title:SetText(BG.STC_g1("自定义开场语"))
 
     local tip = m:CreateFontString(nil, "OVERLAY")
-    tip:SetFont(BIAOGE_TEXT_FONT, 11, "OUTLINE")
-    tip:SetPoint("TOP", 0, -32)
-    tip:SetText(BG.STC_dis("支持动态变量: {rule} 胜出规则, {time} 倒计时秒数"))
+    tip:SetFont(BIAOGE_TEXT_FONT, 12, "OUTLINE")
+    tip:SetPoint("TOP", 0, -36)
+    tip:SetText(BG.STC_dis("支持动态变量: {rule} 胜出规则, {time} 限时秒数, {rule_tip} 规则说明"))
 
-    local eb = CreateFrame("EditBox", nil, m, BG.editTemplate)
-    eb:SetSize(340, 48)
-    eb:SetPoint("TOP", 0, -56)
+    -- 多行输入框容器背景
+    local boxBg = CreateFrame("Frame", nil, m, "BackdropTemplate")
+    boxBg:SetSize(420, 86)
+    boxBg:SetPoint("TOP", 0, -58)
+    boxBg:SetBackdrop({
+        bgFile = "Interface/ChatFrame/ChatFrameBackground",
+        edgeFile = "Interface/Tooltips/UI-Tooltip-Border",
+        edgeSize = 12,
+        insets = { left = 2, right = 2, top = 2, bottom = 2 },
+    })
+    boxBg:SetBackdropColor(0.02, 0.02, 0.02, 0.95)
+    boxBg:SetBackdropBorderColor(0.35, 0.35, 0.35, 0.9)
+
+    local scroll = CreateFrame("ScrollFrame", "BG_DiceGameMsgScrollFrame", boxBg, "UIPanelScrollFrameTemplate")
+    scroll:SetPoint("TOPLEFT", 8, -6)
+    scroll:SetPoint("BOTTOMRIGHT", -26, 6)
+
+    local defaultMsg = "【团队小游戏】骰子大比拼开始啦！规则：[{rule}]，限时 {time} 秒！请点击骰子按钮或输入 /roll 参与！{rule_tip}"
+    local eb = CreateFrame("EditBox", nil, scroll)
+    eb:SetWidth(380)
     eb:SetMultiLine(true)
     eb:SetAutoFocus(true)
     eb:SetFont(BIAOGE_TEXT_FONT, 13, "OUTLINE")
-    eb:SetText(BiaoGe.RaidGame.startMessage or "")
+    eb:SetTextInsets(2, 2, 2, 2)
+    eb:SetText(BiaoGe.RaidGame.startMessage or defaultMsg)
+    scroll:SetScrollChild(eb)
+
+    eb:SetScript("OnEscapePressed", function() m:Hide() end)
+    boxBg:SetScript("OnMouseDown", function() eb:SetFocus() end)
+
+    -- 变量说明小提示
+    local varTip = m:CreateFontString(nil, "OVERLAY")
+    varTip:SetFont(BIAOGE_TEXT_FONT, 11, "OUTLINE")
+    varTip:SetPoint("TOPLEFT", boxBg, "BOTTOMLEFT", 2, -6)
+    varTip:SetText(BG.STC_w1("提示: ") .. BG.STC_dis("开场发言将直接发送至当前团队/小队频道。"))
 
     local btnSave = BG.CreateButton(m)
-    btnSave:SetSize(80, 24)
-    btnSave:SetPoint("BOTTOMLEFT", 60, 16)
-    btnSave:SetText(L["保存"])
+    btnSave:SetSize(90, 26)
+    btnSave:SetPoint("BOTTOMLEFT", 70, 16)
+    btnSave:SetText(BG.STC_g1("保存开场语"))
     btnSave:SetScript("OnClick", function()
         local text = eb:GetText():trim()
         if text ~= "" then
             BiaoGe.RaidGame.startMessage = text
         end
         m:Hide()
-        DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00[BGLite 团队小游戏] 开场发言已保存！|r")
+        DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00[BGLite 团队小游戏] 自定义开场语已保存！|r")
         BG.PlaySound(1)
     end)
 
     local btnReset = BG.CreateButton(m)
-    btnReset:SetSize(80, 24)
-    btnReset:SetPoint("BOTTOMRIGHT", -60, 16)
-    btnReset:SetText(L["恢复默认"])
+    btnReset:SetSize(90, 26)
+    btnReset:SetPoint("BOTTOMRIGHT", -70, 16)
+    btnReset:SetText("恢复默认")
     btnReset:SetScript("OnClick", function()
-        BiaoGe.RaidGame.startMessage = "【团队小游戏】骰子大比拼开始啦！规则：[{rule}]，限时 {time} 秒！请点击骰子按钮或输入 /roll 100 参与！(严禁多次R点)"
-        eb:SetText(BiaoGe.RaidGame.startMessage)
+        BiaoGe.RaidGame.startMessage = defaultMsg
+        eb:SetText(defaultMsg)
+        DEFAULT_CHAT_FRAME:AddMessage("|cff00BFFF[BGLite 团队小游戏] 已恢复默认开场语。|r")
         BG.PlaySound(1)
     end)
 
