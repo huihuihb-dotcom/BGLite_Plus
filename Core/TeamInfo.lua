@@ -96,36 +96,66 @@ local function IsAddonNoise(text)
     return false
 end
 
--- 清理集结号内部协议元数据（如缺职业、版本掩码、MHH尾缀），截断 WARRIOR / 职业列表之前的内容
+-- 强力清理集结号内部协议元数据（如版本掩码 4.80.4273.1、缺职业 WARRIOR、掩码 ._.0.000、~0,1,3 及 MHH@@ 尾缀）
 local function CleanMeetingHornRawText(text)
     if not text or text == "" then return "" end
 
-    -- 1. 截断职业列表或内部职业标识之前的协议串 (WARRIOR, PALADIN, HUNTER, ROGUE, PRIEST, DEATHKNIGHT, SHAMAN, MAGE, WARLOCK, DRUID)
-    local CLASS_TOKENS = {
-        "WARRIOR", "PALADIN", "HUNTER", "ROGUE", "PRIEST",
-        "DEATHKNIGHT", "SHAMAN", "MAGE", "WARLOCK", "DRUID",
+    local cutPos = nil
+
+    local patterns = {
+        "[%s%.~_]*[mM][hH][hH]@*",           -- MHH 或 MHH@@ 协议标记
+        "~%d+",                              -- ~0,1,3 路由标记
+        "~",                                 -- 单独的波浪号路由
+        "[%s%.~_]+%d+%.%d+%.%d+",            -- 4.80.4273 多段版本数字
+        "%d+%.%d+%.%d+%.%d+",                -- 4 段纯版本数字
+        "%.%.%s*[A-Z]+",                     -- ..WARRIOR 或 .. 职业大写
+        "[%s%.~_]+WARRIOR",                  -- 各大写职业
+        "[%s%.~_]+PALADIN",
+        "[%s%.~_]+HUNTER",
+        "[%s%.~_]+ROGUE",
+        "[%s%.~_]+PRIEST",
+        "[%s%.~_]+DEATHKNIGHT",
+        "[%s%.~_]+SHAMAN",
+        "[%s%.~_]+MAGE",
+        "[%s%.~_]+WARLOCK",
+        "[%s%.~_]+DRUID",
+        "%.%._",                             -- .._ 掩码
+        "%._%.%d+",                          -- ._.0.0000 掩码
+        "%.0%.0000",                         -- 掩码
+        "%.%.0+",                            -- ..0000 掩码
     }
-    for _, classToken in ipairs(CLASS_TOKENS) do
-        -- 匹配 ..WARRIOR 或 .WARRIOR 或 空格WARRIOR 或 _WARRIOR
-        local s, e = text:find("[%s%.~_]+" .. classToken)
+
+    for _, pat in ipairs(patterns) do
+        local s = text:find(pat)
         if s and s > 1 then
-            text = text:sub(1, s - 1)
+            if not cutPos or s < cutPos then
+                cutPos = s
+            end
         end
     end
 
-    -- 2. 截断集结号协议尾缀 (如 ~0,0,3 或 .MHH@@ 或 MHH@)
-    local s1 = text:find("[~_]%d+") or text:find("[%s%.~_]*MHH@*")
-    if s1 and s1 > 1 then
-        text = text:sub(1, s1 - 1)
+    if cutPos and cutPos > 1 then
+        text = text:sub(1, cutPos - 1)
     end
 
-    -- 3. 截断版本/状态编码数字串 (如 3.80.3456.1..)
-    text = text:gsub("[%s%.~_]*%d+%.%d+%.%d+%.%d+.*$", "")
-    text = text:gsub("[%s%.~_]*%d+%.%d+%.%d+.*$", "")
-
-    -- 4. 去除多余末尾的点号、波浪号和空白
-    text = text:gsub("[%s%.~_]+$", "")
+    -- 去除末尾残留的标点符号、波浪号、点号、@及空白
+    text = text:gsub("[%s%.~_@#%-%+]+$", "")
     return text:trim()
+end
+
+-- 判断一条消息是否为“进队/进组欢迎+语音频道提示语”
+local function IsWelcomeAnnouncement(text)
+    if not text or type(text) ~= "string" or text == "" then return false end
+    -- 必须包含进队/进组/欢迎等特征词
+    local hasWelcomeWord = text:find("欢迎") or text:find("进组") or text:find("进队") or text:find("进团") or text:find("入队") or text:find("新队员") or text:find("新队友")
+    if not hasWelcomeWord then return false end
+
+    -- 并且包含语音、YY、DD 或者含有提取出来的语音号
+    local hasVoiceKeyword = (ExtractYYFromText(text) ~= nil)
+        or text:find("[yY][yY]") or text:find("[dD][dD]")
+        or text:find("语音") or text:find("歪歪") or text:find("频道")
+        or text:find("开麦") or text:find("听指挥")
+    return hasVoiceKeyword
 end
 
 -- 解析集结号原生 MHH 广播数据包 (如: MHH@波比兔.百元均分团。测试信息 不开； 无)
@@ -392,18 +422,6 @@ function TeamInfo.GetCardState()
     InitDataPersistence()
     local currentFB = GetCurrentFB()
 
-    -- 历史表格查看态检测：如果正在查看历史账单，优先只读展示该历史快照中的 teamInfo
-    if BG and BG.HistoryMainFrame and BG.HistoryMainFrame:IsShown() and BG.History and BG.History.chooseNum then
-        local num = BG.History.chooseNum
-        local histList = BiaoGe and BiaoGe.HistoryList and BiaoGe.HistoryList[currentFB]
-        if histList and histList[num] then
-            local DT = histList[num][1]
-            local histData = BiaoGe.History and BiaoGe.History[currentFB] and BiaoGe.History[currentFB][DT]
-            local histTeam = histData and histData.teamInfo
-            return 3, histTeam or { yy = "", leader = "", recruits = {} }, currentFB
-        end
-    end
-
     local inGroup = IsInGroup() or IsInRaid()
     local fbData = BiaoGe and BiaoGe[currentFB] and BiaoGe[currentFB].teamInfo
 
@@ -479,6 +497,42 @@ function TeamInfo.AddRecruitEntry(channel, text, customTime, FB)
         end
     end
 
+    -- ★ 核心治理：进队欢迎+语音提示消息只允许保留最多 1 条（杜绝进人时名字不同导致欢迎刷屏）
+    local isWelcome = IsWelcomeAnnouncement(text)
+    if isWelcome then
+        local yy = ExtractYYFromText(text)
+        if yy and (not data.yy or data.yy == "") then
+            data.yy = yy
+        end
+
+        local existingWelcomeIndex = nil
+        for idx, item in ipairs(data.recruits) do
+            if item.isWelcome or IsWelcomeAnnouncement(item.text) then
+                existingWelcomeIndex = idx
+                break
+            end
+        end
+
+        if existingWelcomeIndex then
+            -- 就地覆盖已有欢迎消息，绝不重复新增
+            data.recruits[existingWelcomeIndex] = {
+                time = timeStr,
+                channel = channel or L["团队频道"],
+                text = text,
+                isWelcome = true,
+            }
+            if TeamInfo.currentGroupData.isBound and TeamInfo.currentGroupData.boundFB then
+                local bfb = TeamInfo.currentGroupData.boundFB
+                if BiaoGe and BiaoGe[bfb] and BiaoGe[bfb].teamInfo then
+                    BiaoGe[bfb].teamInfo.yy = data.yy
+                    BiaoGe[bfb].teamInfo.recruits = BG.Copy and BG.Copy(data.recruits) or data.recruits
+                end
+            end
+            TeamInfo.UpdateUI()
+            return true
+        end
+    end
+
     -- 最多保留 100 条历史
     if #data.recruits >= 100 then
         tremove(data.recruits, 1)
@@ -488,6 +542,7 @@ function TeamInfo.AddRecruitEntry(channel, text, customTime, FB)
         time = timeStr,
         channel = channel or L["团队通告"],
         text = text,
+        isWelcome = isWelcome or false,
     })
 
     -- 从通告自动提取 YY
@@ -1031,6 +1086,30 @@ function TeamInfo.UpdateUI()
     end
 
     local recruits = (data and data.recruits) or {}
+
+    -- 存量数据自愈：过滤集结号协议乱码，并对换人欢迎语实施单条合并保留
+    if #recruits > 0 then
+        local cleanedRecruits = {}
+        local latestWelcome = nil
+        for _, item in ipairs(recruits) do
+            local cleanTxt = CleanMeetingHornRawText(item.text)
+            if cleanTxt and cleanTxt ~= "" and not IsAddonNoise(cleanTxt) then
+                item.text = cleanTxt
+                if item.isWelcome or IsWelcomeAnnouncement(cleanTxt) then
+                    item.isWelcome = true
+                    latestWelcome = item -- 仅保留最新一条入队欢迎通告
+                else
+                    tinsert(cleanedRecruits, item)
+                end
+            end
+        end
+        if latestWelcome then
+            tinsert(cleanedRecruits, latestWelcome)
+        end
+        recruits = cleanedRecruits
+        data.recruits = cleanedRecruits
+    end
+
     local startY = 0
     local itemHeight = 42
     local totalHeight = 0
@@ -1167,6 +1246,24 @@ end
 -- Hook 副本切换与拍卖记录全局联动 (在任何切本、切 Tab 时同步保持右侧框体)
 if BG and BG.UpdateAuctionLogFrame then
     hooksecurefunc(BG, "UpdateAuctionLogFrame", SyncTeamInfoStateWithMainFrame)
+end
+
+-- Hook 清空表格 (ClearBiaoGe)：整表全清或新 CD 进本自动全清时，同步清空该副本绑定的团队信息
+if BG and BG.ClearBiaoGe then
+    hooksecurefunc(BG, "ClearBiaoGe", function(_type, FB)
+        if _type == "biaoge" and FB then
+            if BiaoGe and BiaoGe[FB] then
+                BiaoGe[FB].teamInfo = nil
+            end
+            if TeamInfo.currentGroupData and TeamInfo.currentGroupData.boundFB == FB then
+                TeamInfo.currentGroupData.isBound = false
+                TeamInfo.currentGroupData.boundFB = nil
+            end
+            if TeamInfo.UpdateUI then
+                TeamInfo.UpdateUI()
+            end
+        end
+    end)
 end
 
 -- 自愈与定时扫描挂载：定时检测进本状态与自动同步

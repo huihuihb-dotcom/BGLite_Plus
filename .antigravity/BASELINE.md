@@ -274,10 +274,23 @@
     1. **单件开拍自动带入**: 挂钩 `BG.StartAuction`，弹出开拍小框时自动检索并填入该装备预设起拍底价；
     2. **Boss 点击全开拍**: 团长按住 `Alt + 点击 Boss 名字`，自动逐一拉起该 Boss 掉落的所有预设装备开拍；
     3. **Tooltip 悬停增强**: 悬停装备按住 Alt 时自动展示【预设起拍价】与【预设起拍语】。版本提升至 `1.0.8`。
+  - **合规性改造：全面对齐官方规范，彻底剥离历史表格 (History) 模块 (2026-09-04)**:
+    - **背景与合规驱动**: 官方新版对历史拍卖数据进行了彻底的去持久化清理（剔除全量聊天持久化与进本自动归档），为保证插件 100% 遵守国服合规规范、消除 RMT 与隐私溯源争议，同时避免 SavedVariables 无限膨胀，正式决定移除历史账单与快照功能；
+    - **模块下线与清理**:
+      1. 从 [BGLite_Plus.toc](file:///e:/World%20of%20Warcraft/_classic_titan_/Interface/AddOns/BGLite_Plus/BGLite_Plus.toc) 中正式剔除 `Core\History.lua`，并物理删除冗余历史源码；
+      2. 移除主界面右上角【保存】按钮与【历史表格】下拉列表，移除只读历史模式（`BG.HistoryMainFrame`）与装备历史价格走势图；
+      3. 在 [TeamInfo.lua](file:///e:/World%20of%20Warcraft/_classic_titan_/Interface/AddOns/BGLite_Plus/Core/TeamInfo.lua) 中移除历史快照检测分支，保持团队信息抽屉专注于当前活跃副本与队伍；
+      4. 在 [Init.lua](file:///e:/World%20of%20Warcraft/_classic_titan_/Interface/AddOns/BGLite_Plus/Core/Init.lua) 中移除针对历史主框架的所有显隐拦截逻辑；
+    - **旧数据一次性自愈清洗**:
+      - 借助 `BG.Once("CleanLegacyHistory_Compliance_260904", 260904)` 机制，在玩家首次载入时自动清空历史残留的 `BiaoGe.History` 与 `BiaoGe.HistoryList` 庞大存档表，彻底为玩家的 WTF 文件瘦身减负。
+    - **ClearBiaoGe 联动同步清理 TeamInfo**:
+      - 挂钩原生 `hooksecurefunc(BG, "ClearBiaoGe")`，在玩家手动清空表格或新 CD 进本自动全清时，同步重置 `BiaoGe[FB].teamInfo = nil` 并解除队伍绑定，彻底消除旧团队信息残留，确保数据合规与状态 100% 同步。
+  - **团队信息欢迎消息单条保留与集结号乱码彻底截断 (2026-09-04)**:
+    - **欢迎语音消息单条保留 (Upsert)**：新增 `IsWelcomeAnnouncement` 识别入队欢迎指引；针对换人进队时因携带不同玩家名导致“欢迎XX请上YY”刷屏几十条的痛点，实施就地覆盖更新策略，全团始终只保留最新 1 条入队欢迎提示，并自动提取语音号，彻底杜绝垃圾信息淹没有效规则；
+    - **集结号协议乱码彻底截断**：全面升级 `CleanMeetingHornRawText`，采用贪婪最早匹配切分所有类似 `4.80.4273.1..WARRIOR._.0.0000000000~0,1,3.MHH@@` 的版本号、掩码、英文职业和 MHH 协议尾缀，并在 `UpdateUI` 渲染时对存量历史数据实施无感自愈清洗。
 
 ## 9. 下一步计划 / 待办事项
 - 持续收集时光服玩家在实战团本中的喊话样本，丰富特征词库。
-- 跟踪测试进本传送门切换与历史表格归档载入的流畅度。
 - 观察玩家在不同客户端语言环境下的职业方案切换表现。
 - 观察大批量交易记录写入时滚动列表的渲染性能与数据清理表现。
 - 跟踪测试多角色切换后声望数据的采集与角色总览刷新流畅度。
