@@ -424,13 +424,14 @@ function TeamInfo.GetCardState()
 
     local inGroup = IsInGroup() or IsInRaid()
     local fbData = BiaoGe and BiaoGe[currentFB] and BiaoGe[currentFB].teamInfo
+    local hasFBData = fbData and ((fbData.leader and fbData.leader ~= "") or (fbData.recruits and #fbData.recruits > 0) or (fbData.yy and fbData.yy ~= ""))
 
-    -- 场景 1：单人未组队状态 -> 只读查看当前选定副本的历史存档 (状态 3)
+    -- 场景 1：单人未组队状态 -> 严格查看当前选定副本的历史存档 (状态 3)
     if not inGroup then
         return 3, fbData or { yy = "", leader = "", recruits = {} }, currentFB
     end
 
-    -- 场景 2：组队状态下，严格检查是否真正在当前副本内，或已将当前队伍绑定至当前副本
+    -- 场景 2：组队状态下，检查当前队伍是否已绑定当前副本，或角色正身处该副本中
     local isInstance, instanceType = IsInInstance()
     local inCurrentInstance = false
     if isInstance and (instanceType == "raid" or instanceType == "party") then
@@ -440,15 +441,25 @@ function TeamInfo.GetCardState()
         end
     end
 
-    -- 仅当已明确绑定当前副本，或已身处该副本中时，才进入状态 2 (已绑定态)
-    if (TeamInfo.currentGroupData.isBound and TeamInfo.currentGroupData.boundFB == currentFB)
-       or inCurrentInstance then
+    local isBoundToCurrentFB = (TeamInfo.currentGroupData.isBound and TeamInfo.currentGroupData.boundFB == currentFB)
+    if isBoundToCurrentFB or inCurrentInstance then
         local activeData = (fbData and fbData.leader and fbData.leader ~= "") and fbData or TeamInfo.currentGroupData
         return 2, activeData, currentFB
     end
 
-    -- 场景 3：进本前 / 组队未绑定态 (状态 1)
-    -- 玩家在副本外面，必须 100% 展示当前正在进行的真实队伍数据，绝不允许被未进本的旧副本存档遮挡劫持！
+    -- 场景 3：当前队伍已经绑定了其他副本（例如当前队伍绑定了 TOC，玩家在主界面切换到了 NAXX 查看账目）
+    -- 必须严格展示 NAXX 自己的存档，绝不能把 TOC 的队伍信息串台显示到 NAXX！
+    if TeamInfo.currentGroupData.isBound and TeamInfo.currentGroupData.boundFB and TeamInfo.currentGroupData.boundFB ~= currentFB then
+        return 3, fbData or { yy = "", leader = "", recruits = {} }, currentFB
+    end
+
+    -- 场景 4：当前队伍尚未绑定任何副本
+    -- 如果当前选中的副本本身有保存的历史团队信息，优先展示该副本的存档记录 (状态 3)
+    if hasFBData then
+        return 3, fbData, currentFB
+    end
+
+    -- 场景 5：当前队伍尚未绑定，且当前选中的副本也是空表 -> 展示当前活跃队伍数据，等待绑定开团 (状态 1)
     return 1, TeamInfo.currentGroupData, currentFB
 end
 
@@ -1030,6 +1041,24 @@ function TeamInfo.CreateUI()
     end)
     f.btnScan = btnScan
 
+    local btnClear = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
+    btnClear:SetSize(65, 22)
+    btnClear:SetPoint("TOPRIGHT", f, "TOPRIGHT", -14, -80)
+    btnClear:SetText("|cffFF5555" .. L["清空"] .. "|r")
+    btnClear:SetScript("OnClick", function()
+        TeamInfo.ClearTeamInfo()
+        if BG.PlaySound then BG.PlaySound(1) end
+    end)
+    btnClear:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_TOPLEFT", 0, 0)
+        GameTooltip:ClearLines()
+        GameTooltip:AddLine(L["清空团队信息"], 1, 1, 1)
+        GameTooltip:AddLine(L["一键清空当前面板记录的语音频道、招募喊话与开团规则。"], 1, 0.82, 0, true)
+        GameTooltip:Show()
+    end)
+    btnClear:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    f.btnClear = btnClear
+
     -- 分割线
     local line = f:CreateTexture(nil, "ARTWORK")
     line:SetSize(316, 1)
@@ -1095,20 +1124,35 @@ function TeamInfo.UpdateUI()
         -- 状态 1：进本前 / 组队未绑定态 (翠绿边框)
         f:SetBackdropBorderColor(0.0, 1.0, 0.4, 0.95)
         f.statusTag:SetText("|cff00FF66[当前队伍(未绑定)]|r")
-        if f.btnBind then f.btnBind:Show() end
-        if f.btnScan then f.btnScan:Show() end
+        if f.btnBind then
+            f.btnBind:Show()
+            f.btnBind:ClearAllPoints()
+            f.btnBind:SetPoint("TOPLEFT", 12, -80)
+        end
+        if f.btnScan then
+            f.btnScan:Show()
+            f.btnScan:ClearAllPoints()
+            f.btnScan:SetPoint("LEFT", f.btnBind, "RIGHT", 8, 0)
+        end
+        if f.btnClear then f.btnClear:Show() end
     elseif state == 2 then
         -- 状态 2：已进本 / 表格已绑定态 (亮蓝边框)
         f:SetBackdropBorderColor(0.2, 0.8, 1.0, 0.95)
         f.statusTag:SetText(string.format("|cff00BFFF[%s已绑定]|r", fbShort))
         if f.btnBind then f.btnBind:Hide() end
-        if f.btnScan then f.btnScan:Show() end
+        if f.btnScan then
+            f.btnScan:Show()
+            f.btnScan:ClearAllPoints()
+            f.btnScan:SetPoint("TOPLEFT", 12, -80)
+        end
+        if f.btnClear then f.btnClear:Show() end
     else
         -- 状态 3：单人 / 历史存档态 (暗灰边框)
         f:SetBackdropBorderColor(0.5, 0.5, 0.5, 0.7)
         f.statusTag:SetText(string.format("|cff888888[%s存档]|r", fbShort))
         if f.btnBind then f.btnBind:Hide() end
         if f.btnScan then f.btnScan:Hide() end
+        if f.btnClear then f.btnClear:Show() end
     end
 
     if data and data.leader and data.leader ~= "" then
@@ -1248,12 +1292,58 @@ function TeamInfo.UpdateUI()
     end
 end
 
--- 11. Hook 清空表格逻辑，当清空某个副本表格时，同步清空该副本绑定的团队信息
+-- 11. 清空团队信息 (副本持久化存档 + 内存实时队伍通告缓存)
+function TeamInfo.ClearTeamInfo(targetFB)
+    InitDataPersistence()
+    targetFB = targetFB or GetCurrentFB()
+
+    -- 1. 清空对应副本持久化存档
+    if targetFB and BiaoGe and BiaoGe[targetFB] then
+        BiaoGe[targetFB].teamInfo = nil
+    end
+
+    -- 2. 清空当前活跃队伍实时通告与语音缓存
+    if TeamInfo.currentGroupData then
+        TeamInfo.currentGroupData.yy = ""
+        TeamInfo.currentGroupData.recruits = {}
+        TeamInfo.currentGroupData.isBound = false
+        TeamInfo.currentGroupData.boundFB = nil
+    end
+    if BiaoGe and BiaoGe.currentGroupData then
+        BiaoGe.currentGroupData.yy = ""
+        BiaoGe.currentGroupData.recruits = {}
+        BiaoGe.currentGroupData.isBound = false
+        BiaoGe.currentGroupData.boundFB = nil
+    end
+
+    -- 3. 若当前不在队伍/团队中，清空团长名字
+    if not IsInGroup() and not IsInRaid() then
+        if TeamInfo.currentGroupData then TeamInfo.currentGroupData.leader = "" end
+        if BiaoGe and BiaoGe.currentGroupData then BiaoGe.currentGroupData.leader = "" end
+    end
+
+    -- 4. 清理输入框与当前界面临时显示
+    local f = TeamInfo.sideFrame
+    if f then
+        if f.yyEdit and not f.yyEdit:HasFocus() then
+            f.yyEdit:SetText("")
+        end
+        if f.leaderText and (not IsInGroup() and not IsInRaid()) then
+            f.leaderText:SetText("")
+        end
+    end
+
+    -- 5. 即时刷新右侧抽屉 UI
+    if TeamInfo.UpdateUI then
+        TeamInfo.UpdateUI()
+    end
+end
+
+-- Hook 清空表格 (ClearBiaoGe)：整表全清或手动清空时，同步清空团队信息
 if BG and BG.ClearBiaoGe then
     hooksecurefunc(BG, "ClearBiaoGe", function(clearType, FB)
-        if clearType == "biaoge" and FB and BiaoGe and BiaoGe[FB] then
-            BiaoGe[FB].teamInfo = nil
-            TeamInfo.UpdateUI()
+        if clearType == "biaoge" then
+            TeamInfo.ClearTeamInfo(FB)
         end
     end)
 end
@@ -1289,23 +1379,14 @@ if BG and BG.UpdateAuctionLogFrame then
     hooksecurefunc(BG, "UpdateAuctionLogFrame", SyncTeamInfoStateWithMainFrame)
 end
 
--- Hook 清空表格 (ClearBiaoGe)：整表全清或新 CD 进本自动全清时，同步清空该副本绑定的团队信息
-if BG and BG.ClearBiaoGe then
-    hooksecurefunc(BG, "ClearBiaoGe", function(_type, FB)
-        if _type == "biaoge" and FB then
-            if BiaoGe and BiaoGe[FB] then
-                BiaoGe[FB].teamInfo = nil
-            end
-            if TeamInfo.currentGroupData and TeamInfo.currentGroupData.boundFB == FB then
-                TeamInfo.currentGroupData.isBound = false
-                TeamInfo.currentGroupData.boundFB = nil
-            end
-            if TeamInfo.UpdateUI then
-                TeamInfo.UpdateUI()
-            end
-        end
+-- Hook 顶部副本按钮切换 (TOC/NAXX/ULD/SW等)，保证切换副本时右侧团队信息严格跟随刷新
+if BG and BG.ClickFBbutton then
+    hooksecurefunc(BG, "ClickFBbutton", function(FB)
+        SyncTeamInfoStateWithMainFrame()
     end)
 end
+
+
 
 -- 自愈与定时扫描挂载：定时检测进本状态与自动同步
 local initFrame = CreateFrame("Frame")

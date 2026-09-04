@@ -324,6 +324,11 @@ local function InitPlusUI()
         securecall(ns.RaidTool.CreateUI, BG.MainFrame)
     end
 
+    -- 4.6 团队小游戏专区初始化 (挂载于团队工具主面板底部)
+    if ns.RaidGame and ns.RaidGame.InitUI and BG.RaidToolMainFrame then
+        securecall(ns.RaidGame.InitUI, BG.RaidToolMainFrame)
+    end
+
     if BG.RaidToolMainFrame then
         BG.RaidToolMainFrame:SetScript("OnShow", function(self)
             BG.FrameHide(0)
@@ -335,6 +340,9 @@ local function InitPlusUI()
             BiaoGe.lastFrame = "RaidTool"
             if ns.RaidTool and ns.RaidTool.SyncCurrentRaidRoster then
                 ns.RaidTool.SyncCurrentRaidRoster(false)
+            end
+            if ns.RaidGame and ns.RaidGame.UpdateUIStatus then
+                ns.RaidGame.UpdateUIStatus()
             end
         end)
     end
@@ -566,6 +574,11 @@ local function InitPlusUI()
 
     -- 8. 小地图钩子
     HookMinimap()
+
+    -- 9. 底部 Plus 版本控件
+    if ns.CreatePlusVerFrame then
+        ns.CreatePlusVerFrame()
+    end
 end
 
 local frame = CreateFrame("Frame")
@@ -574,4 +587,365 @@ frame:RegisterEvent("PLAYER_ENTERING_WORLD")
 frame:SetScript("OnEvent", function(self, event)
     InitPlusUI()
     HookMinimap()
+    if ns.CreatePlusVerFrame then
+        ns.CreatePlusVerFrame()
+    end
 end)
+
+--------------------------------------------------------------------------------
+-- 9. BGLite_Plus 专属版本通信协议 (Plus Version Check Engine)
+--------------------------------------------------------------------------------
+ns.ver = (C_AddOns and C_AddOns.GetAddOnMetadata and C_AddOns.GetAddOnMetadata(AddonName, "Version"))
+    or (GetAddOnMetadata and GetAddOnMetadata(AddonName, "Version"))
+    or "1.0.9"
+
+BG.plusVer = ns.ver
+BG.raidPlusVersion = BG.raidPlusVersion or {}
+BG.guildPlusVersion = BG.guildPlusVersion or {}
+ns.raidPlusVersion = BG.raidPlusVersion
+ns.guildPlusVersion = BG.guildPlusVersion
+
+local COMM_PREFIX_PLUS = "BGLite_Plus"
+
+pcall(function()
+    if C_ChatInfo and C_ChatInfo.RegisterAddonMessagePrefix then
+        C_ChatInfo.RegisterAddonMessagePrefix(COMM_PREFIX_PLUS)
+    elseif RegisterAddonMessagePrefix then
+        RegisterAddonMessagePrefix(COMM_PREFIX_PLUS)
+    end
+end)
+
+function ns.SendPlusVersionCheck(channel)
+    local dist = channel
+    if not dist then
+        if IsInRaid and IsInRaid() then
+            dist = "RAID"
+        elseif IsInGroup and IsInGroup() then
+            dist = "PARTY"
+        end
+    end
+    if not dist then return end
+
+    pcall(function()
+        if C_ChatInfo and C_ChatInfo.SendAddonMessage then
+            C_ChatInfo.SendAddonMessage(COMM_PREFIX_PLUS, "PlusVersionCheck", dist)
+        elseif SendAddonMessage then
+            SendAddonMessage(COMM_PREFIX_PLUS, "PlusVersionCheck", dist)
+        end
+    end)
+end
+
+function ns.SendPlusMyVer(dist)
+    if not dist then return end
+    pcall(function()
+        local msg = "PlusMyVer-" .. tostring(ns.ver)
+        if C_ChatInfo and C_ChatInfo.SendAddonMessage then
+            C_ChatInfo.SendAddonMessage(COMM_PREFIX_PLUS, msg, dist)
+        elseif SendAddonMessage then
+            SendAddonMessage(COMM_PREFIX_PLUS, msg, dist)
+        end
+    end)
+end
+
+local verFrame = CreateFrame("Frame")
+verFrame:RegisterEvent("CHAT_MSG_ADDON")
+verFrame:RegisterEvent("GROUP_ROSTER_UPDATE")
+verFrame:RegisterEvent("GUILD_ROSTER_UPDATE")
+
+local function CleanVerPlayerName(name)
+    if not name then return "" end
+    name = tostring(name)
+    name = name:gsub("|Hplayer:([^|:]+).-|h.-|h", "%1")
+    name = name:gsub("|H.-|h", "")
+    name = name:gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", "")
+    name = name:gsub("[%[%]]", ""):trim()
+    return (strsplit("-", name)):trim()
+end
+
+verFrame:SetScript("OnEvent", function(self, event, ...)
+    if event == "CHAT_MSG_ADDON" then
+        local prefix, msg, distType, sender = ...
+        if prefix ~= COMM_PREFIX_PLUS then return end
+
+        sender = CleanVerPlayerName(sender)
+        local myName = CleanVerPlayerName(UnitName("player"))
+
+        if msg == "PlusVersionCheck" then
+            -- 收到版本查询，自动向对应频道回送自身 Plus 版本
+            if sender ~= myName then
+                ns.SendPlusMyVer(distType)
+            end
+        elseif msg and msg:find("^PlusMyVer%-") then
+            local _, ver = strsplit("-", msg)
+            if ver and ver ~= "" then
+                if distType == "RAID" or distType == "PARTY" then
+                    ns.raidPlusVersion[sender] = ver
+                    if ns.RaidGame and ns.RaidGame.UpdateUIStatus then
+                        ns.RaidGame.UpdateUIStatus()
+                    end
+                    if ns.UpdatePlusVerFrame then
+                        ns.UpdatePlusVerFrame()
+                    end
+                elseif distType == "GUILD" then
+                    ns.guildPlusVersion[sender] = ver
+                    if ns.UpdatePlusVerFrame then
+                        ns.UpdatePlusVerFrame()
+                    end
+                end
+            end
+        end
+
+    elseif event == "GROUP_ROSTER_UPDATE" then
+        if ns.UpdatePlusVerFrame then
+            ns.UpdatePlusVerFrame()
+        end
+        -- 队伍变动防抖 1.5 秒后主动握手版本
+        if self.timer then self.timer:Cancel() end
+        self.timer = C_Timer.NewTimer(1.5, function()
+            if (IsInRaid and IsInRaid()) or (IsInGroup and IsInGroup()) then
+                ns.SendPlusVersionCheck()
+            end
+            if ns.UpdatePlusVerFrame then
+                ns.UpdatePlusVerFrame()
+            end
+        end)
+    elseif event == "GUILD_ROSTER_UPDATE" then
+        if ns.UpdatePlusVerFrame then
+            ns.UpdatePlusVerFrame()
+        end
+    end
+end)
+
+--------------------------------------------------------------------------------
+-- 主界面底部【Plus 增强包版本】控件 (位于工会插件 - 团队插件右侧最底部)
+--------------------------------------------------------------------------------
+local function PlusVer_OnEnter(self)
+    if not self then return end
+    GameTooltip:SetOwner(self, "ANCHOR_TOPLEFT", 0, 0)
+    GameTooltip:ClearLines()
+    self.isOnEnter = true
+
+    -- 严格对齐魔兽与BGLite原生规则：
+    -- 只有真正的团队团本（IsInRaid(1)）才显示团队；5人小队或个人状态下100%跟随公会（IsInGuild）显示！
+    local inRaid = IsInRaid and IsInRaid(1)
+    local inGuild = IsInGuild and IsInGuild()
+
+    if inRaid then
+        GameTooltip:AddLine(ns.L["BGLite_Plus增强包版本"] .. "(" .. (RAID or "团队") .. ")", 0, 1, 0)
+        GameTooltip:AddLine(" ")
+
+        local rosterList = (BG.SortRaidRosterInfo and BG.SortRaidRosterInfo()) or (BG.raidRosterInfo) or {}
+        local line = 2
+        local myName = CleanVerPlayerName(UnitName("player"))
+
+        for i, v in ipairs(rosterList) do
+            local name = v.name or ""
+            local cleanName = CleanVerPlayerName(name)
+            local ver = ns.raidPlusVersion[cleanName]
+            if cleanName == myName then
+                ver = ns.ver
+            end
+
+            local r, g, b = 1, 1, 1
+            if not ver then
+                if v.online == false then
+                    ver = ns.L["未知(离线)"]
+                else
+                    ver = ns.L["无"]
+                end
+                r, g, b = 0.5, 0.5, 0.5
+            else
+                r, g, b = 0, 1, 0
+            end
+
+            local role = ""
+            if v.rank == 2 then
+                role = role .. (ns.AddTexture and ns.AddTexture("interface/groupframe/ui-group-leadericon") or "")
+            elseif v.rank == 1 then
+                role = role .. (ns.AddTexture and ns.AddTexture("interface/groupframe/ui-group-assistanticon") or "")
+            end
+            if v.isML then
+                role = role .. (ns.AddTexture and ns.AddTexture("interface/groupframe/ui-group-masterlooter") or "")
+            end
+
+            local c1, c2, c3 = 1, 1, 1
+            if ns.GetClassRGB then
+                c1, c2, c3 = ns.GetClassRGB(name)
+            end
+
+            GameTooltip:AddDoubleLine(name .. role, ver, c1, c2, c3, r, g, b)
+
+            if ver == ns.L["无"] or ver == ns.L["未知(离线)"] then
+                local alpha = 0.4
+                local leftLine = _G["GameTooltipTextLeft" .. (i + line)]
+                local rightLine = _G["GameTooltipTextRight" .. (i + line)]
+                if leftLine then leftLine:SetAlpha(alpha) end
+                if rightLine then rightLine:SetAlpha(alpha) end
+            end
+        end
+    elseif inGuild then
+        GameTooltip:AddLine(ns.L["BGLite_Plus增强包版本"] .. "(" .. (GUILD or "公会") .. ")", 0, 1, 0)
+        GameTooltip:AddLine(" ")
+
+        local ii = 0
+        local numTotal = GetNumGuildMembers and GetNumGuildMembers() or 0
+        local myName = CleanVerPlayerName(UnitName("player"))
+
+        for i = 1, numTotal do
+            local name, rankName, rankIndex, level, classDisplayName, zone,
+            publicNote, officerNote, isOnline, status, class = GetGuildRosterInfo(i)
+            if isOnline and name then
+                name = BG.GSN and BG.GSN(name) or name
+                local cleanName = CleanVerPlayerName(name)
+                if ii > 40 then
+                    GameTooltip:AddLine("......")
+                    break
+                end
+                ii = ii + 1
+                local ver = ns.guildPlusVersion[cleanName]
+                if cleanName == myName then
+                    ver = ns.ver
+                end
+
+                local r, g, b = 1, 1, 1
+                if not ver then
+                    ver = ns.L["无"]
+                    r, g, b = 0.5, 0.5, 0.5
+                else
+                    r, g, b = 0, 1, 0
+                end
+
+                local c1, c2, c3 = 1, 1, 1
+                if class and GetClassColor then
+                    c1, c2, c3 = GetClassColor(class)
+                elseif ns.GetClassRGB then
+                    c1, c2, c3 = ns.GetClassRGB(name)
+                end
+
+                GameTooltip:AddDoubleLine(name, ver, c1, c2, c3, r, g, b)
+            end
+        end
+    else
+        GameTooltip:AddLine(ns.L["BGLite_Plus增强包版本"], 0, 1, 0)
+        GameTooltip:AddLine(" ")
+        GameTooltip:AddDoubleLine(CleanVerPlayerName(UnitName("player")), ns.ver, 0, 1, 0, 0, 1, 0)
+    end
+    GameTooltip:Show()
+end
+
+local function PlusVer_OnLeave(self)
+    GameTooltip:Hide()
+    self.isOnEnter = false
+end
+
+function ns.CreatePlusVerFrame()
+    if not (BG and BG.MainFrame) then return end
+    if BG.ButtonRaidPlusVer then return end
+
+    local plusBtn = CreateFrame("Frame", "BG_ButtonRaidPlusVer", BG.MainFrame)
+    plusBtn:SetSize(80, 20)
+    plusBtn:SetFrameLevel((BG.ButtonGuildVer and BG.ButtonGuildVer:GetFrameLevel() or BG.MainFrame:GetFrameLevel()) + 2)
+    plusBtn.title2 = "Plus：%s"
+    plusBtn.isPlus = true
+
+    plusBtn.text = plusBtn:CreateFontString()
+    plusBtn.text:SetFont(BIAOGE_TEXT_FONT or STANDARD_TEXT_FONT, 13, "OUTLINE")
+    plusBtn.text:SetPoint("LEFT")
+    plusBtn.text:SetTextColor(0, 0.82, 1)
+
+    plusBtn:SetScript("OnEnter", PlusVer_OnEnter)
+    plusBtn:SetScript("OnLeave", PlusVer_OnLeave)
+
+    BG.ButtonRaidPlusVer = plusBtn
+
+    -- 挂钩主面板打开时立即自愈刷新
+    if BG.MainFrame.HookScript then
+        BG.MainFrame:HookScript("OnShow", function()
+            ns.UpdatePlusVerFrame()
+        end)
+    end
+
+    ns.UpdatePlusVerFrame()
+end
+
+function ns.UpdatePlusVerFrame()
+    local btn = BG.ButtonRaidPlusVer
+    if not btn then
+        if BG.MainFrame then
+            ns.CreatePlusVerFrame()
+            btn = BG.ButtonRaidPlusVer
+        end
+    end
+    if not btn then return end
+
+    -- 严格遵循 BGLite 原生标准：
+    -- 只有处于团队状态 IsInRaid(1) 才作为团队处理；
+    -- 个人状态或5人小队状态，完全跟随公会（公会插件）！
+    local inRaid = IsInRaid and IsInRaid(1)
+    local inGuild = IsInGuild and IsInGuild()
+
+    btn:ClearAllPoints()
+    if inRaid then
+        if BG.ButtonRaidAuction and BG.ButtonRaidAuction:IsShown() and BG.ButtonRaidAuction:GetWidth() > 1 then
+            btn:SetPoint("LEFT", BG.ButtonRaidAuction, "RIGHT", 6, 0)
+        elseif BG.ButtonRaidVer and BG.ButtonRaidVer:IsShown() and BG.ButtonRaidVer:GetWidth() > 1 then
+            btn:SetPoint("LEFT", BG.ButtonRaidVer, "RIGHT", 6, 0)
+        else
+            btn:SetPoint("BOTTOMLEFT", BG.MainFrame, "BOTTOMLEFT", 10, 2)
+        end
+
+        local myName = CleanVerPlayerName(UnitName("player"))
+        local count = 0
+        local total = (GetNumGroupMembers and GetNumGroupMembers()) or 0
+
+        if BG.raidRosterInfo and #BG.raidRosterInfo > 0 then
+            for _, v in ipairs(BG.raidRosterInfo) do
+                local cleanName = CleanVerPlayerName(v.name)
+                if cleanName == myName or ns.raidPlusVersion[cleanName] then
+                    count = count + 1
+                end
+            end
+        else
+            for name in pairs(ns.raidPlusVersion) do
+                count = count + 1
+            end
+            if not ns.raidPlusVersion[myName] then
+                count = count + 1
+            end
+        end
+        if total == 0 then total = count end
+        btn.text:SetFormattedText("Plus：%s", count .. "/" .. total)
+
+    elseif inGuild then
+        -- 个人或5人小队：紧靠在【公会插件】右侧！
+        if BG.ButtonGuildVer and BG.ButtonGuildVer:IsShown() and BG.ButtonGuildVer:GetWidth() > 1 then
+            btn:SetPoint("LEFT", BG.ButtonGuildVer, "RIGHT", 6, 0)
+        else
+            btn:SetPoint("BOTTOMLEFT", BG.MainFrame, "BOTTOMLEFT", 10, 2)
+        end
+
+        local numTotal, numOnline = GetNumGuildMembers()
+        numOnline = numOnline or 1
+        local count = 0
+        local myName = CleanVerPlayerName(UnitName("player"))
+        for name in pairs(ns.guildPlusVersion) do
+            count = count + 1
+        end
+        if not ns.guildPlusVersion[myName] then
+            count = count + 1
+        end
+        btn.text:SetFormattedText("Plus：%s", count .. "/" .. numOnline)
+    else
+        btn:SetPoint("BOTTOMLEFT", BG.MainFrame, "BOTTOMLEFT", 10, 2)
+        btn.text:SetText("Plus：1/1")
+    end
+
+    btn:SetWidth(btn.text:GetStringWidth() + 10)
+    btn:Show()
+
+    if btn.isOnEnter then
+        PlusVer_OnEnter(btn)
+    end
+end
+
+
