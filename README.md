@@ -1,7 +1,7 @@
 # BGLite_Plus - BGLite 增强功能包
 
 [![WoW Version](https://img.shields.io/badge/WoW-Classic%20%7C%20Titan%20%7C%20Retail-blue.svg)](https://worldofwarcraft.com)
-[![Version](https://img.shields.io/badge/Version-1.0.6-brightgreen.svg)]()
+[![Version](https://img.shields.io/badge/Version-1.1.0-brightgreen.svg)]()
 [![Platform](https://img.shields.io/badge/Platform-Windows-lightgrey.svg)]()
 
 **BGLite_Plus** 是专为魔兽世界怀旧服、泰坦时光服（Titan）、巫妖王之怒（WLK）、燃烧的远征（TBC）、大地的裂变（CTM）、熊猫人之谜（MOP）及经典旧世（Vanilla / SoD）打造的 **BGLite 全方位增强功能插件包**。

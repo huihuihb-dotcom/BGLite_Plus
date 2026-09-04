@@ -816,8 +816,6 @@ local function IsValidRecruitOrRuleMessage(msg)
     local RULE_EXTRA_KEYWORDS = {
         "规则", "起拍", "罚款", "补贴", "补助", "打手", "考核", "合剂", "分金", "听指挥",
         "不分金", "灭团", "清buff", "消灭", "装备起", "包团", "降价", "退组",
-        -- 团队小游戏与掷骰结果关键词
-        "团队小游戏", "骰子大比拼", "骰子小游戏", "最佳手气王", "骰子结算", "冠军手气", "亚军手气",
     }
     for _, kw in ipairs(RULE_EXTRA_KEYWORDS) do
         if msg:find(kw, 1, true) then

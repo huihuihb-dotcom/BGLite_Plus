@@ -22,7 +22,6 @@ Core\ItemLib.lua
 Core\Hope.lua
 Core\RoleOverviewOptions.lua
 Core\RaidTool.lua
-Core\RaidGame.lua
 Core\WhoHistory.lua
 Core\TeamInfo.lua
 Core\TradeHistory.lua
@@ -33,7 +32,7 @@ Core\Init.lua
 
 ## Title-zhCN: |cff880303[增强]|r BGLite 增强功能包 (|cff00BFFF心愿单+装备库+角色总览+团队工具|r)
 ## Title-zhTW: |cff880303[增強]|r BGLite 增強功能包 (|cff00BFFF心願單+裝備庫+角色總覽+團隊工具|r)
-## Category: Dungean & Raid
+## Category: Dungeon & Raid
 ## Category-zhCN: 副本团队
 ## Category-zhTW: 副本團隊
 

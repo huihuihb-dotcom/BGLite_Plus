@@ -324,11 +324,6 @@ local function InitPlusUI()
         securecall(ns.RaidTool.CreateUI, BG.MainFrame)
     end
 
-    -- 4.6 团队小游戏专区初始化 (挂载于团队工具主面板底部)
-    if ns.RaidGame and ns.RaidGame.InitUI and BG.RaidToolMainFrame then
-        securecall(ns.RaidGame.InitUI, BG.RaidToolMainFrame)
-    end
-
     if BG.RaidToolMainFrame then
         BG.RaidToolMainFrame:SetScript("OnShow", function(self)
             BG.FrameHide(0)
@@ -340,9 +335,6 @@ local function InitPlusUI()
             BiaoGe.lastFrame = "RaidTool"
             if ns.RaidTool and ns.RaidTool.SyncCurrentRaidRoster then
                 ns.RaidTool.SyncCurrentRaidRoster(false)
-            end
-            if ns.RaidGame and ns.RaidGame.UpdateUIStatus then
-                ns.RaidGame.UpdateUIStatus()
             end
         end)
     end
@@ -680,9 +672,6 @@ verFrame:SetScript("OnEvent", function(self, event, ...)
             if ver and ver ~= "" then
                 if distType == "RAID" or distType == "PARTY" then
                     ns.raidPlusVersion[sender] = ver
-                    if ns.RaidGame and ns.RaidGame.UpdateUIStatus then
-                        ns.RaidGame.UpdateUIStatus()
-                    end
                     if ns.UpdatePlusVerFrame then
                         ns.UpdatePlusVerFrame()
                     end
