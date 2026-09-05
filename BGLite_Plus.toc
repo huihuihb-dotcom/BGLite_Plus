@@ -25,6 +25,7 @@ Core\RaidTool.lua
 Core\WhoHistory.lua
 Core\TeamInfo.lua
 Core\TradeHistory.lua
+Core\TradeFix.lua
 Core\Reputation.lua
 Core\BestPrice.lua
 Core\AuctionPreset.lua

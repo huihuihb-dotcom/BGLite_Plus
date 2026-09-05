@@ -5,7 +5,7 @@
       - 深度联动 EasyAuction 扫描价格（支持【最低挂牌价】与抗钓鱼压价【中位数参考价】双轨分析）
       - 实时计算“每碎片金币收益 (G/片)”与“每余烬金币收益 (G/余烬)”
       - 全服全专业大横向比拼（全服最优推荐冠军卡片 + 全局总排行）
-      - 各专业内部自动高亮最优推荐物资（最低首选 ★ / 中位首选 ★）
+      - 各专业内部自动高亮最优推荐物资（最低价推荐 ★ / 中位价推荐 ★）
       - 顶部中位数显隐开关与偏好持久化记忆
       - 趣味地精身价估算：预估碎片+余烬全换变现金币，叠加自身金币统计总身价
       - 纯正魔兽原生内置材质内嵌（金皇冠、团队星标、暴雪官方专业图标），杜绝乱码方块，质感爆棚！
@@ -490,9 +490,6 @@ function TG.CreateMainFrame(parent)
     f:SetPoint("TOPLEFT", parent, "TOPLEFT", 10, -30)
     f:SetPoint("BOTTOMRIGHT", parent, "BOTTOMRIGHT", -10, 35)
     CreateBackdrop(f)
-    if BG.BackBiaoGe then
-        BG.BackBiaoGe(f)
-    end
     f:Hide()
     BG.TitanGoblinMainFrame = f
 
@@ -683,13 +680,13 @@ function TG.CreateMainFrame(parent)
     end)
     f.showMedianCheck = showMedianCheck
 
-    -- 第二行 (Y = -38)：左侧全服底价最优，右侧代币持有
+    -- 第二行 (Y = -38)：左侧全服最低价冠军，右侧代币持有
     local bestMinCard = topBar:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     bestMinCard:SetPoint("TOPLEFT", 12, -38)
     bestMinCard:SetWidth(390)
     bestMinCard:SetJustifyH("LEFT")
     bestMinCard:SetWordWrap(false)
-    bestMinCard:SetText(string.format("%s |cff00FF00[全服底价最优]|r: |cff808080点击开始计算行情|r", ICON_CROWN))
+    bestMinCard:SetText(string.format("%s |cff00FF00[全服最低价冠军]|r: |cff808080点击开始计算行情|r", ICON_CROWN))
     f.bestMinCard = bestMinCard
 
     local tokenText = topBar:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
@@ -725,13 +722,13 @@ function TG.CreateMainFrame(parent)
     tokenHelpBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
     f.tokenHelpBtn = tokenHelpBtn
 
-    -- 第三行 (Y = -64)：左侧全服中位最优，右侧地精身价资产分析
+    -- 第三行 (Y = -64)：左侧全服中位价冠军，右侧地精身价资产分析
     local bestMedCard = topBar:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     bestMedCard:SetPoint("TOPLEFT", 12, -64)
     bestMedCard:SetWidth(390)
     bestMedCard:SetJustifyH("LEFT")
     bestMedCard:SetWordWrap(false)
-    bestMedCard:SetText(string.format("%s |cff00BFFF[全服中位最优]|r: |cff808080点击开始计算行情|r", ICON_TROPHY))
+    bestMedCard:SetText(string.format("%s |cff00BFFF[全服中位价冠军]|r: |cff808080点击开始计算行情|r", ICON_TROPHY))
     f.bestMedCard = bestMedCard
 
     local wealthText = topBar:CreateFontString(nil, "OVERLAY", "GameFontNormal")
@@ -1003,6 +1000,23 @@ function TG.CreateMainFrame(parent)
     TG.UpdateTableLayout()
     TG.UpdateHeaderSortIndicators()
 
+    -- 物品信息异步加载监听：首次 GetItemInfo 可能未缓存，图标/名称为空
+    -- 监听 GET_ITEM_INFO_RECEIVED 事件，物品数据到达后防抖自动刷新列表
+    f:RegisterEvent("GET_ITEM_INFO_RECEIVED")
+    f:SetScript("OnEvent", function(self, event, itemID, success)
+        if event == "GET_ITEM_INFO_RECEIVED" and TG.hasCalculated and self:IsShown() then
+            if TG._refreshTimer then
+                TG._refreshTimer:Cancel()
+            end
+            TG._refreshTimer = C_Timer.NewTimer(0.2, function()
+                TG._refreshTimer = nil
+                if TG.hasCalculated and mainFrame and mainFrame:IsShown() then
+                    TG.RefreshList()
+                end
+            end)
+        end
+    end)
+
     -- 切换 Tab 生命周期 (仅更新极轻量代币与状态，杜绝重复计算卡顿)
     f:SetScript("OnShow", function(self)
         if BG.FrameHide then BG.FrameHide(0) end
@@ -1112,17 +1126,17 @@ function TG.RefreshList()
 
     -- 刷新顶部推荐卡片 (纯每个泰坦碎片收益，不使用余烬计算)
     if globalBestMin and globalBestMin.yieldMinCopper then
-        mainFrame.bestMinCard:SetText(string.format("%s |cff00FF00[全服底价最优]|r: |cffFFD100%s|r  |cff808080(收益:|r %s|cff808080/片)|r",
+        mainFrame.bestMinCard:SetText(string.format("%s |cff00FF00[全服最低价冠军]|r: |cffFFD100%s|r  |cff808080(收益:|r %s|cff808080/片)|r",
             ICON_CROWN, globalBestMin.name, FormatCopperToText(globalBestMin.yieldMinCopper)))
     else
-        mainFrame.bestMinCard:SetText(string.format("%s |cff00FF00[全服底价最优]|r: |cff808080暂无行情|r", ICON_CROWN))
+        mainFrame.bestMinCard:SetText(string.format("%s |cff00FF00[全服最低价冠军]|r: |cff808080暂无行情|r", ICON_CROWN))
     end
 
     if globalBestMedian and globalBestMedian.yieldMedianCopper then
-        mainFrame.bestMedCard:SetText(string.format("%s |cff00BFFF[全服中位最优]|r: |cffFFD100%s|r  |cff808080(收益:|r %s|cff808080/片)|r",
+        mainFrame.bestMedCard:SetText(string.format("%s |cff00BFFF[全服中位价冠军]|r: |cffFFD100%s|r  |cff808080(收益:|r %s|cff808080/片)|r",
             ICON_TROPHY, globalBestMedian.name, FormatCopperToText(globalBestMedian.yieldMedianCopper)))
     else
-        mainFrame.bestMedCard:SetText(string.format("%s |cff00BFFF[全服中位最优]|r: |cff808080暂无行情|r", ICON_TROPHY))
+        mainFrame.bestMedCard:SetText(string.format("%s |cff00BFFF[全服中位价冠军]|r: |cff808080暂无行情|r", ICON_TROPHY))
     end
 
     if mainFrame.scanTimeText and TG.latestScanTime then
@@ -1258,17 +1272,17 @@ function TG.RefreshList()
         local isCatMedBest = (catBest and catBest.bestMedian and catBest.bestMedian.id == it.id)
 
         if isGlobalMinBest and isGlobalMedBest then
-            row.badgeText:SetText(ICON_CROWN .. " |cffFFD700双冠王|r")
+            row.badgeText:SetText(ICON_CROWN .. " |cffFFD700双冠冠军|r")
         elseif isGlobalMinBest then
-            row.badgeText:SetText(ICON_CROWN .. " |cff00FF00底价王|r")
+            row.badgeText:SetText(ICON_CROWN .. " |cff00FF00最低价冠军|r")
         elseif isGlobalMedBest then
-            row.badgeText:SetText(ICON_TROPHY .. " |cff00BFFF中位王|r")
+            row.badgeText:SetText(ICON_TROPHY .. " |cff00BFFF中位价冠军|r")
         elseif isCatMinBest and isCatMedBest then
-            row.badgeText:SetText(ICON_STAR .. " |cffFFFF00组内最优|r")
+            row.badgeText:SetText(ICON_STAR .. " |cffFFFF00组内双优|r")
         elseif isCatMinBest then
-            row.badgeText:SetText(ICON_STAR .. " |cff7CFC00底价首选|r")
+            row.badgeText:SetText(ICON_STAR .. " |cff7CFC00最低价推荐|r")
         elseif isCatMedBest then
-            row.badgeText:SetText(ICON_STAR .. " |cff87CEFA中位首选|r")
+            row.badgeText:SetText(ICON_STAR .. " |cff87CEFA中位价推荐|r")
         else
             row.badgeText:SetText("|cff808080普通|r")
         end

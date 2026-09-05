@@ -630,11 +630,27 @@
 - 跟踪 175 件物资在长时间滚动列表下的帧率与内存占用。
 - 收集玩家对中位数分析在不同服务器压价环境下的参考反馈。
 
+## 18. 交易防漏单安全修复模块 (TradeFix) (2026-09-06)
+* **模块定位**: `Core/TradeFix.lua`，注入式修复 BGLite 自动交易（`autoAuctionSureClick`）偶发漏单 Bug，对上游 BGLite 零侵入。
+* **Bug 根因分析**:
+  - 当开启自动点击交易时，`AcceptTrade()` 调用后到 `UI_INFO_MESSAGE(ERR_TRADE_COMPLETE)` 之间的窗口期内，WoW 引擎可能触发 `TRADE_MONEY_CHANGED` 等事件；
+  - 这些事件通过 `BG.After(0, BG.TradeUpdate)` 将 `TradeUpdate` 排入下一帧执行；
+  - 如果此时 `TradeFrame` 仍可见但 `GetTargetTradeMoney()` 已返回 0（金币已转移），`BG.TradeIsAutoAuction()` 中 `wipe(BG.trade.autoAuction)` 清空数据后条件不满足无法重新填充；
+  - 最终 `SaveMoney()` 读取到空的 `autoAuction` 表 → 漏单；
+  - Bug 的触发与网络延迟相关：低延迟时事件集中在同一帧不触发；高延迟时事件跨帧到达命中竞争窗口。
+* **加固修复策略（锁标志 + 快照双保险 + 安全解锁）**:
+  1. **Hook 全局 `AcceptTrade` API**: 设置 `BG.trade.isAccepted` 锁标志，并深拷贝 `autoAuction` 和所有交易数据为快照；
+  2. **Hook `BG.TradeUpdate`**: 锁定期间跳过数据刷新，防止 `wipe(autoAuction)`；
+  3. **动态撤销解锁（防 UI 冻结）**: 监听 `TRADE_ACCEPT_UPDATE`，当买家改动金币导致 `playerAccepted == 0` 时，立即解开锁标志并延迟一帧触发真实刷新，杜绝界面冻结；
+  5. **Hook `BG.GetTradeSeeText`**: 在实际保存时如果 `autoAuction` 为空但有快照，用快照兜底恢复，连带修复 `T.SetItemTradeState` 拍卖日志打勾逻辑。
+* **代码轻量化与文档沉淀**:
+  - 已全量抽离 `Core/TradeFix.lua` 中的冗余大段注释，代码精简干练；
+  - 产出完整技术复盘报告归档至 `Doc/TRADE_FIX_REPORT.md`，全文去除去除敏感字眼，规范统一。
 
-
-
-
-
-
-
+## 24. 项目说明文档全面焕新 (README.md) (2026-09-06)
+* **文档全量升级**:
+  1. **重磅特性补齐**：全量补充了【🪙 泰坦物资兑换与碎片收益统计 (TitanGoblin / 碎片统计)】深度适配 EasyAuction、黄金高光【点击扫描】按钮、扫描时间戳直显、中位数分析与行情风险说明；补充了【🛡️ 自动交易防漏单安全修复 (TradeFix)】竞争窗口期漏洞根治与锁标志/快照兜底双保险架构；
+  2. **团队信息准确定义**：规范【团队关键信息留存抽屉 (TeamInfo)】功能定位（集结号原生解码、开团规则存证与时序追踪、YY/DD安全防乱码超链接）；
+  3. **架构拓扑校准**：全面核准更新了 `README.md` 中的文件目录树，收录所有最新的 20 个核心模块，剔除历史废弃文件，与当前代码库及 `BGLite_Plus.toc` 严格 1:1 吻合；
+  4. **快捷交互总表**：梳理并呈现覆盖碎片统计、行情扫描、心理价格、Boss全开拍、阵容调配、语音复制、CD总览等一览表，提升用户查阅体验。
 
