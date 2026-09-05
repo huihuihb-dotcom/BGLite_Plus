@@ -80,6 +80,8 @@ local function HideAllSubFrames()
     SafeHide(BG.RaidToolMainFrame)
     SafeHide(BG.FilterClassItemMainFrame)
     SafeHide(BG.TradeHistoryMainFrame)
+    SafeHide(BG.AuctionPresetMainFrame)
+    SafeHide(BG.TitanGoblinMainFrame)
 end
 
 local function InitPlusUI()
@@ -127,6 +129,9 @@ local function InitPlusUI()
         if ns.AuctionPreset and ns.AuctionPreset.CreateMainFrame then
             ns.AuctionPreset.CreateMainFrame(BG.MainFrame)
         end
+    end
+    if ns.TitanGoblin and ns.TitanGoblin.CreateMainFrame then
+        ns.TitanGoblin.CreateMainFrame(BG.MainFrame)
     end
     if BG.OpenOption and not ns.hasHookedOpenOptionForRaidTool then
         ns.hasHookedOpenOptionForRaidTool = true
@@ -386,6 +391,7 @@ local function InitPlusUI()
             [BG.ItemLibMainFrameTabNum or 20] = 6,         -- 装备库
             [BG.HopeMainFrameTabNum or 21] = 7,            -- 心愿清单
             [BG.RaidToolMainFrameTabNum or 22] = 8,        -- 团队工具
+            [BG.TitanGoblinMainFrameTabNum or 105] = 9,   -- 碎片统计
         }
 
         local validItems = {}

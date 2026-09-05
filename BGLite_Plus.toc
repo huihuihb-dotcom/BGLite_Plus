@@ -4,7 +4,7 @@
 ## Notes-zhCN: 为 BGLite 提供心愿清单、装备库检索、多服角色与团本CD悬停总览、团队组队工具（密语自动邀请/YY号识别一键复制/入队通知）、阵容拖拽调队管理与职业装备智能过滤。
 ## Notes-zhTW: 為 BGLite 提供心願清單、裝備庫檢索、多服角色與團本CD懸停總覽、團隊組隊工具（密語自動邀請/YY號識別一鍵複製/入隊通知）、陣容拖拽調隊管理與職業裝備智能過濾。
 ## Author: 波比兔
-## Version: 1.0.9
+## Version: 1.0.10
 ## RequiredDeps: BGLite
 ## SavedVariables: BiaoGe
 
@@ -28,6 +28,8 @@ Core\TradeHistory.lua
 Core\Reputation.lua
 Core\BestPrice.lua
 Core\AuctionPreset.lua
+Core\DB_TitanExchange.lua
+Core\TitanGoblin.lua
 Core\Init.lua
 
 ## Title-zhCN: |cff880303[增强]|r BGLite 增强功能包 (|cff00BFFF心愿单+装备库+角色总览+团队工具|r)

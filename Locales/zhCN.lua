@@ -3256,7 +3256,11 @@ do -- 减伤链接收器
     L["按品质"] = true
     L["按起拍价"] = true
     L["搜索:"] = true
-    L["序号"] = true
     L["清空"] = true
+
+    -- TitanGoblin 碎片统计
+    L["碎片统计"] = true
+    L["< 碎片统计 >"] = true
+    L["泰坦碎片与余烬物资兑换行情与各专业收益排行。"] = true
 end
 
