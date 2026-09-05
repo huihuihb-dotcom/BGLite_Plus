@@ -776,12 +776,126 @@ function ns.InitBestPriceModule()
         return true
     end
 
+    -- 8. 折叠拍卖窗出价高亮与布局优化增强注入 (BGLite_Plus 独立 Hook)
+    local function GetColoredPlayerName(name)
+        if not name or name == "" then return "" end
+        local shortName = name:match("^([^-]+)") or name
+        if BGA and BGA.aura_env and BGA.aura_env.SetClassCFF then
+            local cName = BGA.aura_env.SetClassCFF(shortName)
+            if cName and cName ~= "" then
+                return cName
+            end
+        end
+        local _, classFile = UnitClass(shortName)
+        if classFile then
+            local colorHex = select(4, GetClassColor(classFile))
+            if colorHex then
+                return "|c" .. colorHex .. shortName .. "|r"
+            end
+        end
+        return shortName
+    end
+
+    local function UpdateSmallWindowMoney(f, money, player)
+        if not (f and f.IsSmallWindow) then return end
+        if not (f.currentMoneyFrame and f.currentMoneyText) then return end
+
+        local currentMoney = money or f.money or 0
+        local currentPlayer = player or f.player
+        local myName = (BGA and BGA.aura_env and BGA.aura_env.GN and BGA.aura_env.GN()) or UnitName("player")
+        local isMe = (currentPlayer and currentPlayer ~= "" and currentPlayer == myName)
+        local moneyColor = isMe and "|cff00FF00" or "|cffFFD100"
+        local formatNum = (BGA and BGA.aura_env and BGA.aura_env.FormatNumber and BGA.aura_env.FormatNumber(currentMoney)) or tostring(currentMoney)
+
+        local displayText = ""
+        if currentPlayer and currentPlayer ~= "" and not f.start then
+            local nameText = isMe and ("|cff00FF00" .. (L["你"] or "你") .. "|r") or GetColoredPlayerName(currentPlayer)
+            displayText = nameText .. " " .. moneyColor .. formatNum .. "|r"
+        else
+            displayText = moneyColor .. formatNum .. "|r"
+        end
+
+        f.currentMoneyText:SetText(displayText)
+        f.currentMoneyText:SetJustifyH("RIGHT")
+
+        local textWidth = (f.currentMoneyText.GetStringWidth and f.currentMoneyText:GetStringWidth()) or 80
+        local frameWidth = math.max(60, math.min(145, textWidth + 8))
+
+        f.currentMoneyFrame:ClearAllPoints()
+        f.currentMoneyFrame:SetSize(frameWidth, 20)
+        if f.itemFrame then
+            f.currentMoneyFrame:SetFrameLevel(f.itemFrame:GetFrameLevel() + 5)
+        end
+        f.currentMoneyFrame:SetPoint("RIGHT", f.hide, "LEFT", -5, 0)
+
+        if f.itemFrame and f.itemFrame.itemNameText and f.itemFrame.iconFrame then
+            f.itemFrame.itemNameText:ClearAllPoints()
+            f.itemFrame.itemNameText:SetPoint("LEFT", f.itemFrame.iconFrame, "RIGHT", 2, 0)
+            f.itemFrame.itemNameText:SetPoint("RIGHT", f.currentMoneyFrame, "LEFT", -4, 0)
+            f.itemFrame.itemNameText:SetWordWrap(false)
+        end
+    end
+
+    local function HookAuctionFrameSmallWindow(f)
+        if not f or f.hasHookedSmallWindow then return end
+        f.hasHookedSmallWindow = true
+
+        if f.hide then
+            f.hide:HookScript("OnClick", function(self)
+                if f.IsSmallWindow then
+                    UpdateSmallWindowMoney(f)
+                else
+                    if f.currentMoneyFrame then
+                        f.currentMoneyFrame:SetSize(190, 20)
+                        f.currentMoneyFrame:SetFrameLevel(f:GetFrameLevel() + 11)
+                    end
+                    if f.itemFrame and f.itemFrame.itemNameText and f.itemFrame.iconFrame then
+                        f.itemFrame.itemNameText:ClearAllPoints()
+                        f.itemFrame.itemNameText:SetPoint("TOPLEFT", f.itemFrame.iconFrame, "TOPRIGHT", 2, -2)
+                        f.itemFrame.itemNameText:SetWidth(f.itemFrame:GetWidth() - f.itemFrame:GetHeight() - 50)
+                    end
+                end
+            end)
+        end
+
+        if f.IsSmallWindow then
+            UpdateSmallWindowMoney(f)
+        end
+        C_Timer.After(0.05, function()
+            if f and f.IsSmallWindow then
+                UpdateSmallWindowMoney(f)
+            end
+        end)
+    end
+
+    -- Hook 底层 BGA.aura_env.SetMoney
+    local function HookBgaSetMoney()
+        if BGA and BGA.aura_env and BGA.aura_env.SetMoney and not BGA.aura_env._orig_SetMoney_Plus then
+            BGA.aura_env._orig_SetMoney_Plus = BGA.aura_env.SetMoney
+            BGA.aura_env.SetMoney = function(bidFrame, money, player)
+                BGA.aura_env._orig_SetMoney_Plus(bidFrame, money, player)
+                if bidFrame and bidFrame.IsSmallWindow then
+                    if bidFrame.updateFrame then
+                        bidFrame.updateFrame:Show()
+                    end
+                    UpdateSmallWindowMoney(bidFrame, money, player)
+                end
+            end
+        end
+    end
+
     -- 安全包装 HookCreateAuction
     local orig_HookCreateAuction = BG.HookCreateAuction
     BG.HookCreateAuction = function(f)
         if orig_HookCreateAuction then
             orig_HookCreateAuction(f)
         end
+
+        HookBgaSetMoney()
+        if f then
+            HookAuctionFrameSmallWindow(f)
+        end
+
         if f and f.itemID then
             local leiting
             if BG.GetAllFB and BG.GetLeiTingItem then
@@ -797,7 +911,7 @@ function ns.InitBestPriceModule()
         end
     end
 
-    -- 8. 核心拦截机制：全局装备格子 Alt + 右键 快捷设定注入
+    -- 9. 核心拦截机制：全局装备格子 Alt + 右键 快捷设定注入
     function BestPrice.HookZhuangBeiButton(bt)
         if not bt or bt.hasHookedBestPrice then return end
         bt.hasHookedBestPrice = true
@@ -861,6 +975,7 @@ function ns.InitBestPriceModule()
     end
 
     -- 执行初次扫描拦截
+    HookBgaSetMoney()
     BestPrice.HookAllTableButtons()
     BestPrice.HookAllHopeButtons()
 

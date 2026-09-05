@@ -69,8 +69,10 @@ end
 
 local function ContainsTitanKeyword(text)
     if not text or type(text) ~= "string" then return false end
+    -- 先剥离物品超链接与颜色转义码（避免如蓝装 |cff0070dd 误中语音关键字 "dd"）
+    local clean = text:gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", ""):gsub("|H.-|h", ""):gsub("|h", "")
     for _, kw in ipairs(TITAN_KEYWORDS) do
-        if text:find(kw, 1, true) then
+        if clean:find(kw, 1, true) then
             return true
         end
     end
@@ -83,7 +85,7 @@ local NOISE_KEYWORDS = {
     "欢迎新队友", "欢迎加入", "愿我们同心协力", "拥有一次完美的旅程",
     "祝大家游戏愉快", "开始通报", "准备确认", "插件提示",
     -- 金团拍卖及装备升级过滤
-    "拍卖开始", "流拍", "建议升级",
+    "拍卖开始", "流拍", "建议升级", "拍卖取消", "重新拍卖", "表格：", "欠款：", "记账：",
 }
 
 local function IsAddonNoise(text)
@@ -803,10 +805,38 @@ local function TriggerMultiWaveScan()
     C_Timer.After(5.0, function() TeamInfo.OnGroupUpdate() end)
 end
 
+-- 专门校验拍卖成功通报：不限制装备颜色/品质，按配置阈值（默认 5000，可自定义）筛选：>= 阈值即记录
+local function CheckValidAuctionSuccess(msg)
+    if not msg:find("拍卖成功", 1, true) then
+        return nil
+    end
+
+    -- 提取成交金额（格式通常形如：... [装备链接] 买家 27000，优先取末尾纯数字）
+    local moneyStr = msg:match("(%d+)%s*$") or msg:match("%s(%d+)%s*")
+    local money = tonumber(moneyStr)
+
+    local threshold = 5000
+    if BiaoGe and BiaoGe.options and BiaoGe.options.teamInfoAuctionThreshold ~= nil then
+        threshold = tonumber(BiaoGe.options.teamInfoAuctionThreshold) or 5000
+    end
+
+    if money and money >= threshold then
+        return true -- 大于等于设置的阈值，允许记录！
+    end
+
+    return false -- 低于阈值或无法提取金额，过滤丢弃
+end
+
 -- 判断一条消息是否为合法的开团招募/团队规则通告 (经过严密语义特征引擎筛选)
 local function IsValidRecruitOrRuleMessage(msg)
     if not msg or type(msg) ~= "string" or #msg < 4 then return false end
     if IsAddonNoise(msg) then return false end
+
+    -- 针对“拍卖成功”的专门筛选：仅保留 > 5000 且非蓝装的高价值记录，其余全部拦截
+    local isAuctionSuccess = CheckValidAuctionSuccess(msg)
+    if isAuctionSuccess ~= nil then
+        return isAuctionSuccess
+    end
 
     -- 必须命中以下实质性开团规则之一：
     if ExtractYYFromText(msg) then return true end
@@ -929,6 +959,9 @@ function TeamInfo.CreateUI()
     BiaoGe.options = BiaoGe.options or {}
     if BiaoGe.options.showTeamInfoFrame == nil then
         BiaoGe.options.showTeamInfoFrame = 1
+    end
+    if BiaoGe.options.teamInfoAuctionThreshold == nil then
+        BiaoGe.options.teamInfoAuctionThreshold = 5000
     end
 
     -- 9.1 顶部栏入口切换按钮 (挂载在拍卖记录按钮旁边，全局 Tab 常驻)
@@ -1124,12 +1157,63 @@ function TeamInfo.CreateUI()
     line:SetPoint("TOPLEFT", 12, -108)
     line:SetColorTexture(0.3, 0.3, 0.3, 0.8)
 
-    -- 通告列表标题
+    -- 通告列表标题与拍卖记录门槛设置
     local listTitle = f:CreateFontString(nil, "ARTWORK")
     listTitle:SetFont(BIAOGE_TEXT_FONT, 12, "OUTLINE")
     listTitle:SetPoint("TOPLEFT", 12, -114)
     listTitle:SetTextColor(0.8, 0.8, 0.8)
     listTitle:SetText(L["招募喊话与团队规则时序列表:"])
+
+    -- 拍卖成功记录阈值设置 (默认 5000，大于等于该价格即记录)
+    local threshGoldLabel = f:CreateFontString(nil, "ARTWORK")
+    threshGoldLabel:SetFont(BIAOGE_TEXT_FONT, 11, "OUTLINE")
+    threshGoldLabel:SetPoint("TOPRIGHT", f, "TOPRIGHT", -28, -115)
+    threshGoldLabel:SetTextColor(1, 0.82, 0)
+    threshGoldLabel:SetText(L["G"])
+
+    local threshEdit = CreateFrame("EditBox", nil, f, "InputBoxTemplate")
+    threshEdit:SetSize(46, 18)
+    threshEdit:SetPoint("RIGHT", threshGoldLabel, "LEFT", -2, 0)
+    threshEdit:SetAutoFocus(false)
+    threshEdit:SetNumeric(true)
+    threshEdit:SetMaxLetters(8)
+    threshEdit:SetFont(BIAOGE_TEXT_FONT, 11, "OUTLINE")
+    threshEdit:SetTextColor(1, 0.82, 0)
+    threshEdit:SetText(tostring(BiaoGe.options.teamInfoAuctionThreshold or 5000))
+    f.threshEdit = threshEdit
+
+    local threshLabel = f:CreateFontString(nil, "ARTWORK")
+    threshLabel:SetFont(BIAOGE_TEXT_FONT, 11, "OUTLINE")
+    threshLabel:SetPoint("RIGHT", threshEdit, "LEFT", -3, 0)
+    threshLabel:SetTextColor(0.8, 0.8, 0.8)
+    threshLabel:SetText(L["拍卖价格"])
+
+    local function SaveThreshold(self)
+        local val = tonumber(self:GetText()) or 5000
+        BiaoGe.options.teamInfoAuctionThreshold = val
+        self:SetText(tostring(val))
+    end
+    threshEdit:SetScript("OnEnterPressed", function(self)
+        SaveThreshold(self)
+        self:ClearFocus()
+    end)
+    threshEdit:SetScript("OnEditFocusLost", function(self)
+        SaveThreshold(self)
+    end)
+
+    local function ShowThreshTooltip(owner)
+        GameTooltip:SetOwner(owner, "ANCHOR_TOPRIGHT", 0, 4)
+        GameTooltip:ClearLines()
+        GameTooltip:AddLine(L["拍卖成功记录阈值"], 1, 1, 1)
+        GameTooltip:AddLine(L["设置团队频道中通报拍卖成功装备的记录门槛。"], 1, 0.82, 0, true)
+        GameTooltip:AddLine(" ")
+        GameTooltip:AddLine(L["规则说明："], 0, 0.9, 1)
+        GameTooltip:AddLine(L["当成交金额大于或等于此阈值时，自动记录到时序列表中；低于该金额则自动过滤忽略。"], 0.85, 0.85, 0.85, true)
+        GameTooltip:AddLine(L["默认阈值为 5000 金。设为 0 则记录所有拍卖成功。"], 0.2, 1, 0.6, true)
+        GameTooltip:Show()
+    end
+    threshEdit:SetScript("OnEnter", ShowThreshTooltip)
+    threshEdit:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
     -- 9.3 滚动列表容器 (填满等高下方区域)
     local scroll = CreateFrame("ScrollFrame", "BGLite_TeamInfoScroll", f, "UIPanelScrollFrameTemplate")
@@ -1223,6 +1307,9 @@ function TeamInfo.UpdateUI()
 
     if not f.yyEdit:HasFocus() then
         f.yyEdit:SetText((data and data.yy) or "")
+    end
+    if f.threshEdit and not f.threshEdit:HasFocus() then
+        f.threshEdit:SetText(tostring(BiaoGe.options.teamInfoAuctionThreshold or 5000))
     end
 
     -- 渲染时序通告列表项
