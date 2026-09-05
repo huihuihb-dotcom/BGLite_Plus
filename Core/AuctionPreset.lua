@@ -659,7 +659,7 @@ function ns.InitAuctionPresetModule()
 
         -- 注册到底部 Tab
         if BG.Create_TabButton then
-            local tabBtn = BG.Create_TabButton(BG.AuctionPresetMainFrameTabNum, L["预设价格"] or "预设价格", f, 100)
+            local tabBtn = BG.Create_TabButton(BG.AuctionPresetMainFrameTabNum, L["预设价格"] or "预设价格", f, 90)
             AuctionPreset.tabBtn = tabBtn
         end
 

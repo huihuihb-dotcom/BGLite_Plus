@@ -356,7 +356,7 @@ local function InitPlusUI()
         end
         BG.TradeHistoryMainFrameTabNum = BG.TradeHistoryMainFrameTabNum or 101
         if not BG.ButtonTabTrade and not BG.TradeHistoryTabButton and BG.TradeHistoryMainFrame then
-            BG.ButtonTabTrade = BG.Create_TabButton(BG.TradeHistoryMainFrameTabNum, L["交易记录"], BG.TradeHistoryMainFrame)
+            BG.ButtonTabTrade = BG.Create_TabButton(BG.TradeHistoryMainFrameTabNum, L["交易记录"], BG.TradeHistoryMainFrame, 90)
             BG.TradeHistoryTabButton = BG.ButtonTabTrade
             if BG.OnEnterDelay then
                 BG.OnEnterDelay(BG.ButtonTabTrade, function(self)
@@ -368,6 +368,93 @@ local function InitPlusUI()
                 end, 0.5, true)
             end
         end
+    end
+
+    -- 5.1 底部 Tab 栏逻辑排序与绝对居中对齐机制
+    function ns.UpdateTabButtonsLayout()
+        if not (BG and BG.tabButtons and BG.MainFrame) then return end
+
+        -- 逻辑权重排序表：
+        -- 1. 表格 -> 2. 对账 -> 3. 交易记录 -> 4. 邮件记录 (账务与流水成组紧随表格)
+        -- 5. 预设价格 -> 6. 装备库 -> 7. 心愿清单 -> 8. 团队工具 (金团辅助与扩展工具平滑衔接)
+        local TAB_ORDER = {
+            [BG.FBMainFrameTabNum or 1] = 1,              -- 表格
+            [BG.DuiZhangMainFrameTabNum or 2] = 2,         -- 对账
+            [BG.TradeHistoryMainFrameTabNum or 101] = 3,   -- 交易记录
+            [BG.MailHistoryMainFrameTabNum or 102] = 4,    -- 邮件记录
+            [BG.AuctionPresetMainFrameTabNum or 104] = 5,  -- 预设价格
+            [BG.ItemLibMainFrameTabNum or 20] = 6,         -- 装备库
+            [BG.HopeMainFrameTabNum or 21] = 7,            -- 心愿清单
+            [BG.RaidToolMainFrameTabNum or 22] = 8,        -- 团队工具
+        }
+
+        local validItems = {}
+        local hiddenItems = {}
+        for _, item in ipairs(BG.tabButtons) do
+            if item.button and item.button.IsShown and item.button:IsShown() then
+                table.insert(validItems, item)
+            else
+                table.insert(hiddenItems, item)
+            end
+        end
+
+        if #validItems == 0 then return end
+
+        -- 按逻辑权重稳定排序
+        table.sort(validItems, function(a, b)
+            local orderA = TAB_ORDER[a.num] or (1000 + (tonumber(a.num) or 0))
+            local orderB = TAB_ORDER[b.num] or (1000 + (tonumber(b.num) or 0))
+            return orderA < orderB
+        end)
+
+        -- 同步回写 BG.tabButtons 列表顺序，保证逻辑遍历与渲染一致
+        wipe(BG.tabButtons)
+        for _, item in ipairs(validItems) do
+            table.insert(BG.tabButtons, item)
+        end
+        for _, item in ipairs(hiddenItems) do
+            table.insert(BG.tabButtons, item)
+        end
+
+        -- 规范统一尺寸：全部 90 宽 x 28 高，按钮间距 3 像素
+        local btnWidth = 90
+        local btnHeight = 28
+        local spacing = 3
+        local totalWidth = 0
+
+        for _, item in ipairs(validItems) do
+            local bt = item.button
+            bt:SetSize(btnWidth, btnHeight)
+            totalWidth = totalWidth + btnWidth
+        end
+        totalWidth = totalWidth + (#validItems - 1) * spacing
+
+        -- 绝对居中：以主界面底部中心点 (BOTTOM, X=0) 为基准，向左偏移总宽度的一半
+        local startX = -math.floor(totalWidth / 2)
+
+        for i, item in ipairs(validItems) do
+            local bt = item.button
+            bt:ClearAllPoints()
+            if i == 1 then
+                bt:SetPoint("TOPLEFT", BG.MainFrame, "BOTTOM", startX, 1)
+            else
+                local prevBt = validItems[i - 1].button
+                bt:SetPoint("LEFT", prevBt, "RIGHT", spacing, 0)
+            end
+        end
+    end
+
+    -- 挂载完成后立即执行一次居中排布
+    ns.UpdateTabButtonsLayout()
+
+    -- 安全挂钩：后续若有任何新 Tab 动态创建，自动重新居中排布
+    if BG.Create_TabButton and not BG.hasHookedTabButtonLayout then
+        BG.hasHookedTabButtonLayout = true
+        hooksecurefunc(BG, "Create_TabButton", function()
+            if ns.UpdateTabButtonsLayout then
+                ns.UpdateTabButtonsLayout()
+            end
+        end)
     end
 
     -- 隐藏交易面板底部的「交易选项设置」按钮
@@ -443,6 +530,11 @@ local function InitPlusUI()
     -- 6. Hook 主框架、Tab 切换与 副本切换逻辑
     if BG.MainFrame and not BG.MainFrame.hasHookedPlus then
         BG.MainFrame.hasHookedPlus = true
+        BG.MainFrame:HookScript("OnShow", function()
+            if ns.UpdateTabButtonsLayout then
+                ns.UpdateTabButtonsLayout()
+            end
+        end)
         BG.MainFrame:HookScript("OnHide", function()
             HideAllSubFrames()
             if ns.TeamInfo and ns.TeamInfo.sideFrame then

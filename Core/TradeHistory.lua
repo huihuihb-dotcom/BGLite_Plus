@@ -19,7 +19,7 @@ local function InitTradeHistoryModule()
 
     -- 1. 恢复底部 Tab 按钮
     if BG.Create_TabButton and not BG.TradeHistoryTabButton then
-        local btTrade = BG.Create_TabButton(BG.TradeHistoryMainFrameTabNum, L["交易记录"], BG.TradeHistoryMainFrame, 100)
+        local btTrade = BG.Create_TabButton(BG.TradeHistoryMainFrameTabNum, L["交易记录"], BG.TradeHistoryMainFrame, 90)
         BG.TradeHistoryTabButton = btTrade
         if BG.OnEnterDelay then
             BG.OnEnterDelay(btTrade, function(self)
