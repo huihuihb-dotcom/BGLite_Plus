@@ -9,6 +9,7 @@ local GetClassRGB = ns.GetClassRGB
 
 local RaidTool = {}
 ns.RaidTool = RaidTool
+_G.RaidTool = RaidTool
 
 local MAX_RAID_MEMBERS = 40
 local NUM_GROUPS = 8
@@ -146,12 +147,31 @@ local function CleanPlayerName(name)
 end
 
 local function GetRosterMemberCount()
-    if GetNumGroupMembers and GetNumGroupMembers() > 0 then
-        return GetNumGroupMembers()
-    elseif GetNumRaidMembers and GetNumRaidMembers() > 0 then
-        return GetNumRaidMembers()
-    elseif GetNumSubgroupMembers and GetNumSubgroupMembers() > 0 then
-        return GetNumSubgroupMembers() + 1
+    if IsInRaid and IsInRaid() then
+        if GetNumGroupMembers and GetNumGroupMembers() > 0 then return GetNumGroupMembers() end
+        if GetNumRaidMembers and GetNumRaidMembers() > 0 then return GetNumRaidMembers() end
+        for i = 40, 1, -1 do
+            if (GetRaidRosterInfo and GetRaidRosterInfo(i)) or UnitExists("raid" .. i) then return i end
+        end
+    end
+    if IsInGroup and IsInGroup() then
+        if GetNumGroupMembers and GetNumGroupMembers() > 0 then return GetNumGroupMembers() end
+        if GetNumSubgroupMembers and GetNumSubgroupMembers() > 0 then return GetNumSubgroupMembers() + 1 end
+        if GetNumPartyMembers and GetNumPartyMembers() > 0 then return GetNumPartyMembers() + 1 end
+        for i = 4, 1, -1 do
+            if UnitExists("party" .. i) then return i + 1 end
+        end
+        return 2
+    end
+    if UnitExists and UnitExists("party1") then
+        for i = 4, 1, -1 do
+            if UnitExists("party" .. i) then return i + 1 end
+        end
+    end
+    if UnitExists and UnitExists("raid1") then
+        for i = 40, 1, -1 do
+            if UnitExists("raid" .. i) then return i end
+        end
     end
     return 0
 end
@@ -1264,6 +1284,8 @@ function RaidTool.CreateUI(parent)
     local slotButtons = {}
     local currentRosterList = {}
     local currentRosterClasses = {}
+    RaidTool.currentRosterList = currentRosterList
+    RaidTool.currentRosterClasses = currentRosterClasses
 
     local gridY = -70
     local groupWidth = 142
@@ -1463,6 +1485,15 @@ function RaidTool.CreateUI(parent)
                 UpdateSlotVisual(i)
             end
             UpdateGroupBoxesVisibility()
+
+            local comp = ns.RaidComp or _G.RaidComp
+            if comp and comp.StartScan then
+                comp.StartScan(false, currentRosterList, currentRosterClasses)
+            end
+            if comp and comp.UpdateUI then
+                comp.UpdateUI()
+            end
+
             if isManual then
                 DEFAULT_CHAT_FRAME:AddMessage("|cffff2020[BGLite 团队工具] 你当前不在任何队伍或团队中！|r")
             end
@@ -1523,6 +1554,15 @@ function RaidTool.CreateUI(parent)
             UpdateSlotVisual(i)
         end
         UpdateGroupBoxesVisibility()
+
+        -- 联动底部团队阵容与 Buff 分析模块同步刷新
+        local comp = ns.RaidComp or _G.RaidComp
+        if comp and comp.StartScan then
+            comp.StartScan(false, currentRosterList, currentRosterClasses)
+        end
+        if comp and comp.UpdateUI then
+            comp.UpdateUI()
+        end
 
         if isManual then
             RaidTool.Log(format("已成功同步当前阵容（共 %d 名成员）！", loadedCount))

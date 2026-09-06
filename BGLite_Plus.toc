@@ -22,6 +22,8 @@ Core\ItemLib.lua
 Core\Hope.lua
 Core\RoleOverviewOptions.lua
 Core\RaidTool.lua
+Core\RaidComp.lua
+Core\RaidCompUI.lua
 Core\WhoHistory.lua
 Core\TeamInfo.lua
 Core\TradeHistory.lua

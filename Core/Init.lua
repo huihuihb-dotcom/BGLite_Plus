@@ -82,6 +82,9 @@ local function HideAllSubFrames()
     SafeHide(BG.TradeHistoryMainFrame)
     SafeHide(BG.AuctionPresetMainFrame)
     SafeHide(BG.TitanGoblinMainFrame)
+    if _G["BG_RaidCompMatrixModalFrame"] then
+        SafeHide(_G["BG_RaidCompMatrixModalFrame"])
+    end
 end
 
 local function InitPlusUI()
@@ -341,7 +344,15 @@ local function InitPlusUI()
             if ns.RaidTool and ns.RaidTool.SyncCurrentRaidRoster then
                 ns.RaidTool.SyncCurrentRaidRoster(false)
             end
+            if ns.RaidComp and ns.RaidComp.UpdateUI then
+                ns.RaidComp.UpdateUI()
+            end
         end)
+    end
+
+    -- 4.6 团队阵容天赋分析与 Buff 缺口初始化
+    if ns.InitRaidCompModule then
+        securecall(ns.InitRaidCompModule)
     end
 
     -- 5. 挂载底部 TabButtons
