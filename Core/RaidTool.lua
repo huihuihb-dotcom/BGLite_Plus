@@ -133,6 +133,17 @@ end
 --------------------------------------------------------------------------------
 -- 2. 组队助手底层引擎 (Invite Engine & New Member Notifier)
 --------------------------------------------------------------------------------
+local function SafeTrim(text)
+    if not text then return "" end
+    text = tostring(text)
+    if string.trim then
+        return string.trim(text)
+    elseif strtrim then
+        return strtrim(text)
+    end
+    return (text:gsub("^%s*(.-)%s*$", "%1"))
+end
+
 local function CleanPlayerName(name)
     if not name or name == "" then return "" end
     name = tostring(name)
@@ -140,9 +151,9 @@ local function CleanPlayerName(name)
     name = name:gsub("|Hplayer:([^|:]+).-|h.-|h", "%1")
     name = name:gsub("|H.-|h", "")
     name = name:gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", "")
-    name = name:gsub("[%[%]]", ""):trim()
+    name = SafeTrim(name:gsub("[%[%]]", ""))
     -- 剥离服务器名后缀 (如 名字-服务器 -> 名字)
-    local short = (strsplit("-", name)):trim()
+    local short = SafeTrim(strsplit("-", name))
     return short
 end
 
@@ -656,8 +667,12 @@ end
 --------------------------------------------------------------------------------
 function RaidTool.CreateUI(parent)
     if BG.RaidToolMainFrame then return end
-    local mainFrame = CreateFrame("Frame", "BG.RaidToolMainFrame", parent)
+    local parentFrame = parent or (BG and BG.MainFrame) or UIParent
+    local mainFrame = CreateFrame("Frame", "BG.RaidToolMainFrame", parentFrame)
     mainFrame:SetAllPoints()
+    if parentFrame.GetFrameLevel then
+        mainFrame:SetFrameLevel(parentFrame:GetFrameLevel() + 5)
+    end
     mainFrame:Hide()
     BG.RaidToolMainFrame = mainFrame
 
@@ -2148,11 +2163,14 @@ function ns.InitRaidToolOthersOptions()
     local cbDebug = CreateFrame("CheckButton", "BG_Button_RaidToolDebugLog", content, "ChatConfigCheckButtonTemplate")
     cbDebug:SetSize(30, 30)
     cbDebug:SetPoint("TOPLEFT", content, "TOPLEFT", 15, startY - 28)
-    cbDebug.Text:SetFont(BIAOGE_TEXT_FONT, 15, "OUTLINE")
-    cbDebug.Text:SetText(L["开启团队工具调试日志"])
-    cbDebug.Text:SetWordWrap(false)
-    cbDebug.Text:SetWidth(cbDebug.Text:GetStringWidth() + 20)
-    cbDebug:SetHitRectInsets(0, -cbDebug.Text:GetWidth(), 0, 0)
+    local cbText = cbDebug.Text or _G[cbDebug:GetName() .. "Text"] or cbDebug:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
+    cbDebug.Text = cbText
+    cbText:SetFont(BIAOGE_TEXT_FONT, 15, "OUTLINE")
+    cbText:SetText(L["开启团队工具调试日志"])
+    cbText:SetWordWrap(false)
+    local textW = (cbText.GetStringWidth and cbText:GetStringWidth() or 120) + 20
+    if cbText.SetWidth then cbText:SetWidth(textW) end
+    if cbDebug.SetHitRectInsets then cbDebug:SetHitRectInsets(0, -textW, 0, 0) end
 
     cbDebug:SetChecked(RaidTool.IsDebugEnabled())
 

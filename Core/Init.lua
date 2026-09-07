@@ -342,10 +342,10 @@ local function InitPlusUI()
             SafeHide(BG.TabButtonsFB)
             BiaoGe.lastFrame = "RaidTool"
             if ns.RaidTool and ns.RaidTool.SyncCurrentRaidRoster then
-                ns.RaidTool.SyncCurrentRaidRoster(false)
+                pcall(ns.RaidTool.SyncCurrentRaidRoster, false)
             end
             if ns.RaidComp and ns.RaidComp.UpdateUI then
-                ns.RaidComp.UpdateUI()
+                pcall(ns.RaidComp.UpdateUI)
             end
         end)
     end
@@ -753,14 +753,22 @@ verFrame:RegisterEvent("CHAT_MSG_ADDON")
 verFrame:RegisterEvent("GROUP_ROSTER_UPDATE")
 verFrame:RegisterEvent("GUILD_ROSTER_UPDATE")
 
+local function SafeTrimStr(s)
+    if not s then return "" end
+    s = tostring(s)
+    if _G.strtrim then return _G.strtrim(s) end
+    return s:match("^%s*(.-)%s*$") or s
+end
+
 local function CleanVerPlayerName(name)
     if not name then return "" end
     name = tostring(name)
     name = name:gsub("|Hplayer:([^|:]+).-|h.-|h", "%1")
     name = name:gsub("|H.-|h", "")
     name = name:gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", "")
-    name = name:gsub("[%[%]]", ""):trim()
-    return (strsplit("-", name)):trim()
+    name = SafeTrimStr(name:gsub("[%[%]]", ""))
+    local first = strsplit("-", name)
+    return SafeTrimStr(first)
 end
 
 verFrame:SetScript("OnEvent", function(self, event, ...)

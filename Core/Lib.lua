@@ -1,5 +1,14 @@
 local AddonName, ns = ...
 
+-- 全局基础环境加固：纯净魔兽客户端缺失 string.trim 垫片（杜绝依赖 tdInspect 等第三方库注入）
+if not string.trim then
+    string.trim = function(s)
+        if not s then return "" end
+        if strtrim then return strtrim(s) end
+        return (tostring(s):gsub("^%s*(.-)%s*$", "%1"))
+    end
+end
+
 -- 引用 LibBG 下拉菜单库与本地化
 ns.LibBG = LibStub:GetLibrary("BiaoGe-LibUIDropDownMenu-4.0", true) or LibStub:GetLibrary("LibUIDropDownMenu-4.0", true) or (BG and BG.LibBG)
 local L = ns.L or setmetatable({}, {
