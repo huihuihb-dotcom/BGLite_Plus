@@ -400,17 +400,32 @@ function ns.InitBestPriceModule()
         editBox:SetNumeric(true)
         editBox:SetMaxLetters(8)
         editBox:SetFont(BIAOGE_TEXT_FONT, 13, "OUTLINE")
-        editBox:SetScript("OnEscapePressed", function(self)
-            self:ClearFocus()
-            self:GetParent():Hide()
-        end)
-        editBox:SetScript("OnEnterPressed", function(self)
-            self:ClearFocus()
-            self:GetParent().ok:Click()
-        end)
-        editBox:SetScript("OnHide", function(self)
-            self:ClearFocus()
-        end)
+        if ns.SecureEditBox then
+            ns.SecureEditBox(editBox, {
+                isNumeric = true,
+                onEscape = function(self)
+                    self:GetParent():Hide()
+                end,
+                onEnter = function(self)
+                    self:GetParent().ok:Click()
+                end,
+            })
+        else
+            editBox:SetScript("OnEscapePressed", function(self)
+                if self.HighlightText then self:HighlightText(0, 0) end
+                self:ClearFocus()
+                self:GetParent():Hide()
+            end)
+            editBox:SetScript("OnEnterPressed", function(self)
+                if self.HighlightText then self:HighlightText(0, 0) end
+                self:ClearFocus()
+                self:GetParent().ok:Click()
+            end)
+            editBox:SetScript("OnHide", function(self)
+                if self.HighlightText then self:HighlightText(0, 0) end
+                self:ClearFocus()
+            end)
+        end
         editBox:SetScript("OnTextChanged", function(self)
             if BG.UpdateTwo0 then BG.UpdateTwo0(self) end
             bestPriceDB.money = self:GetText()

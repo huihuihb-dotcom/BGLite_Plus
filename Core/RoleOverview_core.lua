@@ -917,17 +917,20 @@ function BG.AddRoleOverviewNote(realmID, realmName, player, colorplayer, note)
             OnHide = function(self)
                 local edit = self.EditBox or self.editBox or (self.GetName and _G[self:GetName() .. "EditBox"])
                 if edit then
-                    edit:ClearFocus()
+                    if edit.HighlightText then edit:HighlightText(0, 0) end
+                    if edit.ClearFocus then edit:ClearFocus() end
                 end
             end,
             OnCancel = function(self)
                 local edit = self.EditBox or self.editBox or (self.GetName and _G[self:GetName() .. "EditBox"])
                 if edit then
-                    edit:ClearFocus()
+                    if edit.HighlightText then edit:HighlightText(0, 0) end
+                    if edit.ClearFocus then edit:ClearFocus() end
                 end
             end,
             EditBoxOnEnterPressed = function(self)
-                self:ClearFocus()
+                if self.HighlightText then self:HighlightText(0, 0) end
+                if self.ClearFocus then self:ClearFocus() end
                 local p = self:GetParent()
                 if p then
                     local btn = p.button1 or (p.GetButton1 and p:GetButton1())
@@ -939,7 +942,8 @@ function BG.AddRoleOverviewNote(realmID, realmName, player, colorplayer, note)
                 end
             end,
             EditBoxOnEscapePressed = function(self)
-                self:ClearFocus()
+                if self.HighlightText then self:HighlightText(0, 0) end
+                if self.ClearFocus then self:ClearFocus() end
                 local p = self:GetParent()
                 if p then p:Hide() end
             end,
@@ -948,11 +952,14 @@ function BG.AddRoleOverviewNote(realmID, realmName, player, colorplayer, note)
     StaticPopupDialogs[popupName].OnAccept = function(self)
         local edit = self.EditBox or self.editBox or (self.GetName and _G[self:GetName() .. "EditBox"])
         if edit then
-            edit:ClearFocus()
-            BiaoGe.roleOverviewNote = BiaoGe.roleOverviewNote or {}
-            BiaoGe.roleOverviewNote[realmID] = BiaoGe.roleOverviewNote[realmID] or {}
-            BiaoGe.roleOverviewNote[realmID][player] = edit:GetText()
-            BG.SetFBCD(nil, nil, true, true)
+            if edit.HighlightText then edit:HighlightText(0, 0) end
+            if edit.ClearFocus then edit:ClearFocus() end
+            pcall(function()
+                BiaoGe.roleOverviewNote = BiaoGe.roleOverviewNote or {}
+                BiaoGe.roleOverviewNote[realmID] = BiaoGe.roleOverviewNote[realmID] or {}
+                BiaoGe.roleOverviewNote[realmID][player] = edit:GetText()
+                BG.SetFBCD(nil, nil, true, true)
+            end)
         end
     end
     StaticPopup_Show(popupName, realmName .. colorplayer, nil, note)

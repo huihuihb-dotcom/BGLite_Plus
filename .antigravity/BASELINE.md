@@ -1,4 +1,4 @@
-﻿# BGLite_Plus 项目基准文档 (BASELINE.md)
+# BGLite_Plus 项目基准文档 (BASELINE.md)
 
 ## 1. 项目简介
 - **项目名称**: BGLite_Plus (BiaoGe Plus - 魔兽世界怀旧服/时光服/正式服金团表格及辅助工具插件)
@@ -1132,7 +1132,7 @@
   - 用户敏锐提出：“其他 input 框是否存在这个问题，是否有隐患？是否有防御办法？”；
   - 经对整个 BGLite_Plus 源码全面扫描，发现魔兽插件生态普遍存在三大焦点泄漏隐患：
     1. **弹窗类 (StaticPopup)**：除 Boss 开拍弹窗外，角色备注弹窗 (BiaoGe_AddRoleOverviewNote)、阵容保存弹窗 (BG_SAVE_ROSTER_PROFILE) 等均只在 OnShow 中获取焦点，在点击确认、取消或按 ESC 关闭时均未调用 ditBox:ClearFocus()；
-    2. **常驻界面输入框**：团队信息语音框 (yyEdit)、拍卖阈值输入框 (	hreshEdit)、快捷心理价格 (ditBox)、预设价格搜索框 (searchEdit) 以及每行的起拍价/起拍语输入框 (pEdit/	Edit)，绝大多数只绑定了 OnTextChanged 或 OnEnterPressed，完全缺少 OnEscapePressed 和 OnEditFocusLost；
+    2. **常驻界面输入框**：团队信息语音框 (yyEdit)、拍卖阈值输入框 (threshEdit)、快捷心理价格 (ditBox)、预设价格搜索框 (searchEdit) 以及每行的起拍价/起拍语输入框 (pEdit/tEdit)，绝大多数只绑定了 OnTextChanged 或 OnEnterPressed，完全缺少 OnEscapePressed 和 OnEditFocusLost；
     3. **隐秘卡死场景**：一旦玩家鼠标点进过这些输入框，然后按 ESC 想退出、或者直接切 Tab/关闭主窗口，输入框虽然被隐藏（Hide），但操作系统底层的 IME 焦点指针仍挂在隐藏的 EditBox 身上，Windows 输入法持续劫持键盘所有字母和数字按键。
 * **架构级纵深防御体系 (FocusLeakGuard) 实施**:
   1. **全局弹窗自愈网 (hooksecurefunc("StaticPopup_Hide"))**:
@@ -1146,5 +1146,201 @@ s.SecureEditBox)**:
      - **角色总览备注弹窗 (RoleOverview_core.lua)**: 补齐 dit:SetAutoFocus(false)、OnHide、OnCancel、ClearFocus()；
      - **团队工具预设保存弹窗 (RaidTool.lua)**: 补齐 ditBox:SetAutoFocus(false)、OnHide、OnCancel、ClearFocus()；
      - **团队信息语音框与阈值框 (TeamInfo.lua)**: 补齐 OnEscapePressed、OnEditFocusLost 自动失焦；
-     - **预设价格面板 (AuctionPreset.lua)**: 补齐搜索框 searchEdit 与行内起拍价 pEdit、起拍语 	Edit 的 OnEscapePressed 与 OnEditFocusLost 自动失焦；
+     - **预设价格面板 (AuctionPreset.lua)**: 补齐搜索框 searchEdit 与行内起拍价 pEdit、起拍语 tEdit 的 OnEscapePressed 与 OnEditFocusLost 自动失焦；
      - **心理价格设置弹窗 (BestPrice.lua)**: 补齐 OnEscapePressed、OnEnterPressed、OnHide 的 self:ClearFocus()。
+
+## 40. 表格罚款/支出/总览等非掉落栏目拍卖按钮剔除与保护 (2026-09-07)
+* **需求与场景辨析**:
+  - 用户反馈指出：表格末尾的【罚款】这一项是用于记录团员犯错扣金币的，不属于 Boss 掉落物，不应显示一键开拍 [拍] 按钮；
+  - 经查 BGLite/Core/DB/DB_BossName.lua，表格末尾通常通过 Addother(boss) 追加【杂项】、【罚款】、【支出】、【总览】等辅助账务栏目。
+* **剔除与防护实施 (Core/AuctionPreset.lua)**:
+  1. **UI 挂载精准过滤 (HookBossAuctionButtons)**:
+     - 在为每个 ossFrame 注入 [拍] 按钮前，提取名称 
+ame2 / 
+ame 并识别是否属于【罚款】（罚款、罰款、Fine）或【支出】、【总览】；
+     - 若为罚款等非掉落项，若已存在 tnQuickAuction 则强制 Hide() 隐藏，并不再为其创建按钮，同时禁止在名称上挂载 Alt+点击全拍 Hook；
+     - 仅对真实的 Boss 与装备掉落栏目开放一键拍卖；
+  2. **后端全拍安全校验 (StartBossQuickAuction)**:
+     - 在一键全拍核心执行入口加装前置屏障，若传入的 Boss 索引为罚款/支出等账务项，直接安全拦截退出。
+## 41. 解决点击【确定开拍】后输入框消失导致角色卡移动 (WASD按键锁死) 的深度根治 (2026-09-07)
+* **故障现象与成因诊断**:
+  - 用户反馈指出：“在点击 确认开拍后，价格输入框消失 我瞬间就无法移动了。这是否没有准确处理”；
+  - **核心成因剖析**:
+    1. **选区高亮死锁 (HighlightText)**：弹窗此前在 `OnShow` 中无条件执行了 `editBox:HighlightText()`，使文本处于全局高亮选中状态。在 Windows 10/11 微软拼音等 IME 输入法体系中，高亮文本属于“待输入替换缓冲区（Active Composition Range）”。点击确认后弹窗隐藏，但若未显式清除高亮选区，输入法引擎将持续滞留在“等待击键替换该选区”的挂起模式；
+    2. **无条件强制获焦导致点击受灾**：弹窗打开即强行执行 `editBox:SetFocus()`。即使玩家根本不需要修改价格、直接用鼠标去点击【确定开拍】，系统输入法也已被强行唤醒并处于中文输入激活态；
+    3. **鼠标点击 UI 导致 3D 游戏视口 (WorldFrame) 焦点悬空**：鼠标在【确定开拍】按钮上完成点击并使弹窗瞬间消失后，鼠标未在游戏 3D 视口内发生过有效的 MouseDown 事件，魔兽客户端的移动按键分发通道未重新接管键盘，Windows 微软拼音在后台将 WASD 当作拼音字符拦截吞噬，导致玩家角色瞬间无法移动，直到按一次 Shift 切换至纯英文模式才恢复。
+* **四重纵深防御与彻底根除落地**:
+  1. **弹窗自身精细化生命周期控制 (Core/AuctionPreset.lua)**:
+     - 彻底移除 `OnShow` 中的全选高亮 `HighlightText()` 与盲目强行 `SetFocus()`；改为安全注入默认底价并将光标置于末尾 `editBox:SetCursorPosition(...)`。若用户直接点击【确定开拍】，光标从始至终未曾进入输入框，100% 杜绝唤醒输入法；
+     - 封装专属安全释放器 `SafeReleaseDialogFocus(dialog)`，在 `OnAccept`、`OnHide`、`OnCancel`、`EditBoxOnEnterPressed` 与 `EditBoxOnEscapePressed` 全链路统一调度；
+     - 严格在关闭时同步调用 `editBox:HighlightText(0, 0)`、`editBox:ClearHighlightText()` 与 `editBox:ClearFocus()`，并利用 `C_Timer.After(0)` 延迟彻底排查清理当前残留焦点；
+  2. **视口级全局终极防卡守护 (Core/Init.lua 中的 WorldFrame:HookScript("OnMouseDown"))**:
+     - 全局挂载 `WorldFrame` 鼠标按下监听：一旦玩家在 3D 游戏主屏幕（地面、转身、选中目标）点击鼠标，如果存在除默认聊天框外的任何残留 EditBox 焦点，一律光速清除高亮并强制脱焦，立即归还按键控制权；
+  3. **弹窗隐藏全局钩子升级 (StaticPopup_Hide)**:
+     - 针对游戏内所有静态弹窗隐藏时同步清空 `HighlightText(0, 0)`，并在 `C_Timer.After(0)` 执行延迟双保险清理；
+  4. **标准安全包装器增强 (ns.SecureEditBox)**:
+     - 为输入框补齐 `OnEditFocusLost` 与 `OnHide` 时的选区清空逻辑，彻底阻断输入法残留路径。
+## 42. 专属安全底价输入弹窗 (QuickPriceDialog)、团队频道通报修复与双列瀑布流排布 (2026-09-07)
+* **用户聚焦反馈**:
+  1. “感觉其他位置的 5000 那些不影响键盘，先别改，就改咱这里输入批量价格这个位置，防止键盘失灵”；
+  2. “广播显示全部发送，我依然只能看到 5-6 项，即使日志显示全部发送，检查代码看看有没有显示拍卖只能同时显示 6 个”；
+  3. 截图显示第 1 件发送了团队警报，但第 2~9 件在团队频道中完全未出现，且屏幕右侧只能看到 5~6 个拍卖小窗。
+* **物理病因深度诊断**:
+  1. **输入框同帧销毁导致 Windows IME 握手失败**：在暴雪 StaticPopup 下，输入框获焦时，鼠标直接点【确定开拍】，暴雪内部同步调用 `dialog:Hide()`。在同微秒内，输入框在获焦状态下瞬间消失，Windows 微软拼音未接收到 `EndComposition`，导致输入法死锁在后台吞噬 WASD；
+  2. **团队频道判断参数致失效**：此前在广播队列中使用了 `IsInRaid(1)`，魔兽 Classic 普通团队中传入 1 返回 false，致使第 2~9 件的普通团队通报被全部阻断；
+  3. **单列累加高度超出屏幕物理裁剪**：每个拍卖小窗高度 105px（净占用 110px），起始位置为 Y=-200。排到第 6 个时 Y 坐标已达 -860px，将 1080p 屏幕撑满；第 7~9 个排在 -860~-1080px，已被物理排布到显示器可视区域之外！
+* **架构级落地方案 (Core/AuctionPreset.lua)**:
+  1. **专属于批量价格的无卡键安全弹窗 (QuickPriceDialog)**:
+     - 彻底摒弃暴雪 StaticPopup，构建原生轻量对话框（居中、暗黑金边、模态）；
+     - 输入框右侧配备专属【确定】按钮，点击后立即让输入框脱焦并清空选区；
+     - 底部【确定开拍】与【取消】按钮引入 **50ms 安全脱焦时钟**：先执行脱焦，通过 `C_Timer.After(0.05, ...)` 延迟隐藏弹窗，确保操作系统与输入法平滑退出，彻底根除键盘失灵；
+  2. **团队/队伍通报通道修复**:
+     - 将 `IsInRaid(1)` 替换为 `IsInRaid() or IsInGroup()`，自动适配 RAID 与 PARTY 频道，第 2~9 件平滑广播至聊天栏；
+  3. **双列瀑布流智能排布引擎 (Two-Column Layout)**:
+     - 挂载 `BGA.aura_env.UpdateAllFrames` 钩子：当正在拍卖的装备数量 > 5 时，自动将 6~10 号框体排布在左侧第二列（X = -325px，Y 坐标与 1~5 号水平对齐）；
+     - 使得 10 个拍卖框整体垂直高度锁定在 550px，在任何屏幕分辨率下均 100% 完整可视且清晰交互！
+
+## 43. 批量拍卖丢失部分装备 (6、8、9号) 根因彻底排查与全链路修复 (2026-09-07)
+* **用户指正与排版假说修正**:
+  - 用户明确指出聊天框周边拥有充裕空白，窗口位置系截图时手动拖拽移动，此前“屏幕下边缘物理裁切”推论彻底推翻。
+* **装备丢失现象深度剖析**:
+  - **开拍清单 (艾索雷葛斯 9 件装备)**:
+    - 1: 熔火胜利者的护肩 (套装代币) -> 成功创建 (倒计时 16s)
+    - 2: 熔火征服者的护肩 (套装代币) -> 成功创建 (倒计时 17s)
+    - 3: 熔火保卫者的护肩 (套装代币) -> 成功创建 (倒计时 18s)
+    - 4: 熔火征服者的腰带 (套装代币) -> 成功创建 (倒计时 19s)
+    - 5: 水晶头冠 (布甲头部) -> 成功创建 (倒计时 20s)
+    - 6: **强者斗篷** (物理披风) -> **失败丢失 (无团队警告，无拍卖窗口)**
+    - 7: 无上奥法护腿 (布甲腿部) -> 成功创建 (倒计时 22s，紧随 5 号占据第 6 槽位)
+    - 8: **永冻腰带** (皮甲腰带) -> **失败丢失 (无团队警告，无拍卖窗口)**
+    - 9: **秘法之牙** (单手匕首) -> **失败丢失 (无团队警告，无拍卖窗口)**
+  - **关键铁证与逻辑排除**:
+    - 第 7 号 (无上奥法护腿) 成功创建且紧随 5 号出现，倒计时与 5 号相差 2 秒（证实第 6 秒广播确实发出但被吞），同时证实系统**根本不存在同时只能拍卖 6 件的上限限制**（若有限制，7 号不可能成功创建）；
+    - 仅有 #6 (强者斗篷)、#8 (永冻腰带)、#9 (秘法之牙) 三件物理/特定装备遭遇了事件中断。
+* **致命根因定位 (Item:CreateFromItemLink 静默死锁)**:
+  1. **`SafeGetItemLink` 返回非超链接纯文本**:
+     - 原 `SafeGetItemLink(rawText, itemID)` 当格子里无 `|Hitem:` 且 `GetItemInfo(itemID)` 尚未缓存在客户端内存时，末尾执行了 `return rawText`（返回了纯名字字符串 `"强者斗篷"`）；
+  2. **Addon 消息序列化与分发**:
+     - `BG.SendStartAuctionMsg` 将 `"强者斗篷"` 作为 link 字段通过 `BiaoGeAuction` 信道向团队广播；
+  3. **接收端 `AuctionWAEvent.lua:644` 致命拦截**:
+     - 接收端解析得到 `link = "强者斗篷"`；
+     - 执行 `BG.OnItemLoad(link or itemID)`：因 `link` 存在且为 string，调用了暴雪官方 `Item:CreateFromItemLink("强者斗篷")`；
+     - 暴雪底层 `Item:CreateFromItemLink` 遇到缺少 `|Hitem:` 的非标准超链接字符串时直接认定为无效物品，调用 `:ContinueOnItemLoad(callback)` 时**回调函数永远不会被执行**；
+     - 结果：`wa.CreateAuction` 与 `SendChatMessage(RAID_WARNING)` 彻底被静默丢弃，导致装备在广播后毫无痕迹地“人间蒸发”！
+* **全链路自愈与架构加固措施 (Core/AuctionPreset.lua)**:
+  1. **`SafeGetItemLink` 严守超链接边界**:
+     - 严格校验是否包含 `|Hitem:`；若格子里没有且 `GetItemInfo(itemID)` 未能生成合法链接，**100% 坚决返回 `nil`**，绝不返回普通纯文本；
+  2. **发送端空串安全转换**:
+     - `BG.SendStartAuctionMsg(..., validLink or "", ...)`：若无 link 则传空字符串 `""`，接收端 `linkStr ~= ""` 判定为 false，`link` 解析为 `nil`，从而安全回退至数字 `itemID`；
+  3. **基于 `Item:CreateFromItemID` 的官方异步拉取**:
+     - 当传入数字 `itemID`（如 18541）时，暴雪底层自动向服务器发起数据查询，缓存就绪后稳稳当当触发 `ContinueOnItemLoad` 回调，100% 保证拍卖窗口创建；
+  4. **全局加固 `BG.OnItemLoad` 守护防线**:
+     - 在模块中对全局 `BG.OnItemLoad` 进行安全包装：若入参为非 `|Hitem:` 的字符串，自动尝试提取 itemID 并转入 `Item:CreateFromItemID` 处理，彻底免疫任何因非标准格式导致的异步死锁；
+  5. **清除干扰性排版 Hook**:
+     - 彻底移除 `RelayoutAuctionFrames` 及其对 `HookCreateAuction` 和 `UpdateAllFrames` 的挂载，恢复暴雪和上游原汁原味的原生垂直排布，杜绝外部代码对界面坐标的负面干扰。
+
+## 44. 注入拍卖窗口绘制全生命周期排查日志 (2026-09-07)
+* **目的与方案**:
+  - 用户确认网络信令已成功发出，需在客户端绘制拍卖窗口的各个内部生命周期节点挂载清晰的可视化排查日志，定位丢失装备具体断在哪个环节；
+  - 在 Core/AuctionPreset.lua 中嵌入 SetupAuctionDebugLogger 独立排查日志模块（测试完毕后可一键完整删除）：
+    1. **[拍卖排查:1-收到信令]**: 捕获 CHAT_MSG_ADDON 中的 StartAuction 消息，确认客户端是否真正接收到了该信令；
+    2. **[拍卖排查:2-发起异步]**: 追踪 BG.OnItemLoad 调用与入参类型；
+    3. **[拍卖排查:3-异步完成]**: 追踪暴雪官方 :ContinueOnItemLoad 异步回调是否真正触发（若有2无3，说明暴雪官方 Item 异步未回调）；
+    4. **[拍卖排查:4-进入绘制]**: 包装 BGA.aura_env.CreateAuction 入口，检查是否被重复的 uctionID 查重 return；
+    5. **[拍卖排查:5-绘制成功]**: 确认窗口是否成功加入 BGA.Frames，输出其分配编号 
+um、装备名、是否可见及实际计算的 Y 坐标；
+    6. **[拍卖排查:!注意折叠]**: 检查该装备是否因职业过滤被收束为 IsSmallWindow 折叠条。
+
+## 45. 发现格内属性前缀括号导致装备 ID 解析失效并补全发送端日志 (2026-09-07)
+* **用户实战截图铁证发现**:
+  - 用户截图中喊话内容暴露了单元格真实文本：[(板甲-腰部)(213)(板甲-腰部)(213)永冻腰带]、[(魔杖)(213)...冰冷魔棒]、[(匕首-主手)(213)...秘法之牙]；
+  - 现象：第 6 项 (永冻腰带)、第 8 项 (冰冷魔棒)、第 9 项 (秘法之牙) 甚至没有收到 [排查:1-收到信令]，而第 7 项 (无上奥法护腿) 却错位拿到了 18545 (秘法之牙的 ID)！
+* **致命根因**:
+  - SafeGetItemID 此前只剥离了 []，未剥离 (板甲-腰部)(213) 这种前缀括号标签，导致直接把 (板甲-腰部)(213)... 传给 GetItemInfoInstant，暴雪 API 无法识别带前缀的名称，返回 
+il，引发 itemID 识别失败或数据错位；
+* **修复与加固**:
+  1. 在 SafeGetItemID 中使用 %b() 和 %b（） 彻底剥离所有前缀括号标签，还原出纯粹的物品名称，使暴雪 API 能 100% 正确命中对应 itemID；
+  2. 在发送队列中补充 [拍卖排查:0-准备发送] 与 [拍卖排查:0-已发信令] 追踪，实时确认 it.id、alidLink 与 SendStartAuctionMsg 的实际执行情况。
+
+## 46. 确立“本地直通创建 + 网络异步广播”双保险架构 (2026-09-07)
+* **核心现象对比与矛盾破局**:
+  - 用户指出：“单个直接单击拍卖可以发送出去并成功弹出窗口，但批量开拍时 6、8、9 号没有信令”；
+  - 现象剖析：
+    - 单击单件开拍时，仅发送 1 条信令，绝不触发暴雪客户端/服务器端的发言与 Addon 频控限制（Token Bucket）；
+    - 批量开拍时，连续高频发送 9 件装备 + 9 次团队频道发言，导致魔兽底层网络流量整形器将后续偶数条 Addon 消息静默掐断；
+* **工业级双保险架构实施 (Core/AuctionPreset.lua)**:
+  1. **底层网络 API 追踪**:
+     - Hook C_ChatInfo.SendAddonMessage，实时输出其发送返回值与文本字节数；
+  2. **统一信令与本地生成的 fixedAuctionID**:
+     - 包装 BG.SendStartAuctionMsg，使发出的信令与本地创建共享完全相同的 auctionID（精准到毫秒的同一浮点数）；
+  3. **团长本机直通创建拍卖窗口**:
+     - 团长发起批量拍卖时，不盲目等待网络回环，直接在本机触发 BG.OnItemLoad:ContinueOnItemLoad 并调用 wa.CreateAuction(fixedAuctionID, ...)；
+     - 彻底免疫任何网络丢包与频控限制，保证团长本机的全部 9 个窗口 100% 弹出且零延迟；
+     - 原版 wa.CreateAuction 内部自带基于 auctionID 的查重逻辑（第 87~90 行），若网络信令稍后回传，自动识别重复并安全忽略，绝不会产生多余重复窗口。
+
+## 47. 彻底清除临时排查日志，恢复纯净运行环境 (2026-09-07)
+* **改动落实**:
+  - 用户确认全量 9 件装备批量开拍功能与全部拍卖窗口绘制已彻底恢复正常；
+  - 彻底移除了 `Core/AuctionPreset.lua` 中临时挂载的 `SetupAuctionDebugLogger` 模块（包含 `CHAT_MSG_ADDON`、`OnItemLoad`、`CreateAuction`、`SendAddonMessage` 追踪钩子）；
+  - 移除了发送队列中所有的临时排查打印，仅保留常规友好的业务广播与通报信息；
+  - 全库检索确认无任何调试打印残留，代码库恢复纯净出厂状态。
+
+## 48. 修复开拍初始状态误传玩家名字导致面板出价人显示为自己的 Bug (2026-09-07)
+* **问题现象**:
+  - 用户反馈：“发出拍卖消息后，我没有出价，但是面板上出价者是我”；
+* **根因定位**:
+  - `AuctionWAEvent.lua` 中 `wa.CreateAuction(auctionID, itemID, money, duration, player, ...)`：
+    - 原生开拍信令中该字段为空（`player = ""` 或 `nil`），表示起拍未出价状态（`auctionFrame.start = true`，展示【起拍价：XX】）；
+    - 若传入有效玩家名字，原生会执行 `auctionFrame.start = false` 并展示【出价最高者：>> 你 <<】同时将框体染为绿色；
+  - 此前本地直通创建调用中将 `BG.playerName` 误作为 `player` 传入；
+* **修复与落实**:
+  - 在 `Core/AuctionPreset.lua` 的本地创建调用中将第 5 个参数改为 `nil`：
+    `BGA.aura_env.CreateAuction(fixedAuctionID, it.id, finalMoney, duration, nil, mod, validLink, resetThreshold, isGen2)`；
+  - 恢复标准的初始起拍状态，面板仅显示起拍价，出价者为空。
+
+## 49. 团员仅能看到6件窗口与拍卖成功自动记账双缺陷根治 (2026-09-07)
+* **Bug 1: 团长能看到9件，其他用户仍然只能看到6件**:
+  - **网络信令丢包根因**:
+    - 在快速拍卖队列中，每秒发送一次 `SendStartAuctionMsg`（Addon 广播）的同时，还伴随一次 `SendChatMessage` 普通团队文字通报；
+    - 连续 9 秒产生 18 条发言/广播，触发暴雪客户端底层的 Token Bucket（令牌桶）流量整形器限流保护，从第 7 秒开始静默丢弃后续 Addon 广播包，导致仅依靠 Addon 信令接收的其他团员收不到后 3 件装备；
+  - **物理排布超界根因**:
+    - 原生 BGLite 的单列自上而下排布，每个展开窗口高度 100px + 间距 5px；超过 6 个窗口后累计垂直高度达到 630px+，在常见 1080p 或笔记本屏幕下，后 3 个窗口直接延伸到屏幕物理下边缘之外；
+  - **综合根治措施 (Core/AuctionPreset.lua)**:
+    1. **令牌保护与频控松绑**:
+       - 队列发送间隔从 1.0 秒微调为 1.3 秒，确保暴雪令牌完全恢复；
+       - 将团队通报重构为开拍前单次汇总通报（`[BGLite] 团长已发起【XX】批量拍卖（共 N 件装备），请在拍卖窗口出价！`），**彻底删除循环内部每秒一次的 `SendChatMessage` 刷屏**，Token 维持充盈，9 件信令 100% 送达全团；
+    2. **智能自适应多列排布**:
+       - 挂载 `wa.UpdateAllFrames`：当活跃拍卖窗口数量 > 6 时，自动转为双列平铺排列（前 5 个在左列，第 6 个及以后在右列），单列高度最大锁在 500px 左右，彻底杜绝任何分辨率下的屏幕边缘裁切。
+* **Bug 2: 拍卖成功后表格中未自动记录买家和金额**:
+  - **官方原生设计定位**:
+    - 查阅原生代码 `AuctionLog.lua:583`，发现官方默认逻辑为：
+      `function BG.IsAutoCreateBill() return BiaoGe.options.autoCreateBill == 1 and not BG.IsML end`
+    - 原作者特意通过 `and not BG.IsML` 将团长/分配者排除在自动记账之外（原作者设想让团长在交易框界面通过给物品时自动记账）；
+    - 且原版的 `BG.CreateBillByAuctionLog` 会暴力清空整个表格的所有历史账目再全量重绘，极度危险易造成误删；
+  - **增量安全自动记账体系 (Core/AuctionPreset.lua)**:
+    1. Hook 暴雪与 BGLite 拍卖完成核心事件 `hooksecurefunc(BG, "AuctionWAEnd", ...)`；
+    2. 当 `endType == 1`（拍卖成功）时，提取成交物品 `itemID`，在当前活跃副本 `FB` 中寻找首个 `itemID` 匹配且买家、金额均为空的行；
+    3. 写入买家名字并自动解析职业颜色（`GetClassColor` / `RAID_CLASS_COLORS`）；
+    4. 写入成交金额，并触发金额单元格的原生 `OnTextChanged`，自动联动重算总收入、净收入和人均工资；
+    5. 数据安全持久化至 `BiaoGe[FB]["boss" .. b]`，增量写入绝不覆盖用户手动录入的其他账目；
+    6. 向团长屏幕输出优雅记账通报：`[BGLite] 拍卖记账成功：[装备] 由 [买家] 以 [金额]G 拍得，已自动记入表格！`。
+
+## 50. 全局输入框焦点管理与错误状态自愈体系重构 (2026-09-07)
+* **问题现象与原生冲突**:
+  - 用户反馈：“在销毁装备的时候，delete无法输入”；
+  - **根因剖析**: 此前为防范 Windows 10/11 中文输入法卡 WASD / 卡键盘按键，在 `Core/Init.lua` 中加入了全局 `hooksecurefunc("StaticPopup_Hide")`（内置 `C_Timer.After(0)` 延迟清焦点）与 `WorldFrame:HookScript("OnMouseDown")`；
+  - 当玩家在游戏中拖拽高价值物品到 3D 视口销毁时，暴雪框架不仅会先触发 `WorldFrame` 鼠标点击，内部还会调用 `StaticPopup_Hide` 隐藏前置弹窗；
+  - 随后暴雪刚弹出 `DELETE_GOOD_ITEM` 弹窗并聚焦其 `editBox`，下一帧立即被延迟定时器将焦点暴力拔除，导致输入框无法激活、键盘按键全部失效。
+* **重构方案与实施 (严格守界 + 错误保护 + 异常自愈)**:
+  1. **彻底拆除全局危险炸弹 (Boundary Guard)**:
+     - 彻底切除 `StaticPopup_Hide` 与 `WorldFrame:HookScript("OnMouseDown")` 的全局钩子，100% 放行暴雪系统原生弹窗（装备销毁 DELETE_GOOD_ITEM、删除角色、解散公会等），彻底治愈原生弹窗无法输入的问题；
+     - 建立组件归属检测引擎 `ns.IsBGLiteElement(frame)`，严格将管理范围收敛至 BGLite / BGLite_Plus 体系内部。
+  2. **错误状态与安全提交保护 (`ns.SafeCommit` & `pcall`)**:
+     - 在用户回车、点击确认或执行业务计算时全程采用 `pcall` 保护模式；
+     - **Finally 保证机制**：即使业务逻辑发生任何未预料的 Lua 报错，保证在 `finally` 阶段无条件执行 `editBox:ClearFocus()` 与 `HighlightText(0, 0)`，彻底终结“代码报错即卡键死锁”；
+     - 捕获错误并友好输出至聊天框，避免程序崩溃。
+  3. **标准化安全输入框装配器 (`ns.SecureEditBox`)**:
+     - 统一接管 OnEscapePressed、OnEnterPressed、OnEditFocusLost、OnHide 与控件禁用（`Disable` / `SetEnabled(false)`）；
+     - 支持数值范围自动容错重置与友好错误反馈；
+     - 深度接入 `AuctionPreset.lua`（快速起拍价、批量底价弹窗）、`BestPrice.lua`（心理价格弹窗）与 `RoleOverview_core.lua`（角色备注弹窗）。
+

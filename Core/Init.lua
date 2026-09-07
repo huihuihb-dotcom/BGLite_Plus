@@ -1047,53 +1047,170 @@ function ns.UpdatePlusVerFrame()
 end
 
 --------------------------------------------------------------------------------
--- 10. 全局输入框焦点泄漏与输入法卡键终极防御体系 (Focus Leak Guard)
---------------------------------------------------------------------------------
--- 核心原理：
--- Windows 10/11 与魔兽客户端在 EditBox 获得焦点时会唤醒 IME 中文输入法。
--- 若弹窗或界面隐藏时未调用 editBox:ClearFocus()，焦点指针残留会导致输入法持续拦截键盘按键（按技能打不出，按 Shift 临时恢复）。
--- 本模块提供全插件乃至系统弹窗级的自动焦点兜底回收机制，100% 杜绝输入法卡键！
 
--- ① 弹窗级全局防御：任何 StaticPopup 隐藏时，自动检测并强行释放内部残留焦点
-hooksecurefunc("StaticPopup_Hide", function(which)
-    for i = 1, (STATICPOPUP_NUMDIALOGS or 4) do
-        local dialog = _G["StaticPopup" .. i]
-        if dialog and dialog.editBox then
-            if dialog.editBox.HasFocus and dialog.editBox:HasFocus() then
-                dialog.editBox:ClearFocus()
+-- 10. BGLite 专属输入框焦点管理与错误状态自愈体系 (SafeInput & FocusGuard)
+--------------------------------------------------------------------------------
+-- 核心设计与准则：
+-- 1. 严格守界 (Boundary Guard)：严禁全局无差别 Hook StaticPopup_Hide 或 WorldFrame:OnMouseDown！
+--    杜绝干扰暴雪原生弹窗（如销毁装备 DELETE_GOOD_ITEM、删除角色、解散公会等），彻底解决原生弹窗无法输入的问题。
+-- 2. 错误保护 (SafeCommit & pcall)：在用户回车、点击确认或执行业务计算时全程采用保护模式执行。
+--    即使业务代码发生任何未预料的 Lua 报错，保证在 finally 阶段无条件执行 ClearFocus() 和重置 IME 高亮，彻底终结“报错即卡键”！
+-- 3. 生命周期自愈 (Lifecycle Cleanup)：在父级隐藏、控件禁用 (Disable) 或失去焦点时，自动级联清理选区与残留焦点。
+
+-- ① 归属判定：精准识别是否属于 BGLite / BGLite_Plus 管辖的组件
+function ns.IsBGLiteElement(frame)
+    if not frame then return false end
+    if frame._isBGLiteManaged then return true end
+
+    local current = frame
+    local depth = 0
+    while current and depth < 10 do
+        if current == (BG and BG.MainFrame) or current == (ns.TeamInfo and ns.TeamInfo.sideFrame) then
+            return true
+        end
+        local name = current.GetName and current:GetName()
+        if name then
+            if name:find("^BGLite") or name:find("^BiaoGe") or name:find("^BG_") then
+                return true
+            end
+        end
+        if current == UIParent or current == WorldFrame then
+            break
+        end
+        current = current.GetParent and current:GetParent()
+        depth = depth + 1
+    end
+    return false
+end
+
+-- ② 错误保护提交机制：带 pcall 异常捕获与必定脱焦兜底
+function ns.SafeCommit(editBox, callback)
+    local ok, err
+    if callback then
+        ok, err = pcall(callback, editBox)
+        if not ok then
+            local errMsg = format("|cffff2020[BGLite 输入异常]|r %s", tostring(err))
+            if DEFAULT_CHAT_FRAME then
+                DEFAULT_CHAT_FRAME:AddMessage(errMsg)
             end
         end
     end
-end)
+    -- 核心保障 (Finally 机制)：无论业务逻辑是否抛错，100% 强制清空高亮并安全脱焦，收回键盘控制权
+    if editBox then
+        if editBox.HighlightText then editBox:HighlightText(0, 0) end
+        if editBox.ClearFocus then editBox:ClearFocus() end
+    end
+    return ok, err
+end
 
--- ② 界面级全局防御：BGLite 主界面隐藏（按 ESC 或点击关闭）时，自动回收所有残留输入焦点
+-- ③ 界面级安全防御：BGLite 主界面隐藏（按 ESC 或点击关闭）时，仅回收属于本插件的残留焦点
 if BG and BG.MainFrame then
     BG.MainFrame:HookScript("OnHide", function()
         local currentFocus = GetFocus and GetFocus()
         if currentFocus and currentFocus.IsObjectType and currentFocus:IsObjectType("EditBox") then
-            -- 豁免暴雪原生默认聊天输入框
-            if currentFocus ~= ChatFrame1EditBox and currentFocus ~= (DEFAULT_CHAT_FRAME and DEFAULT_CHAT_FRAME.editBox) then
-                currentFocus:ClearFocus()
+            if ns.IsBGLiteElement(currentFocus) then
+                if currentFocus.HighlightText then currentFocus:HighlightText(0, 0) end
+                if currentFocus.ClearFocus then currentFocus:ClearFocus() end
             end
         end
     end)
 end
 
--- ③ 公共工具：为任意 EditBox 快速注入防泄漏标准行为
-function ns.SecureEditBox(editBox, onEnterCallback, onEscapeCallback)
+-- ④ 标准化安全输入框装配器 (支持 pcall 保护、异常自愈、禁用与失焦级联回收)
+function ns.SecureEditBox(editBox, options, legacyOnEscape)
     if not editBox then return end
+    editBox._isBGLiteManaged = true
+
+    local opts = options
+    if type(options) == "function" then
+        opts = {
+            onEnter = options,
+            onEscape = legacyOnEscape,
+        }
+    elseif type(options) ~= "table" then
+        opts = {}
+    end
+
     editBox:SetAutoFocus(false)
+
+    -- OnEscapePressed: 安全脱焦并清空选区，执行可选取消逻辑
     editBox:HookScript("OnEscapePressed", function(self)
-        self:ClearFocus()
-        if onEscapeCallback then onEscapeCallback(self) end
+        if self.HighlightText then self:HighlightText(0, 0) end
+        if self.ClearFocus then self:ClearFocus() end
+        if opts.onEscape then
+            pcall(opts.onEscape, self)
+        end
     end)
+
+    -- OnEnterPressed: 无论回调成功或异常抛错，均必定收回焦点
     editBox:HookScript("OnEnterPressed", function(self)
-        self:ClearFocus()
-        if onEnterCallback then onEnterCallback(self) end
+        ns.SafeCommit(self, function(eb)
+            -- 若开启数字类型校验，在提交前完成异常数据自愈与容错
+            if opts.isNumeric then
+                local text = eb:GetText() or ""
+                local num = tonumber(text)
+                if not num then
+                    if opts.defaultValue ~= nil then
+                        eb:SetText(tostring(opts.defaultValue))
+                    end
+                    if opts.errorTip and UIErrorsFrame then
+                        UIErrorsFrame:AddMessage(opts.errorTip, 1, 0.2, 0.2)
+                    end
+                elseif opts.minValue and num < opts.minValue then
+                    eb:SetText(tostring(opts.minValue))
+                    if UIErrorsFrame then UIErrorsFrame:AddMessage("数值低于下限，已自动重置", 1, 0.8, 0) end
+                elseif opts.maxValue and num > opts.maxValue then
+                    eb:SetText(tostring(opts.maxValue))
+                    if UIErrorsFrame then UIErrorsFrame:AddMessage("数值超出上限，已自动限制", 1, 0.8, 0) end
+                end
+            end
+            if opts.onEnter then
+                opts.onEnter(eb)
+            end
+        end)
     end)
+
+    -- OnEditFocusLost: 释放 IME 高亮选区，防止输入法拦截
+    editBox:HookScript("OnEditFocusLost", function(self)
+        if self.HighlightText then self:HighlightText(0, 0) end
+        if opts.onFocusLost then
+            pcall(opts.onFocusLost, self)
+        end
+    end)
+
+    -- OnHide: 框架隐藏时，若持有焦点则平稳脱焦
     editBox:HookScript("OnHide", function(self)
-        if self.HasFocus and self:HasFocus() then
+        if self.HighlightText then self:HighlightText(0, 0) end
+        if self.ClearFocus and (self.HasFocus and self:HasFocus()) then
             self:ClearFocus()
         end
     end)
+
+    -- 禁用状态联动：控件被 Disable 时主动脱焦，杜绝幽灵焦点
+    if editBox.Disable then
+        hooksecurefunc(editBox, "Disable", function(self)
+            if self.ClearFocus and (self.HasFocus and self:HasFocus()) then
+                if self.HighlightText then self:HighlightText(0, 0) end
+                self:ClearFocus()
+            end
+        end)
+    end
+    if editBox.SetEnabled then
+        hooksecurefunc(editBox, "SetEnabled", function(self, enabled)
+            if not enabled and self.ClearFocus and (self.HasFocus and self:HasFocus()) then
+                if self.HighlightText then self:HighlightText(0, 0) end
+                self:ClearFocus()
+            end
+        end)
+    end
+
+    -- 绑定确认按钮联动
+    if opts.commitButton then
+        opts.commitButton:HookScript("OnClick", function()
+            ns.SafeCommit(editBox, function(eb)
+                if opts.onEnter then opts.onEnter(eb) end
+            end)
+        end)
+    end
 end
+

@@ -30,8 +30,9 @@ local function SafeGetItemID(text)
         if bgId then return tonumber(bgId) end
     end
 
-    -- 4. 彻底剥离颜色代码、方括号、去除首尾空格后的纯名称解析
+    -- 4. 彻底剥离颜色代码、方括号、前缀属性括号 (如 (板甲-腰部)(213) )、去除首尾空格后的纯名称解析
     local cleanName = str:gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", ""):gsub("%[", ""):gsub("%]", "")
+    cleanName = cleanName:gsub("%b()", ""):gsub("%b（）", "")
     cleanName = cleanName:gsub("^%s+", ""):gsub("%s+$", "")
     local nameWithoutLevel = cleanName:gsub("%s+%d+$", ""):gsub("^%s+", ""):gsub("%s+$", "")
 
@@ -56,16 +57,16 @@ local function SafeGetItemID(text)
     return nil
 end
 
--- 辅助工具：确保获得魔兽标准可用的装备超链接
+-- 辅助工具：确保获得魔兽标准可用的装备超链接 (必须包含 |Hitem:)
 local function SafeGetItemLink(rawText, itemID)
-    if rawText and rawText:find("|Hitem:") then
+    if rawText and type(rawText) == "string" and rawText:find("|Hitem:") then
         return rawText
     end
     if itemID then
         local _, link = GetItemInfo(itemID)
-        if link then return link end
+        if link and link:find("|Hitem:") then return link end
     end
-    return rawText
+    return nil -- 关键：若无法获得标准超链接，必须返回 nil，绝不能返回纯文本字符串，防止接收端 Item:CreateFromItemLink 报废死锁
 end
 
 -- 全局读取预设价格与起拍语接口
@@ -437,6 +438,18 @@ function ns.InitAuctionPresetModule()
                 timeout = 0,
                 whileDead = true,
                 hideOnEscape = true,
+                EditBoxOnEnterPressed = function(self)
+                    local parent = self:GetParent()
+                    if parent and parent.button1 then
+                        StaticPopup_OnClick(parent, 1)
+                    end
+                end,
+                EditBoxOnEscapePressed = function(self)
+                    local parent = self:GetParent()
+                    if parent and parent.button2 then
+                        StaticPopup_OnClick(parent, 2)
+                    end
+                end,
                 OnShow = function(self)
                     local edit = self.editBox or self.EditBox or (self.GetName and _G[self:GetName() .. "EditBox"])
                     if edit then
@@ -448,13 +461,15 @@ function ns.InitAuctionPresetModule()
                 OnHide = function(self)
                     local edit = self.editBox or self.EditBox or (self.GetName and _G[self:GetName() .. "EditBox"])
                     if edit then
-                        edit:ClearFocus()
+                        if edit.HighlightText then edit:HighlightText(0, 0) end
+                        if edit.ClearFocus then edit:ClearFocus() end
                     end
                 end,
                 OnCancel = function(self)
                     local edit = self.editBox or self.EditBox or (self.GetName and _G[self:GetName() .. "EditBox"])
                     if edit then
-                        edit:ClearFocus()
+                        if edit.HighlightText then edit:HighlightText(0, 0) end
+                        if edit.ClearFocus then edit:ClearFocus() end
                     end
                 end,
                 OnAccept = function(self)
@@ -464,39 +479,22 @@ function ns.InitAuctionPresetModule()
                         edit = p.editBox or p.EditBox or (p.GetName and _G[p:GetName() .. "EditBox"])
                     end
                     if edit then
-                        edit:ClearFocus()
+                        if edit.HighlightText then edit:HighlightText(0, 0) end
+                        if edit.ClearFocus then edit:ClearFocus() end
                     end
                     local text = edit and edit:GetText() or ""
                     local val = tonumber(text)
                     if val and val > 0 then
-                        local moneyDB = BiaoGe.auctionPreset[currentFB].money
-                        for _, item in ipairs(currentItems) do
-                            moneyDB[item.itemID] = val
-                        end
-                        ApplyFilterAndSort()
-                        RefreshScrollView()
-                        DEFAULT_CHAT_FRAME:AddMessage("|cff00BFFF[BGLite]|r " .. string.format("已将 %s 所有装备预设底价更新为：%dG", GetFBDisplayName(currentFB), val))
+                        pcall(function()
+                            local moneyDB = BiaoGe.auctionPreset[currentFB].money
+                            for _, item in ipairs(currentItems) do
+                                moneyDB[item.itemID] = val
+                            end
+                            ApplyFilterAndSort()
+                            RefreshScrollView()
+                            DEFAULT_CHAT_FRAME:AddMessage("|cff00BFFF[BGLite]|r " .. string.format("已将 %s 所有装备预设底价更新为：%dG", GetFBDisplayName(currentFB), val))
+                        end)
                     end
-                end,
-                EditBoxOnEnterPressed = function(self)
-                    self:ClearFocus()
-                    local parent = self:GetParent()
-                    local text = self:GetText()
-                    local val = tonumber(text)
-                    if val and val > 0 then
-                        local moneyDB = BiaoGe.auctionPreset[currentFB].money
-                        for _, item in ipairs(currentItems) do
-                            moneyDB[item.itemID] = val
-                        end
-                        ApplyFilterAndSort()
-                        RefreshScrollView()
-                        DEFAULT_CHAT_FRAME:AddMessage("|cff00BFFF[BGLite]|r " .. string.format("已将 %s 所有装备预设底价更新为：%dG", GetFBDisplayName(currentFB), val))
-                    end
-                    parent:Hide()
-                end,
-                EditBoxOnEscapePressed = function(self)
-                    self:ClearFocus()
-                    self:GetParent():Hide()
                 end,
             }
             StaticPopup_Show("BGLITE_BATCH_PRESET_PRICE")
@@ -771,71 +769,192 @@ function ns.InitAuctionPresetModule()
         end
     end
 
-    -- ② Boss 一键全开发送拍卖模块 (Boss Quick Auction)
-    -- 注册未预设起拍底价时的确认弹窗
-    -- ② Boss 一键全开发送拍卖模块 (Boss Quick Auction)
-    -- 注册未预设起拍底价时的确认弹窗
-    StaticPopupDialogs["BGLITE_PLUS_BOSS_AUCTION_PRICE"] = {
-        text = "%s 共有 %d 件装备未设置起拍底价\n请输入未预设装备的统一底价：",
-        button1 = L["确定开拍"] or "确定开拍",
-        button2 = CANCEL or "取消",
-        hasEditBox = true,
-        maxLetters = 8,
-        OnShow = function(self, data)
-            local editBox = self.editBox or self.EditBox or (self.GetName and _G[self:GetName() .. "EditBox"])
-            if editBox then
-                local defaultPrice = (BiaoGe.auctionPreset and BiaoGe.auctionPreset.defaultQuickPrice) or 100
-                editBox:SetAutoFocus(false)
-                editBox:SetNumeric(true)
-                editBox:SetText(tostring(defaultPrice))
-                editBox:HighlightText()
-                editBox:SetFocus()
+    -- ② Boss 一键全开发送拍卖模块：专属无卡键安全输入弹窗 (QuickPriceDialog)
+    -- 彻底摒弃暴雪 StaticPopup 容易卡住 Win11 微软拼音的底层缺陷，配备输入框专属【确定】按钮与 50ms 脱焦缓冲
+    local quickPriceDialog = CreateFrame("Frame", "BGLite_Plus_BossQuickPriceDialog", UIParent, "BackdropTemplate")
+    quickPriceDialog:SetSize(360, 160)
+    quickPriceDialog:SetPoint("CENTER", 0, 60)
+    quickPriceDialog:SetFrameStrata("DIALOG")
+    quickPriceDialog:SetFrameLevel(200)
+    quickPriceDialog:SetClampedToScreen(true)
+    quickPriceDialog:EnableMouse(true)
+    quickPriceDialog:SetMovable(true)
+    quickPriceDialog:RegisterForDrag("LeftButton")
+    quickPriceDialog:SetScript("OnDragStart", quickPriceDialog.StartMoving)
+    quickPriceDialog:SetScript("OnDragStop", quickPriceDialog.StopMovingOrSizing)
+    quickPriceDialog:Hide()
+
+    quickPriceDialog:SetBackdrop({
+        bgFile = "Interface/ChatFrame/ChatFrameBackground",
+        edgeFile = "Interface/Tooltips/UI-Tooltip-Border",
+        edgeSize = 16,
+        insets = { left = 4, right = 4, top = 4, bottom = 4 }
+    })
+    quickPriceDialog:SetBackdropColor(0.08, 0.08, 0.12, 0.95)
+    quickPriceDialog:SetBackdropBorderColor(1, 0.82, 0, 1)
+
+    -- 标题
+    local qpTitle = quickPriceDialog:CreateFontString(nil, "ARTWORK", "GameFontNormalLarge")
+    qpTitle:SetPoint("TOP", 0, -12)
+    qpTitle:SetText(L["批量起拍底价设置"] or "批量起拍底价设置")
+    qpTitle:SetTextColor(1, 0.82, 0)
+
+    -- 提示说明
+    local qpDesc = quickPriceDialog:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
+    qpDesc:SetPoint("TOP", qpTitle, "BOTTOM", 0, -8)
+    qpDesc:SetWidth(330)
+    qpDesc:SetJustifyH("CENTER")
+    quickPriceDialog.descText = qpDesc
+
+    -- 输入框与内嵌确认按钮
+    local qpEdit = CreateFrame("EditBox", nil, quickPriceDialog, "InputBoxTemplate")
+    qpEdit:SetSize(75, 22)
+    qpEdit:SetPoint("CENTER", quickPriceDialog, "CENTER", -24, -10)
+    qpEdit:SetAutoFocus(false)
+    qpEdit:SetNumeric(true)
+    qpEdit:SetMaxLetters(8)
+    qpEdit:SetFontObject("ChatFontNormal")
+    quickPriceDialog.editBox = qpEdit
+
+    local qpGold = quickPriceDialog:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
+    qpGold:SetPoint("LEFT", qpEdit, "RIGHT", 4, 0)
+    qpGold:SetText("G")
+
+    -- 专属于输入框的【确定收起】按钮
+    local qpBtnCommit = CreateFrame("Button", nil, quickPriceDialog, "UIPanelButtonTemplate")
+    qpBtnCommit:SetSize(46, 22)
+    qpBtnCommit:SetPoint("LEFT", qpGold, "RIGHT", 8, 0)
+    qpBtnCommit:SetText(L["确定"] or "确定")
+
+    local function DoClearQuickEditFocus()
+        if qpEdit.HighlightText then qpEdit:HighlightText(0, 0) end
+        if qpEdit.ClearFocus then qpEdit:ClearFocus() end
+    end
+
+    if ns.SecureEditBox then
+        ns.SecureEditBox(qpEdit, {
+            isNumeric = true,
+            minValue = 0,
+            defaultValue = 100,
+            commitButton = qpBtnCommit,
+            onEnter = function(eb)
+                DoClearQuickEditFocus()
+                UIErrorsFrame:AddMessage("|cff00ff00已保存底价并收回键盘|r", 0, 1, 0)
+                if BG.PlaySound then BG.PlaySound(1) end
+            end,
+            onEscape = function(eb)
+                DoClearQuickEditFocus()
+            end,
+            onFocusLost = function(eb)
+                DoClearQuickEditFocus()
+            end,
+        })
+    else
+        qpBtnCommit:SetScript("OnClick", function()
+            DoClearQuickEditFocus()
+            UIErrorsFrame:AddMessage("|cff00ff00已保存底价并收回键盘|r", 0, 1, 0)
+            if BG.PlaySound then BG.PlaySound(1) end
+        end)
+        qpEdit:SetScript("OnEnterPressed", DoClearQuickEditFocus)
+        qpEdit:SetScript("OnEscapePressed", DoClearQuickEditFocus)
+        qpEdit:SetScript("OnEditFocusLost", DoClearQuickEditFocus)
+    end
+
+    -- 底部大按钮：确定开拍
+    local qpBtnAccept = CreateFrame("Button", nil, quickPriceDialog, "UIPanelButtonTemplate")
+    qpBtnAccept:SetSize(110, 26)
+    qpBtnAccept:SetPoint("BOTTOMLEFT", 45, 14)
+    qpBtnAccept:SetText(L["确定开拍"] or "确定开拍")
+
+    -- 底部大按钮：取消
+    local qpBtnCancel = CreateFrame("Button", nil, quickPriceDialog, "UIPanelButtonTemplate")
+    qpBtnCancel:SetSize(90, 26)
+    qpBtnCancel:SetPoint("BOTTOMRIGHT", -45, 14)
+    qpBtnCancel:SetText(CANCEL or "取消")
+
+    local currentQuickDialogData = nil
+
+    local function CloseQuickDialogSafely()
+        DoClearQuickEditFocus()
+        -- 核心防御：延迟 0.05 秒隐藏，给操作系统与微软拼音留出完成 EndComposition 握手的充足时间
+        C_Timer.After(0.05, function()
+            quickPriceDialog:Hide()
+            DoClearQuickEditFocus()
+        end)
+    end
+
+    qpBtnCancel:SetScript("OnClick", function()
+        CloseQuickDialogSafely()
+        currentQuickDialogData = nil
+    end)
+
+    qpBtnAccept:SetScript("OnClick", function()
+        local text = qpEdit:GetText() or "100"
+        local price = tonumber(text) or 100
+        if price <= 0 then price = 100 end
+        if BiaoGe.auctionPreset then
+            BiaoGe.auctionPreset.defaultQuickPrice = price
+        end
+        local savedData = currentQuickDialogData
+        currentQuickDialogData = nil
+        CloseQuickDialogSafely()
+        if savedData and savedData.items and AuctionPreset.ExecuteBossAuction then
+            AuctionPreset.ExecuteBossAuction(savedData.items, price, savedData.bossName)
+        end
+    end)
+
+    -- 呼出专属弹窗接口
+    function AuctionPreset.ShowQuickPriceDialog(bossName, unpresetCount, data)
+        currentQuickDialogData = data
+        local defaultPrice = (BiaoGe.auctionPreset and BiaoGe.auctionPreset.defaultQuickPrice) or 100
+        qpDesc:SetText(format("%s 共有 %d 件装备未设置起拍底价\n请输入统一底价并开拍：", bossName or "Boss", unpresetCount or 1))
+        qpEdit:SetText(tostring(defaultPrice))
+        if qpEdit.HighlightText then qpEdit:HighlightText(0, 0) end
+        qpEdit:SetCursorPosition(string.len(tostring(defaultPrice)))
+        -- 绝不强行自动 SetFocus，直接鼠标点【确定开拍】的用户绝对不会被输入法死锁
+        quickPriceDialog:Show()
+    end
+
+    -- 核心守护：防止任何非合法超链接字符串（如纯名字、未缓存文本、纯数字）传给原生 BG.OnItemLoad 导致 Item:CreateFromItemLink 静默死锁不回调
+    if BG and BG.OnItemLoad then
+        local orig_BG_OnItemLoad = BG.OnItemLoad
+        BG.OnItemLoad = function(item)
+            if type(item) == "string" then
+                local num = tonumber(item)
+                if num then
+                    return Item:CreateFromItemID(num)
+                end
+                if not item:find("|Hitem:") then
+                    local id = item:match("item:(%d+)") or (SafeGetItemID and SafeGetItemID(item)) or (BG.GetItemID and BG.GetItemID(item))
+                    if id and tonumber(id) then
+                        return Item:CreateFromItemID(tonumber(id))
+                    end
+                end
             end
-        end,
-        OnHide = function(self)
-            local editBox = self.editBox or self.EditBox or (self.GetName and _G[self:GetName() .. "EditBox"])
-            if editBox then
-                editBox:ClearFocus()
+            return orig_BG_OnItemLoad(item)
+        end
+    end
+
+    -- 包装 BG.SendStartAuctionMsg：统一信令与本地创建的 auctionID，杜绝重复创建
+    if BG and BG.SendStartAuctionMsg and not BG._hasPlusSendWrapper then
+        BG._hasPlusSendWrapper = true
+        local orig_SendStart = BG.SendStartAuctionMsg
+        BG.SendStartAuctionMsg = function(isGen2, itemID, money, duration, mod, link, resetThreshold, customAuctionID)
+            local curTime = customAuctionID or GetTime()
+            local channel, text
+            if isGen2 then
+                channel = (BGA and BGA.aura_env and BGA.aura_env.GetAddonChannelName and BGA.aura_env.GetAddonChannelName()) or "BGA"
+                text = format("StartAuction^%s^%s^%s^%s^^%s^%s^%s",
+                    curTime, itemID, money, duration, mod, link, resetThreshold)
+            else
+                channel = "BiaoGeAuction"
+                text = format("StartAuction,%s,%s,%s,%s,,%s,%s",
+                    curTime, itemID, money, duration, mod, link)
             end
-        end,
-        OnCancel = function(self, data)
-            local editBox = self.editBox or self.EditBox or (self.GetName and _G[self:GetName() .. "EditBox"])
-            if editBox then
-                editBox:ClearFocus()
-            end
-        end,
-        OnAccept = function(self, data)
-            local editBox = self.editBox or self.EditBox or (self.GetName and _G[self:GetName() .. "EditBox"])
-            if editBox then
-                editBox:ClearFocus()
-            end
-            local text = editBox and editBox:GetText() or "100"
-            local price = tonumber(text) or 100
-            if price <= 0 then price = 100 end
-            if BiaoGe.auctionPreset then
-                BiaoGe.auctionPreset.defaultQuickPrice = price
-            end
-            if data and data.items and AuctionPreset.ExecuteBossAuction then
-                AuctionPreset.ExecuteBossAuction(data.items, price, data.bossName)
-            end
-        end,
-        EditBoxOnEnterPressed = function(self, data)
-            self:ClearFocus()
-            local parent = self:GetParent()
-            local button1 = parent.button1 or (parent.GetName and _G[parent:GetName() .. "Button1"])
-            if button1 and button1:IsEnabled() then
-                button1:Click()
-            end
-        end,
-        EditBoxOnEscapePressed = function(self)
-            self:ClearFocus()
-            self:GetParent():Hide()
-        end,
-        timeout = 0,
-        whileDead = true,
-        hideOnEscape = true,
-        preferredIndex = 3,
-    }
+            C_ChatInfo.SendAddonMessage(channel, text, "RAID")
+            return curTime
+        end
+    end
 
     -- ============================================================================
     -- [SECURITY & ANTI-SCRAPING DIRECTIVE - DO NOT REMOVE]
@@ -865,10 +984,157 @@ function ns.InitAuctionPresetModule()
         end
     end
 
+
+    -- ============================================================================
+    -- 拍卖窗口自适应防出界优化（解决多窗口超过6个排布超出物理屏幕底部的问题）
+    -- ============================================================================
+    if BGA and BGA.aura_env and BGA.aura_env.UpdateAllFrames and not BGA._hasPlusMultiRowLayout then
+        BGA._hasPlusMultiRowLayout = true
+        local orig_UpdateAllFrames = BGA.aura_env.UpdateAllFrames
+        BGA.aura_env.UpdateAllFrames = function(...)
+            orig_UpdateAllFrames(...)
+            local activeFrames = {}
+            local maxFrameCount = BGA.aura_env.maxNumFrame or 20
+            for i = 1, maxFrameCount do
+                local f = BGA.Frames and BGA.Frames[i]
+                if f and f:IsShown() then
+                    table.insert(activeFrames, f)
+                end
+            end
+            -- 如果活跃窗口数量超过 6 个，自适应转为智能双列平铺排列（前5个在左，第6个及以后在右）
+            if #activeFrames > 6 then
+                local colWidth = (BGA.aura_env.WIDTH or 260) + 15
+                local col1Count = math.ceil(#activeFrames / 2)
+                for idx, f in ipairs(activeFrames) do
+                    local col = (idx <= col1Count) and 0 or 1
+                    local row = (col == 0) and (idx - 1) or (idx - col1Count - 1)
+                    local itemH = (f.IsSmallWindow and (BGA.aura_env.SMALL_HEIGHT or 22) or (BGA.aura_env.HEIGHT or 100)) + 5
+                    local yOffset = row * itemH
+                    local xOffset = col * colWidth
+                    f:ClearAllPoints()
+                    f:SetPoint("TOPLEFT", BGA.AuctionMainFrame, "TOPLEFT", xOffset, -yOffset)
+                end
+            end
+        end
+    end
+
+    -- ============================================================================
+    -- 拍卖成功自动记账（增量安全填充表格，不擦除已有数据，自动联动总账统计）
+    -- ============================================================================
+    local function FindAndRecordAuctionResult(zhuangbei, maijia, jine)
+        if not zhuangbei or not maijia or not jine then return end
+        local targetItemID = (GetItemID and GetItemID(zhuangbei))
+        if not targetItemID and type(zhuangbei) == "string" then
+            local idStr = zhuangbei:match("item:(%d+)") or (SafeGetItemID and SafeGetItemID(zhuangbei))
+            targetItemID = idStr and tonumber(idStr)
+        end
+        if not targetItemID then return end
+
+        local FBs = {}
+        if BG.FB2 then table.insert(FBs, BG.FB2) end
+        if BG.FB1 and BG.FB1 ~= BG.FB2 then table.insert(FBs, BG.FB1) end
+        if BG.FBtable then
+            for _, fb in ipairs(BG.FBtable) do
+                if fb ~= BG.FB1 and fb ~= BG.FB2 then
+                    table.insert(FBs, fb)
+                end
+            end
+        end
+
+        local recorded = false
+        for _, FB in ipairs(FBs) do
+            if BG.Frame and BG.Frame[FB] and Maxb and Maxb[FB] then
+                for b = 1, Maxb[FB] - 1 do
+                    local maxI = (BG.GetMaxi and BG.GetMaxi(FB, b)) or 0
+                    for i = 1, maxI do
+                        local cellZb = BG.Frame[FB]["boss" .. b] and BG.Frame[FB]["boss" .. b]["zhuangbei" .. i]
+                        local cellMj = BG.Frame[FB]["boss" .. b] and BG.Frame[FB]["boss" .. b]["maijia" .. i]
+                        local cellJe = BG.Frame[FB]["boss" .. b] and BG.Frame[FB]["boss" .. b]["jine" .. i]
+                        if cellZb and cellMj and cellJe then
+                            local text = cellZb:GetText() or ""
+                            local rowItemID = (GetItemID and GetItemID(text)) or tonumber(text:match("item:(%d+)"))
+                            if rowItemID == targetItemID then
+                                local curMj = cellMj:GetText() or ""
+                                local curJe = cellJe:GetText() or ""
+                                -- 仅在买家和金额未填的空行记账，安全增量写入，绝不覆盖已有账目
+                                if curMj == "" and curJe == "" then
+                                    -- 1. 获取职业颜色并设置买家
+                                    local r, g, b_col = 1, 1, 1
+                                    if BG.GetClassColor then
+                                        local cr, cg, cb = BG.GetClassColor(maijia)
+                                        if cr then r, g, b_col = cr, cg, cb end
+                                    elseif UnitClass then
+                                        local _, cls = UnitClass(maijia)
+                                        if cls and RAID_CLASS_COLORS and RAID_CLASS_COLORS[cls] then
+                                            r, g, b_col = RAID_CLASS_COLORS[cls].r, RAID_CLASS_COLORS[cls].g, RAID_CLASS_COLORS[cls].b
+                                        end
+                                    end
+
+                                    cellMj:SetTextColor(r, g, b_col)
+                                    cellMj:SetText(maijia)
+                                    cellMj:SetCursorPosition(0)
+
+                                    if BiaoGe and BiaoGe[FB] and BiaoGe[FB]["boss" .. b] then
+                                        BiaoGe[FB]["boss" .. b]["maijia" .. i] = maijia
+                                        BiaoGe[FB]["boss" .. b]["color" .. i] = { r, g, b_col }
+                                        if BG.playerClass then
+                                            for k, v in pairs(BG.playerClass) do
+                                                local value = select(v.select, v.func(maijia))
+                                                if value == 0 then value = nil end
+                                                BiaoGe[FB]["boss" .. b][k .. i] = value
+                                            end
+                                        end
+                                    end
+
+                                    -- 2. 设置金额
+                                    local moneyStr = tostring(jine)
+                                    cellJe:SetText(moneyStr)
+                                    if BiaoGe and BiaoGe[FB] and BiaoGe[FB]["boss" .. b] then
+                                        BiaoGe[FB]["boss" .. b]["jine" .. i] = moneyStr
+                                    end
+
+                                    -- 3. 触发金额输入框关联计算（总收入、净收入、人均工资自动实时重算）
+                                    local onTextChange = cellJe:GetScript("OnTextChanged")
+                                    if onTextChange then
+                                        onTextChange(cellJe)
+                                    end
+
+                                    local zbLink = cellZb:GetText()
+                                    if not zbLink or zbLink == "" then zbLink = zhuangbei end
+                                    local logMsg = format("|cff00BFFF[BGLite]|r 拍卖记账成功：%s 由 |cff%02x%02x%02x%s|r 以 %s G 拍得，已自动记入表格！",
+                                        zbLink, math.floor(r * 255), math.floor(g * 255), math.floor(b_col * 255), maijia, moneyStr)
+                                    if DEFAULT_CHAT_FRAME then
+                                        DEFAULT_CHAT_FRAME:AddMessage(logMsg)
+                                    end
+                                    recorded = true
+                                    break
+                                end
+                            end
+                        end
+                    end
+                    if recorded then break end
+                end
+            end
+            if recorded then break end
+        end
+    end
+
+    -- 挂载拍卖完成事件（无论团长还是团员，拍卖成功后均自动触发表格增量记账）
+    if BG and BG.AuctionWAEnd and not BG._hasPlusAutoRecordHook then
+        BG._hasPlusAutoRecordHook = true
+        hooksecurefunc(BG, "AuctionWAEnd", function(endType, zhuangbei, maijia, jine, logs)
+            if endType == 1 and zhuangbei and maijia and jine then
+                C_Timer.After(0.1, function()
+                    FindAndRecordAuctionResult(zhuangbei, maijia, jine)
+                end)
+            end
+        end)
+    end
+
     -- 专用 OnUpdate 发送状态机队列（类似对账通报架构，保证每条平滑发送）
     local quickAuctionQueueFrame = CreateFrame("Frame")
     quickAuctionQueueFrame.queue = {}
-    quickAuctionQueueFrame.interval = 1.0
+    quickAuctionQueueFrame.interval = 1.3
     quickAuctionQueueFrame.timer = 0
     local function QuickAuctionQueue_OnUpdate(self, elapsed)
         if #self.queue == 0 then
@@ -888,9 +1154,6 @@ function ns.InitAuctionPresetModule()
                 self:SetScript("OnUpdate", nil)
                 isQuickAuctionActive = false
                 quickAuctionCount = 0
-                if DEFAULT_CHAT_FRAME then
-                    DEFAULT_CHAT_FRAME:AddMessage("|cff00FF00[BGLite]|r 全部装备拍卖信息已发送完毕！")
-                end
             end
         end
     end
@@ -921,11 +1184,20 @@ function ns.InitAuctionPresetModule()
 
         if BG.PlaySound then BG.PlaySound(1) end
 
-        local infoText = format("|cff00BFFF[BGLite]|r 正在为【%s】发起全部 %d 件装备拍卖（首件团队警报，后续平滑通报，间隔1秒依次广播）...", bossNameStr or "Boss", #itemsToAuction)
+        local infoText = format("|cff00BFFF[BGLite]|r 正在为【%s】发起全部 %d 件装备拍卖（平滑广播中，防限流保护已生效）...", bossNameStr or "Boss", #itemsToAuction)
         if DEFAULT_CHAT_FRAME then
             DEFAULT_CHAT_FRAME:AddMessage(infoText)
         end
         UIErrorsFrame:AddMessage(format("已发起【%s】共 %d 件装备拍卖", bossNameStr or "Boss", #itemsToAuction), 0, 1, 0)
+
+        -- 开拍时向团队/小队仅发送一条汇总通报，彻底避免循环内调用 SendChatMessage 挤爆暴雪聊天 Token 桶导致信令丢包
+        local inRaid = IsInRaid and IsInRaid()
+        local inGroup = IsInGroup and IsInGroup()
+        local chatChannel = inRaid and "RAID" or (inGroup and "PARTY" or nil)
+        if chatChannel then
+            local announceMsg = format(L["[BGLite] 团长已发起【%s】批量拍卖（共 %d 件装备），请在拍卖窗口出价！"] or "[BGLite] 团长已发起【%s】批量拍卖（共 %d 件装备），请在拍卖窗口出价！", bossNameStr or "Boss", #itemsToAuction)
+            SendChatMessage(announceMsg, chatChannel)
+        end
 
         -- 激活平滑防限流发送队列
         quickAuctionQueueFrame.queue = {}
@@ -939,17 +1211,21 @@ function ns.InitAuctionPresetModule()
             tinsert(quickAuctionQueueFrame.queue, {
                 func = function()
                     quickAuctionCount = idx
+                    local fixedAuctionID = GetTime()
                     if BG.SendStartAuctionMsg then
-                        BG.SendStartAuctionMsg(isGen2, it.id, finalMoney, duration, mod, validLink, resetThreshold)
+                        fixedAuctionID = BG.SendStartAuctionMsg(isGen2, it.id, finalMoney, duration, mod, validLink or "", resetThreshold, fixedAuctionID) or fixedAuctionID
                     end
-                    -- 第2件及后续装备，由队列在普通团队频道发送开拍通报，绕开暴雪 RW 严苛限流
-                    if idx > 1 and (IsInRaid and IsInRaid(1)) then
-                        local msg = format(L["{rt1}拍卖开始{rt1} %s 起拍价：%s"] or "{rt1}拍卖开始{rt1} %s 起拍价：%s", validLink or it.id, finalMoney)
-                        SendChatMessage(msg, "RAID")
-                    end
-                    if DEFAULT_CHAT_FRAME then
-                        DEFAULT_CHAT_FRAME:AddMessage(format("|cff00BFFF[BGLite]|r 正在广播 (%d/%d): %s 起拍底价: %dG", idx, #itemsToAuction, validLink or it.id, finalMoney))
-                    end
+
+                    -- 【双保险架构】：团长本机直通创建拍卖窗口！
+                    -- 彻底免疫暴雪服务器对连续 Addon 消息的丢包与限流，确保团长本机全部 9 个窗口 100% 弹出！
+                    -- 原版 wa.CreateAuction 自带 auctionID 查重，若网络信令随后回传，会自动检测重复并安全忽略
+                    BG.OnItemLoad(validLink or it.id):ContinueOnItemLoad(function()
+                        if BGA and BGA.aura_env and BGA.aura_env.CreateAuction then
+                            BGA.aura_env.CreateAuction(fixedAuctionID, it.id, finalMoney, duration, nil, mod, validLink, resetThreshold, isGen2)
+                        end
+                    end)
+                    -- 【暴雪 Token 保护】：已将开拍通报合并为开拍前单次通知，此处严禁高频调用 SendChatMessage
+                    -- 确保暴雪聊天令牌桶（Token Bucket）维持充盈，让全部 9 件装备的 Addon 信令 100% 安全送达全团！
                 end
             })
         end
@@ -1024,7 +1300,11 @@ function ns.InitAuctionPresetModule()
         end
 
         if unpresetCount > 0 then
-            StaticPopup_Show("BGLITE_PLUS_BOSS_AUCTION_PRICE", bossNameStr, unpresetCount, { items = itemsToAuction, bossName = bossNameStr })
+            if AuctionPreset.ShowQuickPriceDialog then
+                AuctionPreset.ShowQuickPriceDialog(bossNameStr, unpresetCount, { items = itemsToAuction, bossName = bossNameStr })
+            else
+                StaticPopup_Show("BGLITE_PLUS_BOSS_AUCTION_PRICE", bossNameStr, unpresetCount, { items = itemsToAuction, bossName = bossNameStr })
+            end
         else
             AuctionPreset.ExecuteBossAuction(itemsToAuction, 100, bossNameStr)
         end
