@@ -55,7 +55,11 @@
        - **职业与名字全持久化**：预设数据同步持久化保存玩家姓名与职业（Class Color），脱离队伍或跨服离线加载也能完整着色。
        - **开窗智能恢复**：非团队状态下打开面板时，自动恢复并展示上次选中的预设方案，无需反复点击载入。
        - **保存弹窗预填**：点击【保存为预设】时，弹窗输入框自动预填当前选中的预设名称，便于一键覆盖或修改。
-       - **记忆上次退出 Tab**：点击小地图图标或重新打开主面板时，自动记忆并恢复上次退出的 Tab 界面（如装备库/心愿单/团队工具/表格），不再强制重置回第一个表格 Tab。
+* **快捷键呼出子面板状态恢复与上游 AuctionMSG 外部防御兜底 (2026-09-08)**：
+  * **白屏病根**：此前在 `BG.MainFrame:HookScript("OnHide")` 中会自动对全部子面板（`RaidToolMainFrame`、`ItemLibMainFrame`、`HopeMainFrame` 等）执行 `SafeHide`，而恢复逻辑 `RestoreLastTab()` 此前仅绑定在点击小地图图标的分支中。玩家通过键盘快捷键（`BIAOGE` 动作）重新呼出主框架时，未触发 `RestoreLastTab()`，导致如果上次停留在团队工具页面，重新打开后子框架依然保持隐藏，整个主面板呈现空白（白屏）。
+  * **修复方案 (上游 100% 零修改)**：
+    1. 在 `BGLite_Plus/Core/Init.lua` 的 `BG.MainFrame:HookScript("OnShow")` 全局入口中直接注入 `RestoreLastTab()`，确保无论通过键盘快捷键、小地图图标还是聊天命令呼出主界面，均能 100% 自动还原上次所在的 Tab（如团队工具），杜绝空白。
+    2. **上游 BGLite 保持原样**：遵循外部依赖零侵入原则，将此前改动完全撤销；改在 `BGLite_Plus/Core/Init.lua` 的 `InitPlusUI` 阶段对共享库 `BiaoGe.auctionMSGhistory` 进行非空防御自愈，彻底消除上游当收到团队聊天消息时偶发的 `bad argument #1 to 'tinsert' (table expected, got nil)` 报错。
 
 * **O键角色查询历史记录与名单导出 (2026-09-02)**：
   * **侧边栏自动注入**：按下 O 键打开官方【查询】（`WhoFrame`）时，自动在查询框右侧显示“查询记录”黑底侧边栏。

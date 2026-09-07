@@ -102,6 +102,11 @@ local function InitPlusUI()
         end)
     end
 
+    -- 0.1 保护上游 BGLite 拍卖聊天历史表，避免上游缺失初始化导致 tinsert 报 nil
+    if BiaoGe and BiaoGe.auctionMSGhistory == nil then
+        BiaoGe.auctionMSGhistory = {}
+    end
+
     -- 初始化心愿数据库与职业过滤数据库结构
     if ns.InitHopeDB then
         ns.InitHopeDB()
@@ -548,6 +553,7 @@ local function InitPlusUI()
     if BG.MainFrame and not BG.MainFrame.hasHookedPlus then
         BG.MainFrame.hasHookedPlus = true
         BG.MainFrame:HookScript("OnShow", function()
+            RestoreLastTab()
             if ns.UpdateTabButtonsLayout then
                 ns.UpdateTabButtonsLayout()
             end
