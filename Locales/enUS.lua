@@ -3166,4 +3166,7 @@ do -- Raid cooldown receiver
     L["交减伤技能"] = "Use defensive cooldown"
     L["提醒：你需立刻施放%s"] = "Reminder: use %s now"
     L["提醒：%s秒后你需施放%s"] = "Reminder: in %s seconds, use %s"
+    L["拍"] = "Auction"
+    L["确定开拍"] = "Start Auction"
+    L["一键全开发送拍卖"] = "Quick All Auction"
 end

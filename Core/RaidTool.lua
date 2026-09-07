@@ -1795,24 +1795,42 @@ function RaidTool.CreateUI(parent)
         OnShow = function(self)
             local editBox = _G[self:GetName() .. "EditBox"]
             if editBox then
+                editBox:SetAutoFocus(false)
                 local defName = BiaoGe.RaidGroups and BiaoGe.RaidGroups.selectedProfile or ""
                 editBox:SetText(defName)
                 editBox:HighlightText()
                 editBox:SetFocus()
             end
         end,
+        OnHide = function(self)
+            local editBox = _G[self:GetName() .. "EditBox"]
+            if editBox then
+                editBox:ClearFocus()
+            end
+        end,
+        OnCancel = function(self)
+            local editBox = _G[self:GetName() .. "EditBox"]
+            if editBox then
+                editBox:ClearFocus()
+            end
+        end,
         OnAccept = function(self)
             local editBox = _G[self:GetName() .. "EditBox"]
+            if editBox then
+                editBox:ClearFocus()
+            end
             local name = editBox and editBox:GetText():trim()
             if name and name ~= "" then
                 SaveProfile(name)
             end
         end,
         EditBoxOnEnterPressed = function(self)
+            self:ClearFocus()
             local parent = self:GetParent()
             StaticPopup_OnClick(parent, 1)
         end,
         EditBoxOnEscapePressed = function(self)
+            self:ClearFocus()
             local parent = self:GetParent()
             StaticPopup_OnClick(parent, 2)
         end,

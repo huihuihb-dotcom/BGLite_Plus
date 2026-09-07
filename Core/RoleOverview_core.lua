@@ -907,13 +907,27 @@ function BG.AddRoleOverviewNote(realmID, realmName, player, colorplayer, note)
             OnShow = function(self, currentNote)
                 local edit = self.EditBox or self.editBox or (self.GetName and _G[self:GetName() .. "EditBox"])
                 if edit then
+                    edit:SetAutoFocus(false)
                     edit:SetFocus()
                     local t = (self.data ~= nil and self.data ~= "") and self.data or currentNote or ""
                     edit:SetText(t)
                     edit:HighlightText()
                 end
             end,
+            OnHide = function(self)
+                local edit = self.EditBox or self.editBox or (self.GetName and _G[self:GetName() .. "EditBox"])
+                if edit then
+                    edit:ClearFocus()
+                end
+            end,
+            OnCancel = function(self)
+                local edit = self.EditBox or self.editBox or (self.GetName and _G[self:GetName() .. "EditBox"])
+                if edit then
+                    edit:ClearFocus()
+                end
+            end,
             EditBoxOnEnterPressed = function(self)
+                self:ClearFocus()
                 local p = self:GetParent()
                 if p then
                     local btn = p.button1 or (p.GetButton1 and p:GetButton1())
@@ -925,6 +939,7 @@ function BG.AddRoleOverviewNote(realmID, realmName, player, colorplayer, note)
                 end
             end,
             EditBoxOnEscapePressed = function(self)
+                self:ClearFocus()
                 local p = self:GetParent()
                 if p then p:Hide() end
             end,
@@ -933,6 +948,7 @@ function BG.AddRoleOverviewNote(realmID, realmName, player, colorplayer, note)
     StaticPopupDialogs[popupName].OnAccept = function(self)
         local edit = self.EditBox or self.editBox or (self.GetName and _G[self:GetName() .. "EditBox"])
         if edit then
+            edit:ClearFocus()
             BiaoGe.roleOverviewNote = BiaoGe.roleOverviewNote or {}
             BiaoGe.roleOverviewNote[realmID] = BiaoGe.roleOverviewNote[realmID] or {}
             BiaoGe.roleOverviewNote[realmID][player] = edit:GetText()

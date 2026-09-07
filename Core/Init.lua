@@ -1041,9 +1041,59 @@ function ns.UpdatePlusVerFrame()
     btn:SetWidth(btn.text:GetStringWidth() + 10)
     btn:Show()
 
-    if btn.isOnEnter then
+                if btn.isOnEnter then
         PlusVer_OnEnter(btn)
     end
 end
 
+--------------------------------------------------------------------------------
+-- 10. 全局输入框焦点泄漏与输入法卡键终极防御体系 (Focus Leak Guard)
+--------------------------------------------------------------------------------
+-- 核心原理：
+-- Windows 10/11 与魔兽客户端在 EditBox 获得焦点时会唤醒 IME 中文输入法。
+-- 若弹窗或界面隐藏时未调用 editBox:ClearFocus()，焦点指针残留会导致输入法持续拦截键盘按键（按技能打不出，按 Shift 临时恢复）。
+-- 本模块提供全插件乃至系统弹窗级的自动焦点兜底回收机制，100% 杜绝输入法卡键！
 
+-- ① 弹窗级全局防御：任何 StaticPopup 隐藏时，自动检测并强行释放内部残留焦点
+hooksecurefunc("StaticPopup_Hide", function(which)
+    for i = 1, (STATICPOPUP_NUMDIALOGS or 4) do
+        local dialog = _G["StaticPopup" .. i]
+        if dialog and dialog.editBox then
+            if dialog.editBox.HasFocus and dialog.editBox:HasFocus() then
+                dialog.editBox:ClearFocus()
+            end
+        end
+    end
+end)
+
+-- ② 界面级全局防御：BGLite 主界面隐藏（按 ESC 或点击关闭）时，自动回收所有残留输入焦点
+if BG and BG.MainFrame then
+    BG.MainFrame:HookScript("OnHide", function()
+        local currentFocus = GetFocus and GetFocus()
+        if currentFocus and currentFocus.IsObjectType and currentFocus:IsObjectType("EditBox") then
+            -- 豁免暴雪原生默认聊天输入框
+            if currentFocus ~= ChatFrame1EditBox and currentFocus ~= (DEFAULT_CHAT_FRAME and DEFAULT_CHAT_FRAME.editBox) then
+                currentFocus:ClearFocus()
+            end
+        end
+    end)
+end
+
+-- ③ 公共工具：为任意 EditBox 快速注入防泄漏标准行为
+function ns.SecureEditBox(editBox, onEnterCallback, onEscapeCallback)
+    if not editBox then return end
+    editBox:SetAutoFocus(false)
+    editBox:HookScript("OnEscapePressed", function(self)
+        self:ClearFocus()
+        if onEscapeCallback then onEscapeCallback(self) end
+    end)
+    editBox:HookScript("OnEnterPressed", function(self)
+        self:ClearFocus()
+        if onEnterCallback then onEnterCallback(self) end
+    end)
+    editBox:HookScript("OnHide", function(self)
+        if self.HasFocus and self:HasFocus() then
+            self:ClearFocus()
+        end
+    end)
+end

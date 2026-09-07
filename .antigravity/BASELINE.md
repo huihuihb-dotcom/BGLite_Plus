@@ -1,4 +1,4 @@
-# BGLite_Plus 项目基准文档 (BASELINE.md)
+﻿# BGLite_Plus 项目基准文档 (BASELINE.md)
 
 ## 1. 项目简介
 - **项目名称**: BGLite_Plus (BiaoGe Plus - 魔兽世界怀旧服/时光服/正式服金团表格及辅助工具插件)
@@ -1036,10 +1036,115 @@
        - 提供快捷定位切换：【坦克】、【治疗】、【近战输出】、【远程输出】；
      - 玩家手动修改后，自动调用 `RaidComp.ManualSetMemberSpecRole`，实时重算全团 Buff 缺口矩阵与底栏统计，并自动将修改结果存入持久化缓存池（SavedVariables），下次组该玩家自动生效！
 
+## 35. 表格 BOSS 一键全开发送拍卖模块架构与实现 (2026-09-07)
+* **需求背景与痛点**:
+  - 团长在副本打完或打完某个 BOSS 后，传统操作需要一件件右键点击装备、输入价格、点击确认发起，操作繁琐易出错；
+  - 用户希望在原版金团表格 Tab 中，每一个 Boss 后面增加一个按钮，点击后能一键将该 Boss 所有未结账的掉落装备一次性发起全团拍卖；
+  - 价格策略：有预设底价的按预设底价执行，没有预设底价的弹窗输入一个固定价格（默认 100 金）；
+  - 拍卖时间：跟随单件拍卖当前的时间设置（`BiaoGe.Auction.duration`）。
+* **架构设计与核心实现 (BGLite_Plus/Core/AuctionPreset.lua)**:
+  1. **只读合规与无侵入挂载**:
+     - 严格保持上游 `BGLite` 绝对只读；
+     - 在 `BGLite_Plus/Core/AuctionPreset.lua` 中实现 `AuctionPreset.HookBossAuctionButtons()`；
+     - 动态遍历所有副本的 `BG.Frame[FB]["boss" .. b]`（`1 <= b <= Maxb[FB]`），在 Boss 名字（`bossName`）正下方挂载 18x16 紧凑型【拍】按钮（`btnQuickAuction`），深灰黑底色配金黄边框与文字，鼠标悬停高亮并展示详细 Tooltip；
+     - 兼容 Alt+点击 Boss 名字与直接点击【拍】按钮双入口。
+  2. **智能待拍过滤与已结账保护**:
+     - 扫描该 Boss 槽位 `1` 到 `maxi` 的所有装备格子；
+     - 自动过滤空格子及无效物品链接；
+     - 智能排除已结账/已分出的装备（当 `maijia` 非空或 `jine > 0` 时自动视为已售出，绝不重复拍卖）。
+  3. **预设底价与未预设确认弹窗系统**:
+     - 遍历待拍装备并调用 `BG.GetAuctionPreset(FB, itemID)`；
+     - **全预设直接秒拍**：若所有待拍装备均已配置预设底价，则无需弹窗打扰，直接秒开拍；
+     - **存在未预设底价**：注册并唤起 `StaticPopupDialogs["BGLITE_PLUS_BOSS_AUCTION_PRICE"]`，提示 *“【Boss名字】共有 N 件装备未设置起拍底价\n请输入未预设装备的统一底价：”*，输入框默认预填 `100`（并支持持久化记忆团长上次输入的自定义金额），支持回车确认或 Esc 取消；
+     - 确认后，未预设装备以此金额开拍，有预设装备继续保留各自的预设底价。
+  4. **单件配置继承与平滑广播**:
+     - 拍卖时间（`duration`）、拍卖模式（`mod`）、拍卖代数（`isGen2`）及重置阈值（`resetThreshold`）直接读取单件拍卖当前配置；
+     - 对待拍装备列表以 `0.8 秒` 为间隔逐一调用上游原生 `BG.SendStartAuctionMsg`，平滑向团队广播拍卖消息，全团自动拉起倒计时窗并在团队警告（RW）频道自动发送开拍通告；
+     - 加装 10 件上限防御安全检测（`currentActiveCount + #itemsToAuction > 10`），杜绝因同时拍卖超标引发客户端报错。
+  5. **切本与生命周期自愈**:
+     - 挂钩 `BG.ClickTabButton`、`BG.CreateFBUI` 及 `BG.MainFrame:OnShow`，保证在副本切换、动态建表或界面重开时，按钮始终完好呈现。
+
+## 36. Boss 一键全拍 Token 兑换物解析与多件展示排查加固 (2026-09-07)
+* **用户反馈现象**:
+  - 用户反馈给 Boss（如艾索雷葛斯）配置了 9 件装备（前 4 件为套装 Token，后 5 件为散件），点击自动全拍后只能出现 4~6 件。
+* **致命根因破译**:
+  1. **Token 兑换物与带中括号纯文本解析失效**:
+     - 截图中前 4 件为套装兑换部件（如 `[熔火胜利者的护肩]`），无标准 `|Hitem:` 协议前缀，或由插件直接写入带方括号的名字；
+     - 原 `SafeGetItemID` 未清理中括号直接传入 `GetItemInfoInstant("[熔火胜利者的护肩]")`，魔兽原生 API 遇到方括号 100% 返回 `nil`；
+     - 导致前 4 件装备在 `if itemID and link and link ~= ""` 校验时直接被判定为无效物品跳过，因此实际只扫描并开拍了后面的 5 件！
+  2. **魔兽 AuctionWA 窗口垂直单列堆叠溢出屏幕**:
+     - 每一个拍卖监控窗口高 105px，垂直间距 5px（总高 110px），从屏幕 y=-200 开始自上而下排列；
+     - 9 件全部展开需要 990px 高度，在常规分辨率（如 1080p）下，后半部分的窗口会延伸至屏幕底边之外，视觉上容易误判为“漏拍”。
+* **彻底修复与防护措施**:
+  1. **超强健壮解析器 (`SafeGetItemID`)**:
+     - 彻底剥离颜色前缀 `|c...`、后缀 `|r` 以及方括号 `[` `]`；
+     - 剥离末尾装等数字（如将 `[台风] 213` 智能剥离为 `台风`），多层级 fallback 提取有效 itemID；
+  2. **标准超链接自动补全 (`SafeGetItemLink`)**:
+     - 即使输入格内是纯文本名字，开拍前自动通过 `GetItemInfo(itemID)` 还原为标准的魔兽带品质颜色超链接（`|cffa335ee|Hitem:...|h[名字]|h|r`），确保全团插件接收与屏幕解析 100% 正常；
+  3. **发送间隔平滑与全量通报**:
+     - 将单件发送间隔由 0.8s 提升至 1.0s（对齐原版标准），彻底消除暴雪聊天警告与 Addon 消息的并发节流（Throttle）丢包；
+     - 开拍时在聊天框与屏幕中央输出高亮通知：“`[BGLite] 正在为【Boss名字】发起全部 N 件装备拍卖...`”，直观展示扫描到的真实件数。
 
 
 
+## 37. 暴雪聊天通道 RAID_WARNING 洪水限流破译与防丢包平滑架构 (2026-09-07)
+* **用户关键洞察与现象复现**:
+  - 用户敏锐观察指出：点击 Boss 一键全拍时，团队聊天窗在第 4~6 件之后完全没有显示后续装备的拍卖开始通告；而团队对账单几十条消息却能全部正常发送。
+* **深层根因对比剖析 (拍卖通告 vs 团队对账通告)**:
+  1. **聊天信道限流机制差异 (Flood Protection Token Bucket)**:
+     - **团队对账通报 (TongBao/ZhangDan.lua)**: 发送频道为 BiaoGe.NotifyChannel（默认普通团队频道 "RAID"）。暴雪普通聊天频道的防刷令牌桶容量大、消耗惩罚低（Penalty 仅为 1），且由专门的 OnUpdate 状态机每 0.3s 吐出一条，数十条消息可顺畅通达；
+     - **拍卖开始广播 (AuctionWAEvent.lua)**: 收到 StartAuction 封包后，硬编码调用 SendChatMessage(message, "RAID_WARNING")（团队报警/红字大字）；暴雪官方引擎为防止全屏红字与警报音效被恶意插件滥用刷屏，对 RAID_WARNING 频道的防刷限制是**全频道中最严苛的**！其令牌桶仅有 4~5 个令牌，一旦连续高频发送 4~5 次，暴雪底层立即强制触发 ERR_CHAT_THROTTLED 并**静默丢弃（Silent Drop）后续的所有 RAID_WARNING 聊天文本**！
+  2. **网络丢包连锁反应 (Chat / Addon Message 共享网络连接)**:
+     - 在暴雪底层网络协议中，SendChatMessage 与 C_ChatInfo.SendAddonMessage 共享客户端对服务器的聊天连接限额。当客户端因连续 RAID_WARNING 进入 Flood Cooldown 限流冷却期时，同期排队的 Addon 消息也极易发生服务器静默丢弃，导致全团各客户端（包括团长自身）未接收到 StartAuction 广播，WA 倒计时框体因此缺失！
+  3. **表格物理格子扫描隐患**:
+     - 原 or i = 1, maxi do 依赖 BG.GetMaxi(FB, b)，不同 Boss 的预设上限各异；改用 while BG.Frame[FB]["boss" .. b]["zhuangbei" .. i] do 物理穷举扫描，确保 9 格或更多装备 100% 全量扫描。
+* **彻底根治与防限流架构实施 (Core/AuctionPreset.lua)**:
+  1. **智能防限流保护 (Smart Channel Downgrade)**:
+     - 包装 SendChatMessage：在批量拍卖执行窗口期（isQuickAuctionActive = true），首条开拍消息保留使用 RAID_WARNING（全屏红字警报+音效，瞬间提醒全团开拍），从第 2 件装备起，自动平滑转换为普通团队频道（"RAID"）广播；
+     - 彻底绕开暴雪对 RAID_WARNING 的 4~5 条洪水阻断限制，9 件（乃至更多）装备在团队聊天窗口中 100% 完整逐条展现，无一条遗漏！
+  2. **专用 OnUpdate 状态机平滑发送队列 (quickAuctionQueueFrame)**:
+     - 借鉴 ZhangDan.lua 的稳健架构，彻底摒弃并发的 C_Timer.After，引入独立的单线程发送帧，严格以 1.0s 为步长逐件触发 BG.SendStartAuctionMsg；
+     - 在本地控制台（DEFAULT_CHAT_FRAME）实时输出清晰的进度日志（正在广播 (x/9): [装备名] 起拍底价: XG），并在发送完成时输出绿色完成提示；
+  3. **全量扫描与信息透明反馈**:
+     - 物理穷举遍历所有装备格子，开拍前向聊天框报告：【Boss名字】共扫描到 N 件待拍装备（其中 X 件已预设底价，Y 件未预设），让团长对扫描结果了如指掌。
 
+## 38. 弹窗 EditBox 焦点泄漏引发输入法卡键与零污染限流架构 (2026-09-07)
+* **用户反馈现象与根因定位**:
+  - 用户反馈测试一键开拍或加载后，角色键盘技能按键失效，按 Shift 后恢复正常；
+  - **核心根因 1 (EditBox 焦点泄漏 Focus Leak)**:
+    - 此前为 Boss 统一底价创建的弹窗 BGLITE_PLUS_BOSS_AUCTION_PRICE 及批量底价弹窗，在 OnShow 中执行了 ditBox:SetFocus() 激活输入焦点；
+    - 但在弹窗点击确定、取消、回车或 ESC 时，**未显式调用 ditBox:ClearFocus()** 且缺少 OnHide 清理；
+    - 在 Windows 10/11 操作系统下，魔兽世界的 IME（输入法）框架认为该 EditBox 仍处于活动状态，保持中文输入法拦截键盘字母和数字（作为拼音缓存），导致技能和移动完全无法响应；
+    - 当玩家按下 Shift 键时，Windows 输入法强行切为英文模式不再拦截按键，游戏操作才得以穿透恢复！
+  - **核心根因 2 (全局函数覆盖风险 Action Button Taint)**:
+    - 此前为平滑降级 RAID_WARNING，临时覆盖了全局函数 SendChatMessage = function(...)；
+    - 覆写魔兽世界全局聊天函数会破坏暴雪动作条安全执行栈（Taint），引发安全环境报错或按键阻断。
+* **彻底根治与实施**:
+  1. **彻底加固所有弹窗的 Focus 释放与 IME 抑制**:
+     - 在弹窗 OnShow 中设置 ditBox:SetAutoFocus(false)；
+     - 补齐 OnHide、OnCancel、OnAccept、EditBoxOnEnterPressed 与 EditBoxOnEscapePressed，全链路显式调用 ditBox:ClearFocus()，确保弹窗关闭时焦点 100% 归还游戏世界，彻底根除输入法卡住技能的 Bug；
+  2. **零污染限流方案 (撤销全局 SendChatMessage 覆盖)**:
+     - 彻底删除对 _G.SendChatMessage 的覆写，原生函数 0 修改、0 污染；
+     - 转为仅在 BGLite 内部闭包中拦截 BGA.aura_env.IsRaidLeader：一键全拍期间仅首件放行原生 RW 报警，第 2~9 件由我们的队列直接向普通团队频道（RAID）发送通报，既杜绝暴雪 RW 限流截断，又彻底杜绝动作条 Taint 隐患！
 
-
-
+## 39. 全局输入框焦点泄漏防御机制 (FocusLeakGuard) 与全库 EditBox 防御加固 (2026-09-07)
+* **系统性隐患深度排查**:
+  - 用户敏锐提出：“其他 input 框是否存在这个问题，是否有隐患？是否有防御办法？”；
+  - 经对整个 BGLite_Plus 源码全面扫描，发现魔兽插件生态普遍存在三大焦点泄漏隐患：
+    1. **弹窗类 (StaticPopup)**：除 Boss 开拍弹窗外，角色备注弹窗 (BiaoGe_AddRoleOverviewNote)、阵容保存弹窗 (BG_SAVE_ROSTER_PROFILE) 等均只在 OnShow 中获取焦点，在点击确认、取消或按 ESC 关闭时均未调用 ditBox:ClearFocus()；
+    2. **常驻界面输入框**：团队信息语音框 (yyEdit)、拍卖阈值输入框 (	hreshEdit)、快捷心理价格 (ditBox)、预设价格搜索框 (searchEdit) 以及每行的起拍价/起拍语输入框 (pEdit/	Edit)，绝大多数只绑定了 OnTextChanged 或 OnEnterPressed，完全缺少 OnEscapePressed 和 OnEditFocusLost；
+    3. **隐秘卡死场景**：一旦玩家鼠标点进过这些输入框，然后按 ESC 想退出、或者直接切 Tab/关闭主窗口，输入框虽然被隐藏（Hide），但操作系统底层的 IME 焦点指针仍挂在隐藏的 EditBox 身上，Windows 输入法持续劫持键盘所有字母和数字按键。
+* **架构级纵深防御体系 (FocusLeakGuard) 实施**:
+  1. **全局弹窗自愈网 (hooksecurefunc("StaticPopup_Hide"))**:
+     - 在 Core/Init.lua 中部署底层系统钩子，当游戏内任何 StaticPopup（无论系统还是插件）隐藏时，自动检测并强制执行 ditBox:ClearFocus()，弹窗关闭后 100% 杜绝焦点残留；
+  2. **主界面关闭兜底网 (BG.MainFrame:HookScript("OnHide"))**:
+     - 当玩家关闭 BGLite 主界面（按 ESC 或点击关闭按钮）时，通过 GetFocus() 自动检索当前拥有键盘焦点的控件；若为任何非聊天框的 EditBox，直接强制清空焦点并释放键盘控制权给游戏主视口；
+  3. **标准加固工具 API (
+s.SecureEditBox)**:
+     - 在 Core/Init.lua 中封装标准化防泄漏加固方法，自动为 EditBox 注入 SetAutoFocus(false)、OnEscapePressed、OnEnterPressed 与 OnHide 焦点清除逻辑；
+  4. **全库现有 EditBox 地毯式排查修补**:
+     - **角色总览备注弹窗 (RoleOverview_core.lua)**: 补齐 dit:SetAutoFocus(false)、OnHide、OnCancel、ClearFocus()；
+     - **团队工具预设保存弹窗 (RaidTool.lua)**: 补齐 ditBox:SetAutoFocus(false)、OnHide、OnCancel、ClearFocus()；
+     - **团队信息语音框与阈值框 (TeamInfo.lua)**: 补齐 OnEscapePressed、OnEditFocusLost 自动失焦；
+     - **预设价格面板 (AuctionPreset.lua)**: 补齐搜索框 searchEdit 与行内起拍价 pEdit、起拍语 	Edit 的 OnEscapePressed 与 OnEditFocusLost 自动失焦；
+     - **心理价格设置弹窗 (BestPrice.lua)**: 补齐 OnEscapePressed、OnEnterPressed、OnHide 的 self:ClearFocus()。

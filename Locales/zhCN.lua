@@ -3257,6 +3257,9 @@ do -- 减伤链接收器
     L["按起拍价"] = true
     L["搜索:"] = true
     L["清空"] = true
+    L["拍"] = true
+    L["确定开拍"] = true
+    L["一键全开发送拍卖"] = true
 
     -- TitanGoblin 碎片统计
     L["碎片统计"] = true
