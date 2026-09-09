@@ -3169,4 +3169,27 @@ do -- Raid cooldown receiver
     L["拍"] = "Auction"
     L["确定开拍"] = "Start Auction"
     L["一键全开发送拍卖"] = "Quick All Auction"
+
+    -- Role Overview Hide Characters
+    L["角色显示自定义队列"] = "Character Visibility Queue"
+    L["（勾选的角色将在角色总览中展示，未勾选的将被隐藏）"] = "(Checked characters will be displayed in overview, unchecked will be hidden)"
+    L["显示/隐藏角色："] = "Show/Hide Characters:"
+    L["管理角色显示"] = "Manage Characters"
+    L["全部显示"] = "Show All"
+    L["仅当前角色"] = "Current Only"
+    L["反选"] = "Invert Selection"
+    L["已隐藏 %d 个角色"] = "%d Hidden Characters"
+    L["全部显示（未隐藏任何角色）"] = "Show All (None Hidden)"
+    L["角色显示管理"] = "Character Visibility Management"
+    L["隐藏此角色"] = "Hide This Character"
+    L["确定在角色总览中隐藏角色 %s 吗？\n（可随时在 [插件设置-角色总览] 中重新开启显示）"] = "Are you sure you want to hide character %s in Overview?\n(You can restore visibility anytime in Plugin Settings - Character Overview)"
+    L["已隐藏角色：%s，若需重新显示可在 [插件设置-角色总览] 中开启。"] = "Character %s is now hidden. You can restore visibility anytime in Plugin Settings - Character Overview."
+
+    -- RaidTool New Member Notification
+    L["仅团队生效"] = "Raid Only"
+    L["仅在团队(Raid)中生效 (推荐)"] = "Raid Group Only (Recommended)"
+    L["勾选(默认)：仅在团队活动中生效，5人小队或地下城中绝不发送，杜绝打日常5人本时的误发。"] = "Checked (Default): Only active in raid activities. Never triggers in 5-man party or dungeons."
+    L["反选(取消勾选)：允许在5人小队中生效，当队长组人时正常发送进组密语和小队频道欢迎公告。"] = "Unchecked: Enables notifications in 5-man parties (whispers and party announcements when leader)."
+    L["勾选后，只有当自己是团长或团队助理(A)时，才会自动发送进组密语或团队通知（在小队中则需为小队长），避免进入他人队伍时产生误发。"] = "When checked, notifications are only sent if you are the raid leader or assistant (or party leader). Prevents misfires when joining other players' groups."
+    L["* 当前已启用[仅在团队生效]，5人小队中不会发送。"] = "* Active: [Raid Only] enabled, no notifications in 5-man party."
 end

@@ -36,6 +36,7 @@ function ns.InitRaidToolDB()
     -- 新成员进组通知配置
     if db.autoWhisperNewMember == nil then db.autoWhisperNewMember = false end
     if db.notifyOnlyLeader == nil then db.notifyOnlyLeader = true end
+    if db.notifyOnlyRaid == nil then db.notifyOnlyRaid = true end
     if db.whisperNewMemberText == nil then db.whisperNewMemberText = "欢迎进组！请上YY：123456" end
     if db.whisperHistory == nil then
         db.whisperHistory = {
@@ -55,23 +56,6 @@ function ns.InitRaidToolDB()
         }
     end
 
-    -- 一次性版本数据迁移与历史预设清洗 (升级到 1.0.5 时同步刷新为最新预设，后续用户自定义不受影响)
-    if BG.Once then
-        BG.Once("RaidToolPresets", "20260903", function()
-            db.whisperNewMemberText = "欢迎进组！请上YY：123456"
-            db.whisperHistory = {
-                "欢迎进组！请上YY：123456",
-                "欢迎 {name}！请做好开打准备。",
-                "欢迎勇士进组，请准备好金币。",
-            }
-            db.raidAnnounceText = "欢迎 {name} 加入团队！DD 123456"
-            db.raidAnnounceHistory = {
-                "欢迎大佬{name}加入团队！DD 123456",
-                "欢迎勇士{name}入团，YY频道：123456，请未上语音的尽快上语音，备好金币，一起打出极品装备！",
-                "欢迎勇士{name}进本，本周活动KLZ全通团！",
-            }
-        end)
-    end
 
     BiaoGe.RaidGroups = BiaoGe.RaidGroups or {}
     local rdb = BiaoGe.RaidGroups
@@ -219,11 +203,45 @@ local function CanIInvite()
     return false
 end
 
-local function IsLeaderOrAssistant()
-    if not IsInGroup() then return false end
-    if UnitIsGroupLeader("player") then return true end
-    if IsInRaid() and UnitIsGroupAssistant("player") then return true end
-    return false
+local function CanSendNewMemberNotification()
+    local db = BiaoGe and BiaoGe.RaidTool
+    if not db then return false end
+    if not db.autoWhisperNewMember and not db.autoRaidAnnounceNew then
+        return false
+    end
+
+    -- 必须处于组队或团队中
+    local inGroup = (IsInGroup and IsInGroup())
+        or ((GetNumGroupMembers and GetNumGroupMembers() or 0) > 0)
+        or ((GetNumPartyMembers and GetNumPartyMembers() or 0) > 0)
+        or ((GetNumSubgroupMembers and GetNumSubgroupMembers() or 0) > 0)
+    if not inGroup then
+        return false
+    end
+
+    local inRaid = (IsInRaid and IsInRaid()) or ((GetNumRaidMembers and GetNumRaidMembers() or 0) > 0)
+
+    -- 1. 团队/小队生效范围：默认开启[仅团队生效]，非团队(5人小队)100%直接拦截
+    if db.notifyOnlyRaid and not inRaid then
+        return false
+    end
+
+    -- 2. 团长/助理管理权限校验
+    if db.notifyOnlyLeader then
+        if inRaid then
+            local isLeader = UnitIsGroupLeader("player")
+            local isAssistant = UnitIsGroupAssistant("player")
+            if not isLeader and not isAssistant then
+                return false
+            end
+        else
+            if not UnitIsGroupLeader("player") then
+                return false
+            end
+        end
+    end
+
+    return true
 end
 
 local recentlyInvited = {}
@@ -324,13 +342,13 @@ local function SendNewMemberNotification(targetName)
     if not targetName or targetName == "" then return end
     local cleanName = CleanPlayerName(targetName)
     local myName = CleanPlayerName(UnitName("player") or "")
-    if cleanName == "" or cleanName == myName then return end
+    if cleanName == "" or cleanName == myName or cleanName == "你" or cleanName:lower() == "you" then return end
 
     local db = BiaoGe and BiaoGe.RaidTool
     if not db then return end
 
-    -- 若开启了仅限团长/助理，且当前不是团长或助理，则直接拦截
-    if db.notifyOnlyLeader and not IsLeaderOrAssistant() then
+    -- 发送前严格校验资格与环境
+    if not CanSendNewMemberNotification() then
         return
     end
 
@@ -342,9 +360,9 @@ local function SendNewMemberNotification(targetName)
 
     -- 延时 1.0 秒，确保客户端与服务器小队/团队成员路由完全就绪
     C_Timer.After(1.0, function()
-        -- 再次校验：确保该玩家当前仍在队伍中，且自身仍为团长/助理
+        -- 再次校验：确保环境与权限依然满足，且该玩家当前仍在队伍中
+        if not CanSendNewMemberNotification() then return end
         if not IsPlayerInGroup(cleanName) then return end
-        if db.notifyOnlyLeader and not IsLeaderOrAssistant() then return end
 
         -- 1. 自动密语
         if db.autoWhisperNewMember and db.whisperNewMemberText and db.whisperNewMemberText ~= "" then
@@ -356,23 +374,11 @@ local function SendNewMemberNotification(targetName)
         -- 2. 自动团队/小队发言
         if db.autoRaidAnnounceNew and db.raidAnnounceText and db.raidAnnounceText ~= "" then
             local rMsg = db.raidAnnounceText:gsub("{name}", cleanName)
-            local channel = nil
-            if IsInRaid and IsInRaid() then
-                channel = "RAID"
-            elseif (GetNumRaidMembers and GetNumRaidMembers() > 0) then
-                channel = "RAID"
-            elseif IsInGroup and IsInGroup() then
-                channel = "PARTY"
-            elseif (GetNumSubgroupMembers and GetNumSubgroupMembers() > 0) then
-                channel = "PARTY"
-            elseif (GetNumGroupMembers and GetNumGroupMembers() > 0) then
-                channel = (IsInRaid and IsInRaid()) and "RAID" or "PARTY"
-            end
+            local inRaid = (IsInRaid and IsInRaid()) or ((GetNumRaidMembers and GetNumRaidMembers() or 0) > 0)
+            local channel = inRaid and "RAID" or "PARTY"
 
-            if channel then
-                SendChatMessage(rMsg, channel)
-                RaidTool.Log("已在 " .. (channel == "RAID" and "团队" or "小队") .. " 频道发送进组欢迎公告。")
-            end
+            SendChatMessage(rMsg, channel)
+            RaidTool.Log("已在 " .. (channel == "RAID" and "团队" or "小队") .. " 频道发送进组欢迎公告。")
         end
     end)
 end
@@ -388,15 +394,12 @@ notifyFrame:SetScript("OnEvent", function(self, event, ...)
         return
     end
 
-    local db = BiaoGe and BiaoGe.RaidTool
-    if not db or (not db.autoWhisperNewMember and not db.autoRaidAnnounceNew) then
-        return
-    end
-    if db.notifyOnlyLeader and not IsLeaderOrAssistant() then
-        return
-    end
-
     if event == "CHAT_MSG_SYSTEM" then
+        -- 仅当具备发送资格时才解析 CHAT_MSG_SYSTEM，避免多余处理
+        if not CanSendNewMemberNotification() then
+            return
+        end
+
         local msg = select(1, ...)
         if msg then
             local p = msg:match("^(.-)加入了队伍") or msg:match("^(.-)加入了團隊") or msg:match("^(.-)加入了团队") or msg:match("^(.-)加入了隊伍")
@@ -406,16 +409,20 @@ notifyFrame:SetScript("OnEvent", function(self, event, ...)
             if not p and ERR_RAID_MEMBER_ADDED_S then
                 p = msg:match(ERR_RAID_MEMBER_ADDED_S:gsub("%%s", "(.+)"))
             end
-            if p then
+            if p and p ~= "" and p ~= "你" and p:lower() ~= "you" then
                 SendNewMemberNotification(p)
             end
         end
         return
     end
 
-    -- GROUP_ROSTER_UPDATE 差异比对兜底
+    -- GROUP_ROSTER_UPDATE 名册维护核心（绝不能被权限拦截，退队或解散时必须无条件重置状态！）
     local memberCount = GetRosterMemberCount()
-    if memberCount == 0 then
+    local inGroup = (IsInGroup and IsInGroup())
+        or ((GetNumGroupMembers and GetNumGroupMembers() or 0) > 0)
+        or ((GetNumPartyMembers and GetNumPartyMembers() or 0) > 0)
+        or ((GetNumSubgroupMembers and GetNumSubgroupMembers() or 0) > 0)
+    if memberCount == 0 or not inGroup then
         wipe(knownRosterMembers)
         isFirstRosterScan = true
         return
@@ -425,9 +432,10 @@ notifyFrame:SetScript("OnEvent", function(self, event, ...)
     local newMembers = {}
     local myName = CleanPlayerName(UnitName("player") or "")
 
-    if IsInRaid() or (GetRaidRosterInfo and GetRaidRosterInfo(1)) then
+    local inRaid = (IsInRaid and IsInRaid()) or ((GetNumRaidMembers and GetNumRaidMembers() or 0) > 0)
+    if inRaid then
         for i = 1, memberCount do
-            local name = GetRaidRosterInfo(i) or UnitName("raid" .. i)
+            local name = (GetRaidRosterInfo and GetRaidRosterInfo(i)) or UnitName("raid" .. i)
             if name and name ~= "" then
                 local shortName = CleanPlayerName(name)
                 if shortName ~= "" then
@@ -462,11 +470,14 @@ notifyFrame:SetScript("OnEvent", function(self, event, ...)
         return
     end
 
-    for _, nName in ipairs(newMembers) do
-        SendNewMemberNotification(nName)
-    end
-
     knownRosterMembers = currentMembers
+
+    -- 只有当满足所有通知发送条件（仅团队、仅团长等）时，才向真正的新进成员发送通知！
+    if CanSendNewMemberNotification() then
+        for _, nName in ipairs(newMembers) do
+            SendNewMemberNotification(nName)
+        end
+    end
 end)
 
 --------------------------------------------------------------------------------
@@ -938,9 +949,12 @@ function RaidTool.CreateUI(parent)
     notifTitle:SetPoint("TOPLEFT", 14, leftY)
     notifTitle:SetText(BG.STC_g1(L["新进成员自动通知"]))
 
+    leftY = leftY - 24
+
+    -- 控制选项双列布局：左列为[仅团长/助理]，右列为[仅团队生效]
     local cbNotifyOnlyLeader = CreateFrame("CheckButton", nil, leftPanel, "UICheckButtonTemplate")
     cbNotifyOnlyLeader:SetSize(18, 18)
-    cbNotifyOnlyLeader:SetPoint("TOPLEFT", 225, leftY + 1)
+    cbNotifyOnlyLeader:SetPoint("TOPLEFT", 14, leftY)
     cbNotifyOnlyLeader.text = cbNotifyOnlyLeader:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
     cbNotifyOnlyLeader.text:SetPoint("LEFT", cbNotifyOnlyLeader, "RIGHT", 3, 0)
     cbNotifyOnlyLeader.text:SetFont(BIAOGE_TEXT_FONT, 13, "OUTLINE")
@@ -955,10 +969,33 @@ function RaidTool.CreateUI(parent)
         GameTooltip:SetOwner(self, "ANCHOR_TOPLEFT", 0, 0)
         GameTooltip:ClearLines()
         GameTooltip:AddLine(L["仅团长/助理生效"], 1, 1, 1, true)
-        GameTooltip:AddLine(L["勾选后，只有当自己是团长或团队助理(A)时，才会自动发送进组密语或团队通知，避免进入他人团队时产生误发。"], 1, 0.82, 0, true)
+        GameTooltip:AddLine(L["勾选后，只有当自己是团长或团队助理(A)时，才会自动发送进组密语或团队通知（在小队中则需为小队长），避免进入他人队伍时产生误发。"], 1, 0.82, 0, true)
         GameTooltip:Show()
     end)
     cbNotifyOnlyLeader:SetScript("OnLeave", GameTooltip_Hide)
+
+    local cbNotifyOnlyRaid = CreateFrame("CheckButton", nil, leftPanel, "UICheckButtonTemplate")
+    cbNotifyOnlyRaid:SetSize(18, 18)
+    cbNotifyOnlyRaid:SetPoint("TOPLEFT", 175, leftY)
+    cbNotifyOnlyRaid.text = cbNotifyOnlyRaid:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
+    cbNotifyOnlyRaid.text:SetPoint("LEFT", cbNotifyOnlyRaid, "RIGHT", 3, 0)
+    cbNotifyOnlyRaid.text:SetFont(BIAOGE_TEXT_FONT, 13, "OUTLINE")
+    cbNotifyOnlyRaid.text:SetText(L["仅团队生效"])
+    cbNotifyOnlyRaid:SetChecked(BiaoGe.RaidTool.notifyOnlyRaid)
+    cbNotifyOnlyRaid:SetHitRectInsets(-2, -cbNotifyOnlyRaid.text:GetStringWidth() - 4, -2, -2)
+    cbNotifyOnlyRaid:SetScript("OnClick", function(self)
+        BiaoGe.RaidTool.notifyOnlyRaid = self:GetChecked()
+        BG.PlaySound(1)
+    end)
+    cbNotifyOnlyRaid:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_TOPLEFT", 0, 0)
+        GameTooltip:ClearLines()
+        GameTooltip:AddLine(L["仅在团队(Raid)中生效 (推荐)"], 1, 1, 1, true)
+        GameTooltip:AddLine(L["勾选(默认)：仅在团队活动中生效，5人小队或地下城中绝不发送，杜绝打日常5人本时的误发。"], 1, 0.82, 0, true)
+        GameTooltip:AddLine(L["反选(取消勾选)：允许在5人小队中生效，当队长组人时正常发送进组密语和小队频道欢迎公告。"], 0.2, 1, 0.2, true)
+        GameTooltip:Show()
+    end)
+    cbNotifyOnlyRaid:SetScript("OnLeave", GameTooltip_Hide)
 
     leftY = leftY - 24
 
@@ -1087,6 +1124,9 @@ function RaidTool.CreateUI(parent)
         if BiaoGe.RaidTool.notifyOnlyLeader then
             GameTooltip:AddLine(L["* 当前已启用[仅限团长/助理]，仅在拥有管理权限时发送。"], 0.3, 1, 0.3, true)
         end
+        if BiaoGe.RaidTool.notifyOnlyRaid then
+            GameTooltip:AddLine(L["* 当前已启用[仅在团队生效]，5人小队中不会发送。"], 0.3, 1, 0.3, true)
+        end
         GameTooltip:Show()
     end)
     cbWhisper:SetScript("OnLeave", GameTooltip_Hide)
@@ -1166,6 +1206,9 @@ function RaidTool.CreateUI(parent)
         GameTooltip:AddLine(L["当有新玩家加入队伍或团队时，自动在团队/小队频道发送进组欢迎公告。"], 1, 0.82, 0, true)
         if BiaoGe.RaidTool.notifyOnlyLeader then
             GameTooltip:AddLine(L["* 当前已启用[仅限团长/助理]，仅在拥有管理权限时发送。"], 0.3, 1, 0.3, true)
+        end
+        if BiaoGe.RaidTool.notifyOnlyRaid then
+            GameTooltip:AddLine(L["* 当前已启用[仅在团队生效]，5人小队中不会发送。"], 0.3, 1, 0.3, true)
         end
         GameTooltip:Show()
     end)

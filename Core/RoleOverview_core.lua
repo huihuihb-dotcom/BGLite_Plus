@@ -346,6 +346,47 @@ local function CreateEquipIcons(t_paizi, equip, slots, isNewUI)
     end
 end
 local CreateTrinkets = CreateEquipIcons
+
+function BG.IsRoleOverviewRoleHidden(rID, pName)
+    if BiaoGe and BiaoGe.roleOverviewHideRoles and rID and pName then
+        if BiaoGe.roleOverviewHideRoles[rID] and BiaoGe.roleOverviewHideRoles[rID][pName] then
+            return true
+        end
+    end
+    return false
+end
+
+function BG.ConfirmHideRoleOverviewPlayer(rID, pName, colorplayer)
+    local popupName = "BiaoGe_ConfirmHideRoleOverviewPlayer"
+    if not StaticPopupDialogs[popupName] then
+        StaticPopupDialogs[popupName] = {
+            text = L["确定在角色总览中隐藏角色 %s 吗？\n（可随时在 [插件设置-角色总览] 中重新开启显示）"],
+            button1 = YES,
+            button2 = NO,
+            timeout = 0,
+            whileDead = true,
+            hideOnEscape = true,
+            OnAccept = function(self, data)
+                if data and data.realmID and data.player then
+                    BiaoGe.roleOverviewHideRoles = BiaoGe.roleOverviewHideRoles or {}
+                    BiaoGe.roleOverviewHideRoles[data.realmID] = BiaoGe.roleOverviewHideRoles[data.realmID] or {}
+                    BiaoGe.roleOverviewHideRoles[data.realmID][data.player] = true
+                    if BG.RefreshRoleOverviewOptions then
+                        BG.RefreshRoleOverviewOptions()
+                    end
+                    if BG.FBCDFrame and BG.FBCDFrame:IsVisible() and BG.SetFBCD then
+                        BG.SetFBCD(nil, nil, true, true)
+                    end
+                    local nameStr = data.colorplayer or data.player
+                    print(format("|cff00BFFF[BiaoGe]|r " .. L["已隐藏角色：%s，若需重新显示可在 [插件设置-角色总览] 中开启。"], nameStr))
+                    BG.PlaySound(1)
+                end
+            end,
+        }
+    end
+    StaticPopup_Show(popupName, colorplayer or pName, nil, { realmID = rID, player = pName, colorplayer = colorplayer })
+end
+
 local function SetEquipFrameFuc(bt, isAccounts, realmID, player, colorplayer, level, class, iLevel)
     if BG.ShowEquipFrame then
         local r, g, b = GetClassColor(class)
@@ -367,8 +408,13 @@ local function SetEquipFrameFuc(bt, isAccounts, realmID, player, colorplayer, le
             end
             GameTooltip:Hide()
         end)
-        bt:SetScript("OnClick", function(self)
-            BG.ShowEquipFrame(true, bt, isAccounts, realmID, player, colorplayer, level, class, iLevel)
+        bt:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+        bt:SetScript("OnClick", function(self, button)
+            if button == "RightButton" then
+                BG.ConfirmHideRoleOverviewPlayer(realmID, player, colorplayer)
+            else
+                BG.ShowEquipFrame(true, bt, isAccounts, realmID, player, colorplayer, level, class, iLevel)
+            end
         end)
     end
 end
@@ -511,31 +557,33 @@ do
     local function _AddDB(newTbl, db, realmID, isAccounts, accountName, includeLocal)
         if db and db[FBCD] and db[FBCD][realmID] then
             for player, v in pairs(db[FBCD][realmID]) do
-                if (not isAccounts or IsRoleOverviewAccountPlayer(accountName, realmID, player))
-                    and (not isAccounts or not includeLocal or not (BiaoGe[FBCD] and BiaoGe[FBCD][realmID] and BiaoGe[FBCD][realmID][player])) then
-                    local playerInfo = db.playerInfo and db.playerInfo[realmID] and db.playerInfo[realmID][player]
-                    local level = playerInfo and playerInfo.level
-                    local onlyFull = (not BiaoGe.options or BiaoGe.options.roleOverviewOnlyFullLevel ~= 0)
-                    if level and (not onlyFull or level >= (BG.fullLevel_RoleOverview or 0)) then
-                        local class = playerInfo and playerInfo.class
-                        local iLevel = (playerInfo and playerInfo.iLevel) or (db.PlayerItemsLevel and db.PlayerItemsLevel[realmID] and db.PlayerItemsLevel[realmID][player]) or 0
-                        local talent = playerInfo and playerInfo.talent
-                        if class and iLevel >= ((BiaoGe.options and BiaoGe.options["roleOverviewNotShowiLevel"]) or 0) then
-                            local faction = playerInfo and playerInfo.faction
-                            local colorplayer = "|c" .. select(4, GetClassColor(class)) .. player .. (isAccounts and "*" or "") .. "|r"
-                            tinsert(newTbl, {
-                                player = player,
-                                colorplayer = colorplayer,
-                                class = class,
-                                iLevel = iLevel,
-                                level = level,
-                                talent = talent,
-                                faction = faction,
-                                realmID = realmID,
-                                realmName = (db.realmName and db.realmName[realmID]) or (BiaoGe.realmName and BiaoGe.realmName[realmID]) or realmID,
-                                isAccounts = isAccounts,
-                                tbl = BG.Copy(v)
-                            })
+                if not BG.IsRoleOverviewRoleHidden(realmID, player) then
+                    if (not isAccounts or IsRoleOverviewAccountPlayer(accountName, realmID, player))
+                        and (not isAccounts or not includeLocal or not (BiaoGe[FBCD] and BiaoGe[FBCD][realmID] and BiaoGe[FBCD][realmID][player])) then
+                        local playerInfo = db.playerInfo and db.playerInfo[realmID] and db.playerInfo[realmID][player]
+                        local level = playerInfo and playerInfo.level
+                        local onlyFull = (not BiaoGe.options or BiaoGe.options.roleOverviewOnlyFullLevel ~= 0)
+                        if level and (not onlyFull or level >= (BG.fullLevel_RoleOverview or 0)) then
+                            local class = playerInfo and playerInfo.class
+                            local iLevel = (playerInfo and playerInfo.iLevel) or (db.PlayerItemsLevel and db.PlayerItemsLevel[realmID] and db.PlayerItemsLevel[realmID][player]) or 0
+                            local talent = playerInfo and playerInfo.talent
+                            if class and iLevel >= ((BiaoGe.options and BiaoGe.options["roleOverviewNotShowiLevel"]) or 0) then
+                                local faction = playerInfo and playerInfo.faction
+                                local colorplayer = "|c" .. select(4, GetClassColor(class)) .. player .. (isAccounts and "*" or "") .. "|r"
+                                tinsert(newTbl, {
+                                    player = player,
+                                    colorplayer = colorplayer,
+                                    class = class,
+                                    iLevel = iLevel,
+                                    level = level,
+                                    talent = talent,
+                                    faction = faction,
+                                    realmID = realmID,
+                                    realmName = (db.realmName and db.realmName[realmID]) or (BiaoGe.realmName and BiaoGe.realmName[realmID]) or realmID,
+                                    isAccounts = isAccounts,
+                                    tbl = BG.Copy(v)
+                                })
+                            end
                         end
                     end
                 end
@@ -629,32 +677,34 @@ do
     local function AddDB(db, newTbl, copyTbl, isAccounts, includeLocal)
         for realmID in pairs(copyTbl) do
             for player, v in pairs(copyTbl[realmID]) do
-                if not isAccounts or not includeLocal or not (BiaoGe[MONEY] and BiaoGe[MONEY][realmID] and BiaoGe[MONEY][realmID][player]) then
-                    local playerInfo = db.playerInfo and db.playerInfo[realmID] and db.playerInfo[realmID][player]
-                    local level = playerInfo and playerInfo.level
-                    local onlyFull = (BiaoGe.options and BiaoGe.options.roleOverviewResOnlyFullLevel == 1)
-                    if level and (not onlyFull or level >= (BG.fullLevel_RoleOverview or 0))
-                        and (level >= ((BiaoGe.options and BiaoGe.options["roleOverviewNotShowLevel"]) or 0)) then
-                        local class = playerInfo and playerInfo.class
-                        local talent = playerInfo and playerInfo.talent
-                        local iLevel = (playerInfo and playerInfo.iLevel) or (db.PlayerItemsLevel and db.PlayerItemsLevel[realmID] and db.PlayerItemsLevel[realmID][player]) or 0
-                        if class and iLevel >= ((BiaoGe.options and BiaoGe.options["roleOverviewNotShowiLevel"]) or 0) then
-                            local faction = playerInfo and playerInfo.faction
-                            local colorplayer = "|c" .. select(4, GetClassColor(class)) .. player .. (isAccounts and "*" or "")
-                            tinsert(newTbl, {
-                                player = player,
-                                colorplayer = colorplayer,
-                                class = class,
-                                iLevel = iLevel,
-                                level = level,
-                                talent = talent,
-                                faction = faction,
-                                realmID = realmID,
-                                realmName = (db.realmName and db.realmName[realmID]) or (BiaoGe.realmName and BiaoGe.realmName[realmID]) or realmID,
-                                isAccounts = isAccounts,
-                                tbl = v,
-                                equip = db.equip and db.equip[realmID] and db.equip[realmID][player],
-                            })
+                if not BG.IsRoleOverviewRoleHidden(realmID, player) then
+                    if not isAccounts or not includeLocal or not (BiaoGe[MONEY] and BiaoGe[MONEY][realmID] and BiaoGe[MONEY][realmID][player]) then
+                        local playerInfo = db.playerInfo and db.playerInfo[realmID] and db.playerInfo[realmID][player]
+                        local level = playerInfo and playerInfo.level
+                        local onlyFull = (BiaoGe.options and BiaoGe.options.roleOverviewResOnlyFullLevel == 1)
+                        if level and (not onlyFull or level >= (BG.fullLevel_RoleOverview or 0))
+                            and (level >= ((BiaoGe.options and BiaoGe.options["roleOverviewNotShowLevel"]) or 0)) then
+                            local class = playerInfo and playerInfo.class
+                            local talent = playerInfo and playerInfo.talent
+                            local iLevel = (playerInfo and playerInfo.iLevel) or (db.PlayerItemsLevel and db.PlayerItemsLevel[realmID] and db.PlayerItemsLevel[realmID][player]) or 0
+                            if class and iLevel >= ((BiaoGe.options and BiaoGe.options["roleOverviewNotShowiLevel"]) or 0) then
+                                local faction = playerInfo and playerInfo.faction
+                                local colorplayer = "|c" .. select(4, GetClassColor(class)) .. player .. (isAccounts and "*" or "")
+                                tinsert(newTbl, {
+                                    player = player,
+                                    colorplayer = colorplayer,
+                                    class = class,
+                                    iLevel = iLevel,
+                                    level = level,
+                                    talent = talent,
+                                    faction = faction,
+                                    realmID = realmID,
+                                    realmName = (db.realmName and db.realmName[realmID]) or (BiaoGe.realmName and BiaoGe.realmName[realmID]) or realmID,
+                                    isAccounts = isAccounts,
+                                    tbl = v,
+                                    equip = db.equip and db.equip[realmID] and db.equip[realmID][player],
+                                })
+                            end
                         end
                     end
                 end
