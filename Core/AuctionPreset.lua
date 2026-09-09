@@ -69,6 +69,44 @@ local function SafeGetItemLink(rawText, itemID)
     return nil -- 关键：若无法获得标准超链接，必须返回 nil，绝不能返回纯文本字符串，防止接收端 Item:CreateFromItemLink 报废死锁
 end
 
+-- 辅助工具：精准识别套装兑换物 (Tier Token / 印记 / 奖章 / 兑换物)
+local function IsTierTokenItem(itemID, FB)
+    if not itemID then return false end
+    local idNum = tonumber(itemID)
+    if not idNum then return false end
+
+    -- 1. 最权威数据源：上游 BGLite 原生维护的 ExchangeItems 数据库
+    if BG and BG.Loot then
+        if FB and BG.Loot[FB] and BG.Loot[FB].ExchangeItems and BG.Loot[FB].ExchangeItems[idNum] then
+            return true
+        end
+        for fbKey, fbData in pairs(BG.Loot) do
+            if type(fbData) == "table" and fbData.ExchangeItems and fbData.ExchangeItems[idNum] then
+                return true
+            end
+        end
+    end
+
+    -- 2. 名字特征匹配（严格匹配套装代币专属模式，排除普通穿戴装备）
+    local name, _, _, _, _, _, _, _, equipLoc = GetItemInfo(idNum)
+    if name then
+        if name:find("失落的") or name:find("战败的") or name:find("征服者的")
+           or name:find("保卫者的") or name:find("胜利者的")
+           or name:find("圣洁勋服") or name:find("圣洁徽记")
+           or name:find("北伐奖章") or name:find("十字军奖章")
+           or name:find("印记") or name:find("代币") or name:find("兑换物") then
+            if not equipLoc or equipLoc == "" or equipLoc == "INVTYPE_NON_EQUIP" then
+                return true
+            elseif name:find("失落的") or name:find("战败的") or name:find("征服者的") or name:find("保卫者的") or name:find("胜利者的") or name:find("印记") then
+                return true
+            end
+        end
+    end
+
+    return false
+end
+ns.IsTierTokenItem = IsTierTokenItem
+
 -- 全局读取预设价格与起拍语接口
 function BG.GetAuctionPreset(FB, itemID)
     if not itemID then return nil, nil end
@@ -112,6 +150,7 @@ function ns.InitAuctionPresetModule()
     for _, FB in ipairs(BG.FBtable or {}) do
         BiaoGe.auctionPreset[FB] = BiaoGe.auctionPreset[FB] or {}
         BiaoGe.auctionPreset[FB].money = BiaoGe.auctionPreset[FB].money or {}
+        BiaoGe.auctionPreset[FB].autoAuction = BiaoGe.auctionPreset[FB].autoAuction or {}
     end
 
     local currentFB = BiaoGe.auctionPreset.currentFB
@@ -122,6 +161,7 @@ function ns.InitAuctionPresetModule()
     local contentFrame
     local rowFrames = {}
     local searchKeyword = ""
+    local UpdateBottomTipCount
 
     local ROW_HEIGHT = 26
     local VISIBLE_ROWS = 18
@@ -176,6 +216,7 @@ function ns.InitAuctionPresetModule()
     local function ApplyFilterAndSort()
         filteredItems = {}
         local moneyDB = BiaoGe.auctionPreset[currentFB] and BiaoGe.auctionPreset[currentFB].money or {}
+        local autoDB = BiaoGe.auctionPreset[currentFB] and BiaoGe.auctionPreset[currentFB].autoAuction or {}
 
         for _, item in ipairs(currentItems) do
             local itemID = item.itemID
@@ -200,6 +241,7 @@ function ns.InitAuctionPresetModule()
                     level = level,
                     price = moneyDB[itemID] or 0,
                     tips = moneyDB[itemID .. "tips"] or "",
+                    autoAuction = autoDB[itemID], -- nil: 默认跟随, 1: 开启, 0: 关闭(人工处理)
                     bossNum = item.bossNum,
                 })
             end
@@ -289,6 +331,17 @@ function ns.InitAuctionPresetModule()
                 row.priceEdit:SetText(data.price > 0 and tostring(data.price) or "")
                 row.tipsEdit:SetText(data.tips or "")
 
+                -- 自动拍卖复选框渲染 (橙装 quality == 5 默认必须人工处理；普通装备默认开启自动)
+                if row.autoCheck then
+                    local isAuto
+                    if data.quality == 5 then
+                        isAuto = (data.autoAuction == 1)
+                    else
+                        isAuto = (data.autoAuction == nil) or (data.autoAuction == 1)
+                    end
+                    row.autoCheck:SetChecked(isAuto)
+                end
+
                 row:Show()
             else
                 row.data = nil
@@ -300,10 +353,12 @@ function ns.InitAuctionPresetModule()
     local function ReloadCurrentFB(FB)
         currentFB = FB or currentFB
         BiaoGe.auctionPreset.currentFB = currentFB
-        BiaoGe.auctionPreset[currentFB] = BiaoGe.auctionPreset[currentFB] or { money = {} }
+        BiaoGe.auctionPreset[currentFB] = BiaoGe.auctionPreset[currentFB] or { money = {}, autoAuction = {} }
+        BiaoGe.auctionPreset[currentFB].autoAuction = BiaoGe.auctionPreset[currentFB].autoAuction or {}
         currentItems = CollectFBItems(currentFB)
         ApplyFilterAndSort()
         RefreshScrollView()
+        if UpdateBottomTipCount then UpdateBottomTipCount() end
     end
 
     -- 转换副本显示名称：优先中文全称 + 英文缩写
@@ -500,6 +555,98 @@ function ns.InitAuctionPresetModule()
             StaticPopup_Show("BGLITE_BATCH_PRESET_PRICE")
         end)
 
+        -- 自动拍卖批量设置按钮与下拉菜单
+        local batchSetBtn = CreateFrame("Button", nil, topBar, "UIPanelButtonTemplate")
+        batchSetBtn:SetSize(90, 22)
+        batchSetBtn:SetPoint("LEFT", batchPriceBtn, "RIGHT", 8, 0)
+        batchSetBtn:SetText(L["自动拍卖 ▾"] or "自动拍卖 ▾")
+
+        local batchSetMenu = LibBG:Create_UIDropDownMenu("BGLite_AuctionPresetBatchSetMenu", batchSetBtn)
+        LibBG:UIDropDownMenu_Initialize(batchSetMenu, function(self, level)
+            local function BatchSetAutoAuction(mode, filterTokenOnly)
+                local autoDB = BiaoGe.auctionPreset[currentFB].autoAuction
+                local count = 0
+                for _, item in ipairs(currentItems) do
+                    local isToken = IsTierTokenItem(item.itemID, currentFB)
+
+                    if filterTokenOnly then
+                        -- 仅处理套装兑换物：非套装装备一律跳过，绝不修改！
+                        if isToken then
+                            count = count + 1
+                            if mode == "disable" then
+                                autoDB[item.itemID] = 0
+                            elseif mode == "enable" then
+                                autoDB[item.itemID] = 1
+                            elseif mode == "reset" then
+                                autoDB[item.itemID] = nil
+                            end
+                        end
+                    else
+                        -- 处理当前副本全部装备
+                        local isLegendary = false
+                        local _, _, q = GetItemInfo(item.itemID)
+                        if q == 5 then isLegendary = true end
+
+                        if mode == "enable" and isLegendary then
+                            -- 橙装保护：即使批量开启，橙装也保持默认人工处理，绝不误开
+                        else
+                            count = count + 1
+                            if mode == "enable" then
+                                autoDB[item.itemID] = 1
+                            elseif mode == "disable" then
+                                autoDB[item.itemID] = 0
+                            elseif mode == "reset" then
+                                autoDB[item.itemID] = nil
+                            end
+                        end
+                    end
+                end
+                ApplyFilterAndSort()
+                RefreshScrollView()
+                if UpdateBottomTipCount then UpdateBottomTipCount() end
+
+                local scopeName = filterTokenOnly and "套装兑换物" or "装备"
+                if mode == "enable" then
+                    DEFAULT_CHAT_FRAME:AddMessage(string.format("|cff00BFFF[BGLite 自动拍卖]|r 已将 %s 共 %d 件%s设为：|cff00ff00开启自动拍卖|r (橙装保持人工保护)", GetFBDisplayName(currentFB), count, scopeName))
+                elseif mode == "disable" and filterTokenOnly then
+                    DEFAULT_CHAT_FRAME:AddMessage(string.format("|cff00BFFF[BGLite 自动拍卖]|r 已将 %s 共 %d 件套装兑换物设为：|cffffaa00不自动拍卖 (保留最后人工处理)|r", GetFBDisplayName(currentFB), count))
+                elseif mode == "disable" then
+                    DEFAULT_CHAT_FRAME:AddMessage(string.format("|cff00BFFF[BGLite 自动拍卖]|r 已将 %s 共 %d 件装备设为：|cffff8000全部不自动 (保留人工处理)|r", GetFBDisplayName(currentFB), count))
+                elseif mode == "reset" then
+                    DEFAULT_CHAT_FRAME:AddMessage(string.format("|cff00BFFF[BGLite 自动拍卖]|r 已将 %s 共 %d 件装备恢复为：默认跟随", GetFBDisplayName(currentFB), count))
+                end
+            end
+
+            local info1 = LibBG:UIDropDownMenu_CreateInfo()
+            info1.text = "|cff00ff00全部开启自动拍卖|r (橙装保持人工)"
+            info1.notCheckable = true
+            info1.func = function() BatchSetAutoAuction("enable", false) end
+            LibBG:UIDropDownMenu_AddButton(info1)
+
+            local info2 = LibBG:UIDropDownMenu_CreateInfo()
+            info2.text = "|cffff8000全部关闭自动拍卖 (全部人工)|r"
+            info2.notCheckable = true
+            info2.func = function() BatchSetAutoAuction("disable", false) end
+            LibBG:UIDropDownMenu_AddButton(info2)
+
+            local info3 = LibBG:UIDropDownMenu_CreateInfo()
+            info3.text = "|cffffaa00套装：设为不自动 (保留人工)|r"
+            info3.notCheckable = true
+            info3.func = function() BatchSetAutoAuction("disable", true) end
+            LibBG:UIDropDownMenu_AddButton(info3)
+
+            local info4 = LibBG:UIDropDownMenu_CreateInfo()
+            info4.text = "|cffaaaaaa全部恢复默认跟随总开关|r"
+            info4.notCheckable = true
+            info4.func = function() BatchSetAutoAuction("reset", false) end
+            LibBG:UIDropDownMenu_AddButton(info4)
+        end, "MENU")
+
+        batchSetBtn:SetScript("OnClick", function(self)
+            if BG.PlaySound then BG.PlaySound(1) end
+            LibBG:ToggleDropDownMenu(1, nil, batchSetMenu, self, 0, 0)
+        end)
+
         -- 清空当前副本按钮
         local clearBtn = CreateFrame("Button", nil, topBar, "UIPanelButtonTemplate")
         clearBtn:SetSize(72, 22)
@@ -508,7 +655,7 @@ function ns.InitAuctionPresetModule()
         clearBtn:SetScript("OnClick", function()
             if BG.PlaySound then BG.PlaySound(1) end
             StaticPopupDialogs["BGLITE_CLEAR_PRESET_CONFIRM"] = {
-                text = string.format("确定要清空【%s】的所有预设起拍价和起拍语吗？", GetFBDisplayName(currentFB)),
+                text = string.format("确定要清空【%s】的所有预设起拍价、起拍语与自动设置吗？", GetFBDisplayName(currentFB)),
                 button1 = OKAY or "确定",
                 button2 = CANCEL or "取消",
                 timeout = 0,
@@ -516,9 +663,11 @@ function ns.InitAuctionPresetModule()
                 hideOnEscape = true,
                 OnAccept = function()
                     BiaoGe.auctionPreset[currentFB].money = {}
+                    BiaoGe.auctionPreset[currentFB].autoAuction = {}
                     ApplyFilterAndSort()
                     RefreshScrollView()
-                    DEFAULT_CHAT_FRAME:AddMessage("|cff00BFFF[BGLite]|r " .. string.format("已清空 %s 的所有预设价格", GetFBDisplayName(currentFB)))
+                    if UpdateBottomTipCount then UpdateBottomTipCount() end
+                    DEFAULT_CHAT_FRAME:AddMessage("|cff00BFFF[BGLite]|r " .. string.format("已清空 %s 的所有预设价格与自动拍卖设置", GetFBDisplayName(currentFB)))
                 end,
             }
             StaticPopup_Show("BGLITE_CLEAR_PRESET_CONFIRM")
@@ -535,7 +684,8 @@ function ns.InitAuctionPresetModule()
             { text = L["等级"] or "等级", width = 50, justify = "CENTER" },
             { text = L["装备"] or "装备", width = 230, justify = "LEFT" },
             { text = L["预设起拍价"] or "预设起拍价", width = 110, justify = "CENTER" },
-            { text = L["预设起拍语 (附加喊话)"] or "预设起拍语 (附加喊话)", width = 200, justify = "LEFT" },
+            { text = L["预设起拍语 (附加喊话)"] or "预设起拍语 (附加喊话)", width = 190, justify = "LEFT" },
+            { text = L["自动"] or "自动", width = 45, justify = "CENTER" },
             { text = L["清空"] or "清空", width = 45, justify = "CENTER" },
         }
 
@@ -696,22 +846,67 @@ function ns.InitAuctionPresetModule()
             row.tipsEdit = tEdit
             rx = rx + columns[5].width + 10
 
+            -- 自动拍卖复选框
+            local aCheck = CreateFrame("CheckButton", nil, row, "UICheckButtonTemplate")
+            aCheck:SetSize(20, 20)
+            aCheck:SetPoint("CENTER", row, "LEFT", rx + columns[6].width / 2, 0)
+            aCheck:SetScript("OnClick", function(self)
+                if BG.PlaySound then BG.PlaySound(1) end
+                if not row.data then return end
+                local autoDB = BiaoGe.auctionPreset[currentFB].autoAuction
+                if self:GetChecked() then
+                    autoDB[row.data.itemID] = 1
+                    row.data.autoAuction = 1
+                else
+                    autoDB[row.data.itemID] = 0
+                    row.data.autoAuction = 0
+                end
+                if UpdateBottomTipCount then UpdateBottomTipCount() end
+            end)
+            aCheck:SetScript("OnEnter", function(self)
+                GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+                GameTooltip:ClearLines()
+                GameTooltip:AddLine(L["掉落自动拍卖"] or "掉落自动拍卖", 1, 0.82, 0)
+                local isChecked = self:GetChecked()
+                if isChecked then
+                    GameTooltip:AddLine("当前状态：|cff00ff00开启自动拍卖|r", 1, 1, 1)
+                else
+                    GameTooltip:AddLine("当前状态：|cffff8000不自动拍卖 (保留人工处理)|r", 1, 1, 1)
+                end
+                if row.data and row.data.quality == 5 then
+                    GameTooltip:AddLine("【橙装保护】橙装价值极高，默认不自动拍卖，保留由团长单独人工拍卖。", 1, 0.5, 0, true)
+                else
+                    GameTooltip:AddLine("• 勾选（默认）：拾取/摸尸体时自动发起拍卖。", 0.85, 0.85, 0.85, true)
+                    GameTooltip:AddLine("• 取消勾选：拾取/摸尸体时不自动开拍，保留在背包由团长最后单独人工拍卖。", 1, 0.82, 0.4, true)
+                end
+                GameTooltip:Show()
+            end)
+            aCheck:SetScript("OnLeave", GameTooltip_Hide)
+            row.autoCheck = aCheck
+            rx = rx + columns[6].width + 10
+
             -- 清空按钮
             local clrBt = CreateFrame("Button", nil, row)
             clrBt:SetSize(16, 16)
-            clrBt:SetPoint("CENTER", row, "LEFT", rx + columns[6].width / 2, 0)
+            clrBt:SetPoint("CENTER", row, "LEFT", rx + columns[7].width / 2, 0)
             clrBt:SetNormalTexture("interface/raidframe/readycheck-notready")
             clrBt:SetHighlightTexture("interface/raidframe/readycheck-notready")
             clrBt:SetScript("OnClick", function()
                 if BG.PlaySound then BG.PlaySound(1) end
                 if row.data then
                     local moneyDB = BiaoGe.auctionPreset[currentFB].money
+                    local autoDB = BiaoGe.auctionPreset[currentFB].autoAuction
                     moneyDB[row.data.itemID] = nil
                     moneyDB[row.data.itemID .. "tips"] = nil
+                    if autoDB then autoDB[row.data.itemID] = nil end
                     row.data.price = 0
                     row.data.tips = ""
+                    row.data.autoAuction = nil
                     pEdit:SetText("")
                     tEdit:SetText("")
+                    local defaultChecked = (row.data.quality ~= 5)
+                    aCheck:SetChecked(defaultChecked)
+                    if UpdateBottomTipCount then UpdateBottomTipCount() end
                 end
             end)
             row.clearBtn = clrBt
@@ -724,7 +919,23 @@ function ns.InitAuctionPresetModule()
         bottomTip:SetFont(BIAOGE_TEXT_FONT, 12, "OUTLINE")
         bottomTip:SetPoint("BOTTOMLEFT", 15, 8)
         bottomTip:SetTextColor(0.8, 0.8, 0.8)
-        bottomTip:SetText("提示：团长右键装备开拍时自动填入起拍价。")
+        bottomTip:SetText("提示：取消勾选装备后的【自动】即可禁止自动开拍，留待最后单独人工处理。")
+
+        UpdateBottomTipCount = function()
+            if not bottomTip then return end
+            local autoDB = BiaoGe.auctionPreset[currentFB] and BiaoGe.auctionPreset[currentFB].autoAuction or {}
+            local manualCount = 0
+            for k, v in pairs(autoDB) do
+                if v == 0 then
+                    manualCount = manualCount + 1
+                end
+            end
+            if manualCount > 0 then
+                bottomTip:SetText(string.format("提示：已设置 |cffff8000%d|r 件装备【不自动拍卖】(保留最后人工处理)。取消勾选【自动】即可设置。", manualCount))
+            else
+                bottomTip:SetText("提示：取消勾选装备后的【自动】即可禁止自动开拍，留待最后单独人工处理。")
+            end
+        end
 
         -- 拾取后自动全开拍卖控制区
         local autoCheck = CreateFrame("CheckButton", "BGLite_AuctionPreset_AutoAuctionCheck", f, "UICheckButtonTemplate")
@@ -791,6 +1002,9 @@ function ns.InitAuctionPresetModule()
             if BiaoGe.options then
                 autoCheck:SetChecked(BiaoGe.options.autoAuctionOnLoot == 1)
                 instantCheck:SetChecked(BiaoGe.options.autoAuctionInstant == 1)
+            end
+            if UpdateBottomTipCount then
+                UpdateBottomTipCount()
             end
         end)
 

@@ -51,9 +51,12 @@ local function CanInitiateAuction(isManualTest)
         return true
     end
 
+    -- 经典旧世/时光服/WLK 中，若当前玩家是分配者，GetLootMethod 返回的 raidMaster/partyMaster 为 0
     local lootmethod, partyMaster, raidMaster = GetLootMethod()
-    if lootmethod == "master" and raidMaster then
-        if UnitIsUnit("raid" .. raidMaster, "player") then
+    if lootmethod == "master" then
+        if raidMaster == 0 or partyMaster == 0 then
+            return true
+        elseif raidMaster and UnitIsUnit("raid" .. raidMaster, "player") then
             return true
         end
     end
@@ -71,7 +74,11 @@ local recentQueuedItems = {} -- [itemID .. "_" .. link] = timestamp
 local debounceTimer = nil
 local countDownFrame = nil
 
-local function IsRecentlyQueued(itemID, link)
+local function IsRecentlyQueued(itemID, link, slotKey)
+    -- 若来自摸尸体的具体独立槽位（如 slot_1, slot_2），允许同名多件掉落正常入队
+    if slotKey and slotKey ~= "" then
+        return false
+    end
     local key = tostring(itemID) .. "_" .. tostring(link or "")
     local now = GetTime()
     if recentQueuedItems[key] and (now - recentQueuedItems[key] < 45) then
@@ -432,9 +439,67 @@ local function IsSetTokenOrRaidItem(itemID, link, name, FB)
 
     return false
 end
+ns.IsSetTokenOrRaidItem = IsSetTokenOrRaidItem
+
+-- 检查某件装备是否允许自动拍卖（支持单件装备预设不自动 / 保留人工处理）
+function AutoAuctionOnLoot.IsItemAutoEnabled(itemID, FB)
+    if not itemID then return false end
+    FB = FB or (BG and BG.FB2) or (BG and BG.FB1) or "TOCtitan"
+    local idNum = tonumber(itemID)
+    local idStr = tostring(itemID)
+
+    -- 1. 检查总开关
+    if BiaoGe and BiaoGe.options and BiaoGe.options.autoAuctionOnLoot == 0 then
+        return false
+    end
+
+    -- 2. 检查当前副本 FB 的单件装备覆盖配置 (兼容数字与字符串双类型检索)
+    if BiaoGe and BiaoGe.auctionPreset and FB and BiaoGe.auctionPreset[FB] and BiaoGe.auctionPreset[FB].autoAuction then
+        local autoDB = BiaoGe.auctionPreset[FB].autoAuction
+        local setting = (idNum and autoDB[idNum]) or autoDB[idStr]
+        if setting == 0 or setting == false then
+            return false -- 明确配置为不自动（保留人工处理）
+        elseif setting == 1 or setting == true then
+            return true  -- 明确配置为自动拍卖
+        end
+    end
+
+    -- 3. 检查当前选中的副本 currentFB（防止玩家在预设界面设置的副本与实际活动副本存在别名映射差异）
+    local curFB = BiaoGe and BiaoGe.auctionPreset and BiaoGe.auctionPreset.currentFB
+    if curFB and curFB ~= FB and BiaoGe.auctionPreset[curFB] and BiaoGe.auctionPreset[curFB].autoAuction then
+        local autoDB = BiaoGe.auctionPreset[curFB].autoAuction
+        local setting = (idNum and autoDB[idNum]) or autoDB[idStr]
+        if setting == 0 or setting == false then
+            return false
+        elseif setting == 1 or setting == true then
+            return true
+        end
+    end
+
+    -- 4. 跨副本检查 fallback（若其他副本配置了不自动，则同样尊重其人工处理设置）
+    if BiaoGe and BiaoGe.auctionPreset then
+        for fbKey, fbData in pairs(BiaoGe.auctionPreset) do
+            if type(fbData) == "table" and fbData.autoAuction then
+                local setting = (idNum and fbData.autoAuction[idNum]) or fbData.autoAuction[idStr]
+                if setting == 0 or setting == false then
+                    return false
+                end
+            end
+        end
+    end
+
+    -- 5. 橙装 (Legendary, quality == 5) 出厂保护：默认必须人工处理，除非团长显式配置为开启 (1)
+    local _, _, quality = GetItemInfo(itemID)
+    if quality == 5 then
+        return false -- 橙装默认不自动，保留人工处理
+    end
+
+    -- 6. 普通装备默认跟随全局开启
+    return true
+end
 
 -- 6. 统一的装备加入待拍队列入口
-function AutoAuctionOnLoot.QueueItemForAuction(link, explicitBossName, isManualTest)
+function AutoAuctionOnLoot.QueueItemForAuction(link, explicitBossName, isManualTest, slotKey)
     EnsureOptions()
     if BiaoGe.options.autoAuctionOnLoot ~= 1 then return end
     if not CanInitiateAuction(isManualTest) then return end
@@ -443,13 +508,23 @@ function AutoAuctionOnLoot.QueueItemForAuction(link, explicitBossName, isManualT
     local itemID = GetItemInfoInstant(link)
     if not itemID then return end
 
-    -- 防重复防击穿判断 (45 秒内同一件装备不重复入队)
-    if IsRecentlyQueued(itemID, link) then
+    -- 解析副本
+    local FB = (BG and BG.FB2) or (BG and BG.FB1) or "TOCtitan"
+
+    -- 核心：校验单件装备是否配置为【不自动拍卖】（保留最后人工处理）
+    if not AutoAuctionOnLoot.IsItemAutoEnabled(itemID, FB) then
+        if DEFAULT_CHAT_FRAME then
+            DEFAULT_CHAT_FRAME:AddMessage(format("|cff00BFFF[BGLite 自动拍卖]|r 装备：%s 已配置为【不自动拍卖】（保留人工处理），已跳过。", link))
+        end
         return
     end
 
-    -- 解析副本与物品信息
-    local FB = (BG and BG.FB2) or (BG and BG.FB1) or "TOCtitan"
+    -- 防重复防击穿判断 (若带 slotKey 槽位标识则允许同名多件掉落同时入队)
+    if IsRecentlyQueued(itemID, link, slotKey) then
+        return
+    end
+
+    -- 解析物品详细信息
     local name, _, quality, level, _, _, _, _, _, Texture, _, classID, subclassID, bindType = GetItemInfo(link)
     if not quality then
         -- 本地缓存未就绪时的色值兜底
@@ -571,7 +646,7 @@ lootOpenedFrame:SetScript("OnEvent", function(self, event, ...)
     for slot = 1, numItems do
         local link = GetLootSlotLink(slot)
         if link then
-            AutoAuctionOnLoot.QueueItemForAuction(link, targetName)
+            AutoAuctionOnLoot.QueueItemForAuction(link, targetName, false, "slot_" .. slot)
         end
     end
 end)
