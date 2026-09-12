@@ -1282,7 +1282,7 @@ function RaidTool.CreateUI(parent)
     cbYYLink.text = cbYYLink:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
     cbYYLink.text:SetPoint("LEFT", cbYYLink, "RIGHT", 5, 0)
     cbYYLink.text:SetFont(BIAOGE_TEXT_FONT, 14, "OUTLINE")
-    cbYYLink.text:SetText(L["聊天框语音/YY号转超链接 (点击秒复制)"])
+    cbYYLink.text:SetText(L["聊天框语音/YY号转超链接"])
     cbYYLink:SetChecked(BiaoGe.RaidTool.enableYYLink)
     cbYYLink:SetHitRectInsets(-2, -cbYYLink.text:GetStringWidth() - 4, -2, -2)
     cbYYLink:SetScript("OnClick", function(self)
@@ -1290,12 +1290,6 @@ function RaidTool.CreateUI(parent)
         BG.PlaySound(1)
     end)
 
-    leftY = leftY - 20
-
-    local yyTip = leftPanel:CreateFontString(nil, "OVERLAY")
-    yyTip:SetFont(BIAOGE_TEXT_FONT, 12, "OUTLINE")
-    yyTip:SetPoint("TOPLEFT", 14, leftY)
-    yyTip:SetText(BG.STC_dis(L["* 聊天框语音/YY号转超链接"]))
 
     ----------------------------------------------------------------------------
     -- 右侧：阵容助手 (Raid Groups Optimizer) - 宽度与高度自适应拉满整个容器

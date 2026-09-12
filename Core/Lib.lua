@@ -175,31 +175,82 @@ if BG then
     BG.IsHave = BG.IsHave or function() end
 end
 
--- 初始化 BiaoGe.Hope 嵌套数据库
-function ns.InitHopeDB()
-    if not BiaoGe then return end
-    local realmID = GetRealmID()
-    local player = UnitName("player")
-    if not realmID or not player then return end
-
-    local FBtable = (BG and BG.FBtable) or {}
-    for _, FB in ipairs(FBtable) do
-        BiaoGe[FB] = BiaoGe[FB] or {}
-        BiaoGe[FB].tradeTbl = BiaoGe[FB].tradeTbl or {}
-    end
+-- 安全获取当前角色的心愿单数据库 (双向同步全名与短名，杜绝键名不一致问题)
+function BG.GetHopeDB(realmID, player)
+    if not BiaoGe then return nil end
+    realmID = realmID or GetRealmID()
+    if not realmID then return nil end
 
     BiaoGe.Hope = BiaoGe.Hope or {}
     BiaoGe.Hope[realmID] = BiaoGe.Hope[realmID] or {}
-    BiaoGe.Hope[realmID][player] = BiaoGe.Hope[realmID][player] or {}
 
-    for _, FB in ipairs(FBtable) do
-        BiaoGe.Hope[realmID][player][FB] = BiaoGe.Hope[realmID][player][FB] or {}
-        local maxn = (BG and BG.difficultyTable and BG.difficultyTable[FB] and #BG.difficultyTable[FB]) or 3
-        for n = 1, maxn do
-            BiaoGe.Hope[realmID][player][FB]["nandu" .. n] = BiaoGe.Hope[realmID][player][FB]["nandu" .. n] or {}
-            local maxb = (ns.HopeMaxb and ns.HopeMaxb[FB]) or 15
-            for b = 1, maxb do
-                BiaoGe.Hope[realmID][player][FB]["nandu" .. n]["boss" .. b] = BiaoGe.Hope[realmID][player][FB]["nandu" .. n]["boss" .. b] or {}
+    local shortName = UnitName("player")
+    local fullName = BG.playerName
+    local targetPlayer = player or shortName or fullName
+
+    if not targetPlayer or targetPlayer == "" then return nil end
+
+    local realmDB = BiaoGe.Hope[realmID]
+
+    -- 检查现有数据：全名或短名是否存在
+    local dbShort = shortName and realmDB[shortName]
+    local dbFull = fullName and realmDB[fullName]
+
+    local mainDB = dbShort or dbFull
+    if not mainDB then
+        mainDB = {}
+    end
+
+    -- 双向同步绑定：让全名与短名都指向同一份数据引用
+    if shortName and shortName ~= "" then
+        realmDB[shortName] = mainDB
+    end
+    if fullName and fullName ~= "" then
+        realmDB[fullName] = mainDB
+    end
+    if player and player ~= "" and not realmDB[player] then
+        realmDB[player] = mainDB
+    end
+
+    return realmDB[targetPlayer] or mainDB
+end
+
+-- 初始化 BiaoGe.Hope 嵌套数据库 (对齐原版 DB.lua 预分配 n=1..4, b=1..30 彻底防 nil 越界崩溃)
+function ns.InitHopeDB()
+    if not BiaoGe then return end
+    local realmID = GetRealmID()
+    if not realmID then return end
+
+    local charHopeDB = BG.GetHopeDB(realmID)
+    if not charHopeDB then return end
+
+    local fbList = {}
+    if BG then
+        if BG.FBtable then for _, fb in ipairs(BG.FBtable) do fbList[fb] = true end end
+        if BG.phaseFBtable then
+            for fb, tbl in pairs(BG.phaseFBtable) do
+                fbList[fb] = true
+                if type(tbl) == "table" then
+                    for _, subFB in ipairs(tbl) do fbList[subFB] = true end
+                end
+            end
+        end
+        if BG.FBCDall_table then for _, fb in ipairs(BG.FBCDall_table) do fbList[fb] = true end end
+    end
+    local defaultFBs = { "ICC", "TOC", "ULD", "NAXX", "RS", "TOCtitan", "RS25", "ICCtitan", "ULDtitan", "NAXXtitan", "SWP", "BT", "HS", "SSC", "TK", "ZAM", "MC", "BWL", "TAQ", "NAXX60", "ZG", "RAQ", "SSCtitan", "TKtitan" }
+    for _, fb in ipairs(defaultFBs) do fbList[fb] = true end
+
+    for FB, _ in pairs(fbList) do
+        if type(FB) == "string" and FB ~= "" then
+            BiaoGe[FB] = BiaoGe[FB] or {}
+            BiaoGe[FB].tradeTbl = BiaoGe[FB].tradeTbl or {}
+
+            charHopeDB[FB] = charHopeDB[FB] or {}
+            for n = 1, 4 do
+                charHopeDB[FB]["nandu" .. n] = charHopeDB[FB]["nandu" .. n] or {}
+                for b = 1, 30 do
+                    charHopeDB[FB]["nandu" .. n]["boss" .. b] = charHopeDB[FB]["nandu" .. n]["boss" .. b] or {}
+                end
             end
         end
     end

@@ -3192,4 +3192,18 @@ do -- Raid cooldown receiver
     L["反选(取消勾选)：允许在5人小队中生效，当队长组人时正常发送进组密语和小队频道欢迎公告。"] = "Unchecked: Enables notifications in 5-man parties (whispers and party announcements when leader)."
     L["勾选后，只有当自己是团长或团队助理(A)时，才会自动发送进组密语或团队通知（在小队中则需为小队长），避免进入他人队伍时产生误发。"] = "When checked, notifications are only sent if you are the raid leader or assistant (or party leader). Prevents misfires when joining other players' groups."
     L["* 当前已启用[仅在团队生效]，5人小队中不会发送。"] = "* Active: [Raid Only] enabled, no notifications in 5-man party."
+
+    -- LootHistory
+    L["掉落记录"] = "Loot History"
+    L["< 掉落记录 >"] = "< Loot History >"
+    L["团队副本所有掉落拾取流水记录，实时核对金团表格防漏少记。"] = "Track all raid loot drops in real-time, cross-checking with the ledger to prevent omissions."
+    L["仅看未记入"] = "Untabled Only"
+    L["仅看未记入表格的装备 (防漏少记)"] = "Show only items not yet entered into the ledger (Prevent omissions)"
+    L["仅看紫装/橙装"] = "Epic/Legendary"
+    L["仅看史诗及以上品质的装备"] = "Show only items of Epic quality or higher"
+    L["通报未记入"] = "Report Untabled"
+    L["将未记入金团表格的掉落装备通报至团队/小队频道"] = "Broadcast untabled dropped items to Raid/Party channel"
+    L["搜索物品或玩家..."] = "Search item or player..."
+    L["清空记录"] = "Clear History"
+    L["确定要清空当前副本的掉落拾取记录吗？"] = "Are you sure you want to clear the loot drop history for this raid?"
 end

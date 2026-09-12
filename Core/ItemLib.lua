@@ -1392,6 +1392,15 @@ local function SetItemLib()
     if mainFrame and mainFrame.child then
         mainFrame.child:SetSize(WIDTH, math.max(1, #db * BUTTONHEIGHT + 10))
     end
+    if mainFrame and mainFrame.Hope then
+        mainFrame.Hope:Show()
+    end
+    if BG.UpdateItemLib_LeftHope_All then BG.UpdateItemLib_LeftHope_All() end
+    if BG.UpdateItemLib_LeftLib_IsHaved_All then BG.UpdateItemLib_LeftLib_IsHaved_All() end
+    if BG.UpdateItemLib_LeftLib_IsLooted_All then BG.UpdateItemLib_LeftLib_IsLooted_All() end
+    if BG.UpdateItemLib_RightHope_All then BG.UpdateItemLib_RightHope_All() end
+    if BG.UpdateItemLib_RightHope_IsHaved_All then BG.UpdateItemLib_RightHope_IsHaved_All() end
+    if BG.UpdateItemLib_RightHope_IsLooted_All then BG.UpdateItemLib_RightHope_IsLooted_All() end
 end
 local function UpdateTiptext()
     local FB = BG.FB1
@@ -1485,28 +1494,46 @@ end
 -- 更新心愿装备
 do
     function BG.GetEquipLocName(EquipLoc) -- 返回该装备部位对应的invtypetable名称
-        return BG.invtypetable2[EquipLoc]
-    end
-
-    local function CheckIsSame_ItemLib_RightHope(itemID)
-        for i, v in ipairs(BG.invtypetable) do
-            local EquipLoc = v.name2
-            for i = 1, maxhope do
-                local hope = mainFrame.Hope[EquipLoc .. i]
-                local _itemID = GetItemID(hope:GetText())
-                if _itemID == itemID then
-                    return true
+        if not BG.invtypetable2 then
+            BG.invtypetable2 = {}
+            if BG.invtypetable then
+                for _, v in ipairs(BG.invtypetable) do
+                    if v.key then
+                        for _, el in ipairs(v.key) do
+                            BG.invtypetable2[el] = v.name2
+                        end
+                    end
                 end
             end
         end
+        return BG.invtypetable2 and BG.invtypetable2[EquipLoc]
     end
+
+    local function CheckIsSame_ItemLib_RightHope(itemID)
+        if not (mainFrame and mainFrame.Hope) then return false end
+        for i, v in ipairs(BG.invtypetable or {}) do
+            local EquipLoc = v.name2
+            for i = 1, (maxhope or 4) do
+                local hope = mainFrame.Hope[EquipLoc .. i]
+                if hope and hope.GetText then
+                    local _itemID = GetItemID(hope:GetText())
+                    if _itemID == itemID then
+                        return true
+                    end
+                end
+            end
+        end
+        return false
+    end
+
     function BG.UpdateItemLib_RightHope(itemIDorLink, ShoworHide) -- 更新心愿汇总，ShoworHide：1为添加装备，0为删除装备
+        if not (mainFrame and mainFrame.Hope) then return end
         local FB = BG.FB1
         local _EquipLoc, Texture = select(4, GetItemInfoInstant(itemIDorLink))
         local EquipLoc = BG.GetEquipLocName(_EquipLoc)
         if not EquipLoc then
             local itemID = type(itemIDorLink) == 'string' and GetItemID(itemIDorLink) or itemIDorLink
-            local tbl = BG.Loot[FB].ExchangeItems[itemID]
+            local tbl = BG.Loot and BG.Loot[FB] and BG.Loot[FB].ExchangeItems and BG.Loot[FB].ExchangeItems[itemID]
             if tbl then
                 local lastExItem = tbl[1]
                 if lastExItem then
@@ -1516,32 +1543,34 @@ do
         end
         if not EquipLoc then return end
         -- 只需历遍对应部位的心愿格子
-        for i = 1, maxhope do
+        for i = 1, (maxhope or 4) do
             local hope = mainFrame.Hope[EquipLoc .. i]
-            if ShoworHide == 1 then
-                if not CheckIsSame_ItemLib_RightHope(itemIDorLink) then
-                    if hope:GetText() == "" then
-                        hope:SetText(AddTexture(Texture) .. itemIDorLink)
-                        hope:SetCursorPosition(0)
-                        return
+            if hope then
+                if ShoworHide == 1 then
+                    if not CheckIsSame_ItemLib_RightHope(itemIDorLink) then
+                        if hope:GetText() == "" then
+                            hope:SetText(AddTexture(Texture) .. itemIDorLink)
+                            hope:SetCursorPosition(0)
+                            return
+                        end
                     end
-                end
-            else
-                if GetItemID(hope:GetText()) == itemIDorLink then
-                    hope:SetText("")
+                else
+                    if GetItemID(hope:GetText()) == itemIDorLink then
+                        hope:SetText("")
+                    end
                 end
             end
         end
     end
 
     function BG.UpdateItemLib_LeftHope(itemID, ShoworHide)
-        local count = mainFrame.buttoncount
-        if count then
+        local count = mainFrame and mainFrame.buttoncount
+        if count and mainFrame.buttons then
             for i = 1, count do
                 local f = mainFrame.buttons[i]
                 if f then
                     local _itemID = f.exItemID or f.itemID
-                    if itemID == _itemID then
+                    if itemID == _itemID and f.item and f.item.hope then
                         if ShoworHide == 1 then
                             f.item.hope:Show()
                         else
@@ -1554,10 +1583,10 @@ do
     end
 
     function BG.UpdateItemLib_LeftHope_HideAll()
-        local count = mainFrame.buttoncount
-        if count then
+        local count = mainFrame and mainFrame.buttoncount
+        if count and mainFrame.buttons then
             for i = 1, count do
-                if mainFrame.buttons[i] then
+                if mainFrame.buttons[i] and mainFrame.buttons[i].item and mainFrame.buttons[i].item.hope then
                     mainFrame.buttons[i].item.hope:Hide()
                 end
             end
@@ -1565,26 +1594,49 @@ do
     end
 
     function BG.UpdateItemLib_RightHope_HideAll()
-        for i, v in ipairs(BG.invtypetable) do
+        if not (mainFrame and mainFrame.Hope) then return end
+        for i, v in ipairs(BG.invtypetable or {}) do
             local EquipLoc = v.name2
-            for i = 1, maxhope do
+            for i = 1, (maxhope or 4) do
                 local hope = mainFrame.Hope[EquipLoc .. i]
-                hope:SetText("")
+                if hope and hope.SetText then
+                    hope:SetText("")
+                end
             end
         end
     end
 
     function BG.UpdateItemLib_LeftHope_All()
         BG.UpdateItemLib_LeftHope_HideAll()
-        for _, FB in pairs(BG.phaseFBtable[BG.FB1]) do
-            for n = HopeMaxn[FB], 1, -1 do
-                for b = HopeMaxb[FB], 1, -1 do
-                    for i = 1, HopeMaxi do
-                        local link = BiaoGe.Hope[RealmID][player][FB]["nandu" .. n]["boss" .. b]["zhuangbei" .. i]
-                        if link then
-                            local itemID = GetItemID(link)
-                            if itemID then
-                                BG.UpdateItemLib_LeftHope(itemID, 1)
+        local charHopeDB = (BG.GetHopeDB and BG.GetHopeDB())
+        if not charHopeDB and BiaoGe and BiaoGe.Hope then
+            local rID = GetRealmID()
+            local pName = UnitName("player") or BG.playerName or ""
+            charHopeDB = BiaoGe.Hope[rID] and (BiaoGe.Hope[rID][pName] or BiaoGe.Hope[rID][BG.playerName])
+        end
+        if not charHopeDB then return end
+
+        local FBlist = (BG.phaseFBtable and BG.phaseFBtable[BG.FB1]) or { BG.FB1 }
+        for _, FB in pairs(FBlist) do
+            if charHopeDB[FB] then
+                local maxN = HopeMaxn[FB] or 3
+                local maxB = HopeMaxb[FB] or 25
+                for n = maxN, 1, -1 do
+                    local nanduKey = "nandu" .. n
+                    if charHopeDB[FB][nanduKey] then
+                        for b = maxB, 1, -1 do
+                            local bossKey = "boss" .. b
+                            local bossTable = charHopeDB[FB][nanduKey][bossKey]
+                            if bossTable then
+                                for i = 1, (HopeMaxi or 7) do
+                                    local link = bossTable["zhuangbei" .. i]
+                                    if link and link ~= "" then
+                                        local itemID = GetItemID(link)
+                                        if itemID then
+                                            BG.UpdateItemLib_LeftHope(itemID, 1)
+                                        end
+                                    end
+                                end
                             end
                         end
                     end
@@ -1595,17 +1647,36 @@ do
 
     function BG.UpdateItemLib_RightHope_All()
         BG.UpdateItemLib_RightHope_HideAll()
-        local FBtable = BG.phaseFBtable[BG.FB1]
+        local charHopeDB = (BG.GetHopeDB and BG.GetHopeDB())
+        if not charHopeDB and BiaoGe and BiaoGe.Hope then
+            local rID = GetRealmID()
+            local pName = UnitName("player") or BG.playerName or ""
+            charHopeDB = BiaoGe.Hope[rID] and (BiaoGe.Hope[rID][pName] or BiaoGe.Hope[rID][BG.playerName])
+        end
+        if not charHopeDB then return end
+
+        local FBtable = (BG.phaseFBtable and BG.phaseFBtable[BG.FB1]) or { BG.FB1 }
         if BG.IsVanilla_60 then
             FBtable = { BG.FB1 }
         end
         for _, FB in pairs(FBtable) do
-            for n = HopeMaxn[FB], 1, -1 do
-                for b = HopeMaxb[FB], 1, -1 do
-                    for i = 1, HopeMaxi do
-                        local link = BiaoGe.Hope[RealmID][player][FB]["nandu" .. n]["boss" .. b]["zhuangbei" .. i]
-                        if link and GetItemID(link) then
-                            BG.UpdateItemLib_RightHope(link, 1)
+            if charHopeDB[FB] then
+                local maxN = HopeMaxn[FB] or 3
+                local maxB = HopeMaxb[FB] or 25
+                for n = maxN, 1, -1 do
+                    local nanduKey = "nandu" .. n
+                    if charHopeDB[FB][nanduKey] then
+                        for b = maxB, 1, -1 do
+                            local bossKey = "boss" .. b
+                            local bossTable = charHopeDB[FB][nanduKey][bossKey]
+                            if bossTable then
+                                for i = 1, (HopeMaxi or 7) do
+                                    local link = bossTable["zhuangbei" .. i]
+                                    if link and link ~= "" and GetItemID(link) then
+                                        BG.UpdateItemLib_RightHope(link, 1)
+                                    end
+                                end
+                            end
                         end
                     end
                 end
@@ -2186,6 +2257,9 @@ function BG.ItemLibUI()
         f:SetBackdropColor(0, 0, 0, 0.4)
         f:SetSize(width, mainFrame.bg:GetHeight())
         f:SetPoint("TOPLEFT", mainFrame.bg, "TOPRIGHT", 30, 0)
+        local baseLevel = (mainFrame and mainFrame:GetFrameLevel() or 10)
+        f:SetFrameLevel(baseLevel + 5)
+        f:Show()
         mainFrame.Hope = f
 
         -- 头顶大标题
@@ -2212,6 +2286,7 @@ function BG.ItemLibUI()
         local right
         for i, v in ipairs(title_table) do
             local f = CreateFrame("Frame", nil, f)
+            f:SetFrameLevel(baseLevel + 10)
             f:SetSize(title_table[i].width, BUTTONHEIGHT)
             if i == 1 then
                 f:SetPoint("TOPLEFT", 10, -10)
@@ -2236,6 +2311,7 @@ function BG.ItemLibUI()
         local right
         local function CreateSlotButton(i, v, ii)
             local bt = CreateFrame("Button", nil, f)
+            bt:SetFrameLevel(f:GetFrameLevel() + 5)
             bt:SetSize(title_table[ii].width, BUTTONHEIGHT + 4)
             bt:SetNormalFontObject(BG.FontGold15)
             bt:SetDisabledFontObject(BG.FontWhite15)
@@ -2270,6 +2346,7 @@ function BG.ItemLibUI()
         end
         local function CreateEdit(i, v, ii)
             local edit = CreateFrame("EditBox", nil, f, BG.editTemplate)
+            edit:SetFrameLevel(f:GetFrameLevel() + 5)
             edit:SetSize(title_table[ii].width, BUTTONHEIGHT)
             edit:SetPoint("LEFT", right, "RIGHT", w_jiange, 0)
             edit:SetAutoFocus(false)

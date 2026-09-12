@@ -1547,3 +1547,447 @@ il，引发 itemID 识别失败或数据错位；
   4. **历史过期迁移代码清理**:
      - 彻底移除了早期的 `BG.Once("RaidToolPresets", "20260903", ...)` 历史预设强制清洗逻辑，精简启动开销，完全尊重用户自定义的预设配置。
 
+## 11. 掉落自动拍卖：严格对齐「记录进拍卖表格」与白色装备误拍根治 (2026-09-11)
+* **用户反馈问题**:
+  - 用户反馈打团或清小怪时，掉落的普通白色装备（如 `[布质护手]`、`[亚麻长靴]` 等）也会被弹出倒计时并自动发起拍卖；
+  - 团长明确指出：BGLite 官方“记录入库”到金团表格的过滤逻辑是正确的，自动拍卖必须**仅对真正【记录进拍卖表格】的装备展开自动拍卖**，未录入表格的任何物品绝不拍卖。
+* **病根诊断**:
+  1. **泛用防具槽位词误杀 (`IsSetTokenOrRaidItem`)**:
+     - 此前代码在识别套装代币（Token）时，在模式匹配中直接包含了 `"头盔"`、`"胸甲"`、`"护腿"`、`"肩铠"`、`"护手"`、`"护腕"`、`"腰带"`、`"长靴"`；
+     - 魔兽中小怪掉落的普通白色装备（品质 1）绝大多数名字都带有这些词，导致所有白色防具被 100% 误判为套装代币；
+  2. **分支穿透绕过品质检查**:
+     - `QueueItemForAuction` 在被误判为套装代币后走入 `else` 放行分支，完全未对代币做 `quality` 校验，直接绕过了 `quality < 4` 史诗紫装检查；
+  3. **摸尸体事件早熟脱节 (`LOOT_OPENED`)**:
+     - 摸尸体打开掉落列表时，尸体上的物品根本尚未拾取，更未通过 BGLite 录入金团表格，且小怪尸体充斥着白装灰装，盲目遍历直接引发误拍。
+* **重构与架构实施**:
+  1. **严格绑定金团表格录入事实 (`FindItemInBiaoGeTable`)**:
+     - 新增表格存在性权威校验函数 `FindItemInBiaoGeTable(itemID, link, FB)`，直接检索当前副本金团表格 `BiaoGe[FB]["boss" .. b]["zhuangbei" .. i]`；
+     - `requireInTable` 强制要求：只有被 BGLite 权威过滤并正式写入金团表格的装备，才具备发起自动拍卖的资格；
+  2. **彻底移除 `LOOT_OPENED` 摸尸体触发源**:
+     - 彻底删除尸体开启监听，杜绝尸体未拾取状态下的过早介入与垃圾物品误扫描；
+  3. **`CHAT_MSG_LOOT` 延时对账机制**:
+     - 监听到拾取时先直接拦截过滤灰白链接（`|cffffffff` / `|cff9d9d9d`）；
+     - 延时 0.25 秒等待 BGLite 的 `Loot.lua` 完成对金团表格的写入；
+     - 仅当确认该装备已被正式写入 `BiaoGe[FB]` 时，提取准确的 Boss 名称并带入槽位 Key 入队开拍；
+  4. **全方位多重绝对品质物理防御**:
+     - 入口处对 `quality <= 1`（灰色 0、白色 1）直接 `return` 拦截；
+     - `quality == 2`（普通绿装）非官方白名单一律拦截；
+     - 重构 `IsSetTokenOrRaidItem`：剔除所有泛防具部位词，严格对齐 `BG.Loot[FB].ExchangeItems` 与专属代币前缀（失落/战败/征服者/保卫者/胜利者/北伐奖章/圣洁徽记等）及非直接穿戴槽位（`INVTYPE_NON_EQUIP`）校验。
+  5. **开关默认值调整与最佳实践指南 UI (2026-09-11)**:
+     - **默认关闭保障**: 将出厂默认值设为 `0`（关闭），并添加 `BG.Once("autoAuctionDefaultOff", 260911, function() ... end)` 确保现有存档的玩家也安全重置为默认关闭，防止团长未配价格直接误开；
+     - **常驻提示与悬停指南**: 在【拾取后自动拍卖】开关左侧常驻展示最佳实践要领，并在开关文字旁增设黄色高亮 `[?]` 按钮，悬停呈现 4 步规范流程（批量设底价100/300 -> 设特殊价如升级物品1000 -> 设橙装/套装 -> 开启自动拍卖）及安全入库机制说明。
+
+## 12. 自动拍卖失效深度排查与全链路修复 (2026-09-11 傍晚)
+* **用户反馈问题**:
+  - 用户反馈下午更新后，即使在界面上勾选了【拾取后自动拍卖】，打团或测试时完全失效，没有倒计时浮动条也没有自动发起拍卖。
+* **病根诊断 (Root Causes)**:
+  1. **全局函数缺失引发致命运行时崩溃 (`GetItemID` is nil)**:
+     - 在 `FindItemInBiaoGeTable` 遍历金团表格检索装备 ID 时，直接调用了 `GetItemID(txt)`；
+     - `GetItemID` 是上游 `BGLite/function1.lua` 的局部私有函数（`ns.GetItemID`），魔兽原生 API 与全局 `_G` 中均不存在 `GetItemID`，亦未在 `AutoAuctionOnLoot.lua` 中导入；
+     - 导致执行到该行时必定抛出 Lua 运行时报错：`attempt to call global 'GetItemID' (a nil value)`，导致异步定时器静默中断崩溃，`FindItemInBiaoGeTable` 永远无法返回 `true`，拍卖队列永远无法入队。
+  2. **`BG.Once` 参数数量不匹配**:
+     - `BGLite` 原生定义为 `BG.Once(name, dt, func)`（需 3 个参数）；
+     - 上午更新中误传了 2 个参数 `BG.Once("name", function() ... end)`，导致部分客户端环境将函数作为字符串拼接引发报错或回调异常。
+  3. **`CHAT_MSG_LOOT` 拾取归属过滤器过度严格 (`isMine` 误杀)**:
+     - 拾取事件中原代码检查了 `if not isMine then return end`（仅限“你获得了”或玩家名字）；
+     - 在实际团本中，团员摸箱子（如 TOC/ICC 嘉奖宝箱/箱子拾取）、团队自由拾取或其它队员开怪拾取时，BGLite 官方正常将其记录进拍卖表格，但自动拍卖因 `not isMine` 将拾取事件直接丢弃；
+     - 团长身为全团拍卖发起人（已有 `CanInitiateAuction` 权限保障），只要任何团本掉落被 BGLite 正式录入金团表格，均应当触发自动拍卖。
+  4. **跨副本别名与写入时序轻微竞态**:
+     - 仅单次延迟 0.25 秒可能在团本高频掉落或卡顿时偶发错过 BGLite 的 `BG.After(0.1)` 写入时机；
+     - `FindItemInBiaoGeTable` 仅比对了单一传入 `FB`，缺少向 `BG.FB2`、`BG.FB1` 及 `BiaoGe` 全局多副本表格的完整泛型检索。
+  5. **API 升级废弃崩溃 (`GetLootMethod` is nil)**:
+     - 暴雪在现代魔兽大脚/时光服/WLK 等新客户端中将全局 `GetLootMethod()` 废弃并迁移至 `C_PartyInfo.GetLootMethod()`；
+     - 原代码在 `CanInitiateAuction` 中直接执行 `local lootmethod = GetLootMethod()`，由于全局无此函数，直接抛出 `AutoAuctionOnLoot.lua:55: attempt to call a nil value`。
+* **重构与解决方案**:
+  1. **自研独立安全 ID 提取工具 (`SafeGetItemID`)**:
+     - 在 `AutoAuctionOnLoot.lua` 文件顶部实现完全自治的 `SafeGetItemID(text)`，支持纯数字、`item:ID`、`Hitem:ID`、带堆叠后缀（`link .. "x2"`）等任意格式的安全解析，杜绝任何外部未定义全局函数的依赖；
+  2. **规范化 `BG.Once` 调用**:
+     - 修正为标准 3 参数规范：`BG.Once("autoAuctionDefaultOff", 260911, function() ... end)`；
+  3. **表格多维泛型检索机制**:
+     - `FindItemInBiaoGeTable` 升级为依次遍历：传入 `FB` -> `BG.FB2` -> `BG.FB1` -> 预设当前 `currentFB` -> 遍历 `BiaoGe` 中所有包含 `boss1` 的有效副本表格；只要任何金团表格完成入库，立即精准捕获槽位并提取所属 Boss 名称；
+  4. **三段式对账与拾取放行**:
+     - 移除 `isMine` 限制，全团拾取进表格均由团长统一展开拍卖；
+     - `CHAT_MSG_LOOT` 采用 0.15s -> 0.40s -> 0.80s 三段智能对账，一旦入库即刻入队，抗延迟防掉帧；
+  5. **命令与调试自愈与权限 API 安全防崩**:
+     - 优先采用 BGLite 官方自维护的 `BG.IsML` / `BG.IsLeader` / `BG.ImMLorLeader()` 判定团长与分配者；
+     - 兜底检测中采用 `GetLootMethod or (C_PartyInfo and C_PartyInfo.GetLootMethod)` 安全调用，彻底杜绝 `attempt to call a nil value` 报错；
+     - 手动测试 `/bgloot [装备链接]`、`/bgloot test` 以及开发者调试模式（`BG.DeBug`）均享有最高权限穿透，方便随时验证测试。
+
+
+## 13. 掉落自动拍卖：只拍一次原则与交易防二次拍卖彻底根治 (2026-09-12)
+* **用户反馈问题**:
+  - 用户反馈在实际团本中拾取 Boss 掉落分配装备给别人时，插件正常记录表格并开始自动拍卖；
+  - 但后续人家（队友）通过交易窗口把该装备还给/交易给团长后，插件居然又再次弹出了自动拍卖；
+  - 核心诉求：**自动拍卖只要拍一次**，装备交易回包或重复进包严禁再次开拍！
+* **病根诊断 (Root Causes)**:
+  1. **魔兽世界交易机制伴随 `CHAT_MSG_LOOT` 广播**:
+     - 队友在交易窗口将装备交给团长后，交易成功完成，物品进入团长背包，系统必然广播抛出 `CHAT_MSG_LOOT`；
+  2. **非掉落交互（交易/邮件/商店）完全未做状态过滤**:
+     - 原 `AutoAuctionOnLoot.lua` 完全未监听任何交易或邮件事件，导致交易进包与 Boss 掉落进包混为一谈；
+  3. **表格反查缺少生命周期与已售状态校验**:
+     - 原代码在 `FindItemInBiaoGeTable` 中仅核对了装备 ID 是否存在于表格中；
+     - 由于该装备此前打 Boss 时早已录入表格，即使已拍完、已卖出、甚至已记账填写了买家和金额，依然被误判为“属于表格待拍装备”；
+  4. **防重击穿 Bug**:
+     - 原 `IsRecentlyQueued` 中当传入 `slotKey` 时直接执行了 `return false`，导致任何带有槽位的检测彻底穿透绕过了防重机制。
+* **五层防御与重构方案**:
+  1. **第一层：非掉落交互场景物理拦截 (Interaction Suppression)**:
+     - 注册监听 `TRADE_SHOW`、`TRADE_CLOSED`、`TRADE_ACCEPT_UPDATE`、`UI_INFO_MESSAGE`（交易成功 `ERR_TRADE_COMPLETE`）以及邮件、商人窗口；
+     - 维护交易与交互时间戳：只要处于交易窗口中，或交易完成/关闭 3.5 秒内，或邮件/商店开启期间，`CHAT_MSG_LOOT` **100% 物理丢弃**，绝不开拍；
+  2. **第二层：表格槽位级（Slot-level）“只拍一次”终生锁定 (`auctionedSlots`)**:
+     - 引入持久化/跨重载防重表 `BiaoGe.autoAuctionedSlots = BiaoGe.autoAuctionedSlots or {}`；
+     - 槽位唯一 Key：`FB_b_i`（如 `TOCtitan_1_1`）；装备入队时立即打上终生锁定 `auctionedSlots[slotKey] = true`；
+     - 只要该槽位记录为已开拍过，后续无论任何原因进包，**终生绝不开拍第二次**；跨 `/reload` 依然免疫；
+  3. **第三层：表格已售出/已记账状态拦截 (`checkAvailableOnly`)**:
+     - `FindItemInBiaoGeTable` 升级支持 `checkAvailableOnly = true`：
+     - 若该槽位已有金额（`jine > 0`）或已有买家（`maijia ~= ""`），直接判定为历史成交装备跳过；
+     - 若同名装备有多件，优先匹配未开拍、未记账的空闲槽位；若全部已拍或已售，返回 `false`；
+  4. **第四层：生命周期联动清空与自愈**:
+     - Hook `BG.ClearBiaoGe` 与 `BG.ClearBiaoGeByIndex`：当团长清空表格或某 Boss 时，同步释放对应槽位记忆；
+     - 遍历表格时，若发现某槽位被手动删空，自动自愈释放该槽位锁定；
+     - 增加 `/bgloot reset` 允许团长手动清空已拍记忆；
+  5. **第五层：修复防抖穿透 Bug**:
+     - 纠正 `IsRecentlyQueued` 穿透漏洞，实现基于 `slotKey` 终生锁池与全局 45 秒防抖池的双重拦截。
+
+## 14. 拍卖底价预设：搜索栏汉字模糊搜索失效根治与全量扫描加固 (2026-09-12)
+* **用户反馈问题**:
+  - 用户反馈在【预设价格】界面中，明明列表下方显示了某件装备，但在搜索栏输入其中任何一个汉字，搜索出来的列表却全部变空（搜不到）。
+  - 批量设置底价时偶发失效，必须依赖 /reload。
+* **病根诊断 (Root Causes)**:
+  1. **滚动条偏移越界导致全空 (FauxScrollFrame Offset Overflow - 核心硬伤)**:
+     - 玩家浏览“下面的装备”时，滚动条处于下方（例如 `offset = 18`）；
+     - 当输入关键字后，过滤出的匹配装备数量减少（例如匹配出 2 件，`total = 2`）；
+     - 但搜索框输入时未将滚动条偏移复位为 0，导致循环渲染从 `offset + 1 = 19` 开始比对，发现 `19 > total`，全部 18 行整齐划一执行 `row:Hide()`，界面瞬间变成一片空白！
+  2. **Windows 下 UTF-8 中文调用 `:lower()` 产生字节篡改**:
+     - 原代码盲目使用 `name:lower():find(searchKeyword:lower())`；
+     - 在 Windows 系统的 MSVCRT 运行时环境下，多字节中文字符的高位字节若落在 ANSI 扩展重音区，会被错误执行大小写转换，导致搜索词与装备名称的 UTF-8 字节序列被篡改，`find` 判定为不匹配；
+  3. **装备全量采集缺陷 (`CollectFBItems`)**:
+     - 原代码使用 `while lootTable["boss" .. bi]`，遇到非连续 Boss 或 `bossXother`、兑换物、杂项时提前中断，遗漏大批装备；
+     - 批量设置价格时仅覆盖部分内存列表，导致批量底价失效。
+* **重构与修复实施**:
+  1. **中文原生免 lower 纯文本包含搜索**:
+     - 搜索比对优先使用 `name:find(w, 1, true)` 原文纯子串包含比对，彻底免疫 UTF-8 编码破坏；
+     - 同时支持纯数字 ID（如输入 `47242`）与英文字母不区分大小写匹配；
+  2. **搜索输入时强制滚动条归零**:
+     - 在 `searchEdit:OnTextChanged` 时，执行 `FauxScrollFrame_SetOffset(scrollFrame, 0)` 并将滑块归零，确保搜索结果无论几件均从第 1 行正常展现；
+  3. **输入内容清洗与多词空格支持**:
+     - 自动去除前后空格，剥离中括号 `[]` 和超链接颜色代码，支持空格多词组合搜索；
+  4. **全量装备扫描与批量双写加固**:
+     - 扫描全部 Boss、难度、杂项、兑换物与时光服别名（`TOC` 与 `TOCtitan`），批量设置底价自动双向同步数字与字符串 Key。
+
+
+## 15. 拍卖底价预设：string.gsub 多返回值展开导致 tinsert 报错根治 (2026-09-12)
+* **报错现象与堆栈定位**:
+  ```
+  Interface/AddOns/BGLite_Plus/Core/AuctionPreset.lua:218: bad argument #2 to 'tinsert' (number expected, got string)
+  Count: 1
+  Call Stack:
+  [1] [C]: in function 'tinsert'
+  [2] [Interface/AddOns/BGLite_Plus/Core/AuctionPreset.lua]:218: in function <Interface/AddOns/BGLite_Plus/Core/AuctionPreset.lua:212>
+  [3] [Interface/AddOns/BGLite_Plus/Core/AuctionPreset.lua]:474: in function <Interface/AddOns/BGLite_Plus/Core/AuctionPreset.lua:469>
+  [4] [Interface/AddOns/BGLite_Plus/Core/AuctionPreset.lua]:1173: in function 'CreateMainFrame'
+  ```
+* **病根诊断 (Root Cause)**:
+  - 在 `AuctionPreset.lua:218` 中调用了 `tinsert(fbsToScan, FB:gsub("titan", ""))`；
+  - 在 Lua 原生与魔兽 API 中，`string.gsub` 会返回两个值：`(newString, matchesCount)`；
+  - 当作为函数调用的最后一个参数时，多个返回值会被自动全部展开。因此实际执行为 `tinsert(fbsToScan, cleanFB, 1)`；
+  - 而魔兽中的 `tinsert(table, pos, value)` 在传入 3 个参数时，强制要求第二个参数为插入位置索引（数字类型）；
+  - 将作为字符串的 `cleanFB` 传入第二个参数，直接触发 Lua 解释器报错：`bad argument #2 to 'tinsert' (number expected, got string)`，导致界面初始化失败。
+* **修复与实施方案**:
+  1. 将 `FB:gsub("titan", "")` 赋值给单一局部变量 `local baseFB = (FB:gsub("titan", ""))`，利用外部括号 `()` 严格截断为单返回值；
+  2. 再安全执行 `tinsert(fbsToScan, baseFB)`；
+  3. 全量排查插件内所有 `gsub` 调用并对 `(currentFB:gsub("titan", ""))` 等全部加上返回值截断保护；
+  4. 全库扫描确认 0 遗留、0 语法异常。
+
+
+## 16. 预设价格：过滤NPC进阶兑换成品装备与全量搜索异步缓存重构 (2026-09-12)
+* **用户反馈问题**:
+  1. 纳克萨玛斯掉落“黑曜石烈焰”（拉格纳罗斯之手升级物），预设价格列表既显示了“黑曜石烈焰”（正确），又显示了“升级2/10的拉格纳罗斯之手”（错误），团长不可能在团本中拍卖 NPC 兑换出来的升级锤子；
+  2. 搜索功能依然搜不到装备，输入其中汉字列表变成全空。
+* **病根诊断 (Root Causes)**:
+  1. **Boss 掉落与 NPC 进阶成品混淆**:
+     - 在 `DB_Loot_Titan.lua` 中，Boss 掉落物定义在 `boss1`..`boss18` 中（包含 265526 黑曜石烈焰）；
+     - 而兑换后的进阶成品保存在 `boss7other`（265514 升级2/10拉格之手）以及 `ExchangeItems` 表中；
+     - 原代码遍历 `pairs(lootTable)` 时使用了 `k:match("boss(%d+)")`，导致 `"boss7other"` 也被误判定为 Boss7 掉落，并且还主动扫描了 `ExchangeItems`，导致成套装/成武器被大量错误塞入；
+  2. **物品异步未加载导致名称为 nil 搜不出 (核心硬伤)**:
+     - 刚进入游戏时，魔兽客户端对全副本近 300 件掉落装备绝大多数未建立本地缓存，同步调用 `GetItemInfo(itemID)` 返回 `nil`；
+     - 原代码虽在可见行通过 `ContinueOnItemLoad` 渲染了文字，但从未把异步拉取到的名字回填到数据源，未显示的装备名字永远为 `Item:xxxx`；
+     - 用户输入任意汉字，由于 `GetItemInfo` 返回 `nil` 或未缓存，汉字模糊匹配直接判定为未命中，导致整个列表全军覆没全空；
+  3. **IME 输入法事件响应与多词拆分缺陷**:
+     - 原代码仅在 `OnTextChanged` 中触发，缺乏回车确认和焦点失去同步；
+     - 复杂的 `%S+` 在 Windows 环境下拆词存在边界隐患，应优先采用整串原生字面包含比对 `name:find(cleanKw, 1, true)`。
+* **重构与修复实施**:
+  1. **Boss 掉落严格限定，彻底剔除 NPC 兑换成品**:
+     - 遍历掉落改用 `while lootTable["boss" .. b]` 与严格正则 `k:match("^boss(%d+)$")`，彻底屏蔽任何带 `other` 的 NPC 兑换装备；
+     - 彻底删除 `BG.Loot[scanFB].ExchangeItems` 的扫描；
+     - 优先使用当前选定副本的独立掉落表，避免跨版本旧装备污染；
+  2. **引入全局装备属性二级缓存 (`itemInfoCache`) 与预热驱动 (`PreloadItemInfo`)**:
+     - 收集装备时立即对每个 itemID 进行异步预热；
+     - `GetItemInfo` 只要成功返回，立即持久保存至 `itemInfoCache[itemID]`（包含 name, link, quality, level, texture）；
+     - 过滤与搜索优先从 `itemInfoCache` 读取，彻底告别临时 `GetItemInfo` 为 nil 导致搜索失灵的问题；
+  3. **搜索与输入法全事件覆盖与一键清空**:
+     - 采用单字/多字纯字面值包含匹配 `name:find(cleanKw, 1, true)`，同时支持纯数字 ID、英文字母与空格多词高级过滤；
+     - 统一抽取 `ExecuteSearch()`，全面覆盖 `OnTextChanged`、`OnEnterPressed`、`OnEscapePressed`、`OnEditFocusLost`；
+     - 支持右键点击搜索框一键快速清空；
+     - 显式初始化 `scrollFrame.buttonHeight = ROW_HEIGHT` 并增加偏移量越界安全兜底。
+
+
+## 17. 预设价格：少量搜索结果因滚动条残留偏移越界被全隐藏Bug彻底根治 (2026-09-12)
+* **用户反馈奇葩现象**:
+  - 用户反馈：“我搜 哈 就有内容，搜 吞 就没有内容； 搜血 有内容，金没有内容，这怎么回事？明明截图里第 10 行就是[吞噬披风]，第 17 行就是[金度的裁决]、第 18 行就是[金度的邪眼]！”
+* **病根诊断 (数学与渲染机制)**:
+  1. **暴雪 FauxScrollFrame 在结果数量 <= 可见行时的隐藏陷阱**:
+     - 当玩家在浏览列表时，如果曾经向下滚动过列表（例如滚到了第 2~3 行，此时 `offset = 2`）；
+     - 当搜索关键词导致总结果数量变少时（例如搜“吞”全本只有 1 件吞噬披风，`total = 1`；搜“金”只有 2 件金度装备，`total = 2`）；
+     - 暴雪的 `FauxScrollFrame_Update` 在 `total <= 18` 时，直接将滚动条隐藏（`scrollBar:Hide()`），但此时滚动条的 `GetValue()` 依然残存为原来的正数（如 `52`，即 `offset = 2`）；
+  2. **原越界判断存在逻辑漏斗**:
+     - 原代码为 `if offset > total then offset = 0 end`；
+     - 当 `offset = 1`，而 `total = 1`（搜“吞”）时，`1 > 1` 为假，判断被跳过！`offset` 未能归零！
+     - 循环渲染时执行：`idx = offset + ri`。当第 1 行渲染时：`idx = 1 + 1 = 2`；
+     - 系统比对 `idx <= total`（即 `2 <= 1`）判定为超出上限，直接对第 1 行执行 `row:Hide()`！
+     - 导致整屏全部 18 行整整齐齐被判定为越界全部隐藏，用户看到的就是一片空白！
+  3. **为什么搜“哈”和“血”有内容，搜“吞”和“金”没有**:
+     - 包含“哈”的装备有多达 8 件（`total = 8`）；即使 `offset = 2`，从 `idx = 3` 开始依然能显示出第 3 到第 8 件，因此“哈”能看见内容；
+     - 而“吞”只有 1 件，“金”只有 2 件；它们的数量小于等于残存的 `offset`，所有的结果被全部当成“滚动条上方的旧内容”跳过，导致用户看到的完全是空的！
+* **重构与解决方案**:
+  1. **无条件强制归零**:
+     - 在 `RefreshScrollView` 中，只要 `total <= VISIBLE_ROWS`（搜索匹配到的数量小于等于整屏 18 行），**绝对强制 `offset = 0`**，无需任何滚动偏移；
+     - 只要 `offset + 1 > total`（首个显示下标超出总数），绝对强制 `offset = 0`；
+  2. **滚动条底层彻底重置**:
+     - 显式执行 `scrollBar:SetMinMaxValues(0, 0)` 与 `scrollBar:SetValue(0)`，消除任何隐藏状态下的残存数值；
+     - 经逻辑验证：搜索“吞”第 1 行必出 [吞噬披风]；搜索“金”第 1、2 行必出 [金度的裁决] 与 [金度的邪眼]！
+
+
+## 18. 预设价格：5重兜底匹配引擎与实时屏幕诊断落地 (2026-09-12)
+* **用户反馈问题**:
+  - 用户反馈搜索依然搜不出“金”（金度的裁决），界面依然显示全空。
+* **病根诊断与5重防线实施**:
+  1. **比对对象缺失与名称为空的死锁**:
+     - 在搜索发生时，如果装备刚被渲染，`itemInfoCache` 或 `name` 可能尚未同步，原代码直接拿空值去 find 导致判定为 false；
+     - 构筑 5 重兜底匹配链条：
+       1) 纯数字 ID 匹配（如 `19884`）；
+       2) 纯中文/原文包含匹配（`name:find(cleanKw, 1, true)`）；
+       3) 超链接包含匹配（`link:find(cleanKw, 1, true)`）；
+       4) 表格缓存名称匹配（`item.cachedName:find(cleanKw, 1, true)`）；
+       5) 实时直调魔兽 `GetItemInfo(itemID)` 再次比对（`realName:find(cleanKw, 1, true)`），只要有一处包含“金”，瞬间判定命中并即时回填缓存！
+  2. **字符串清洗纯化**:
+     - 废除可能产生编码截断的 `strtrim`，改用纯正则 `text:gsub("^%s+", ""):gsub("%s+$", "")`；
+  3. **实时屏幕搜索诊断日志**:
+     - 当用户在搜索框输入任何字符时，聊天框自动打印：`[预设搜索诊断] 关键词: [金], 总装备数: X, 匹配命中数: Y`，如果为0，打印首件装备的实际读数，让运行时状态完全透明。
+
+### 19. 根治预设装备搜索在客户端未缓存时搜不到/全黑空白 Bug (2026-09-12)
+
+- **核心根因全链条剖析**:
+  1. **客户端未缓存 (Uncached) 致命阻断**: 魔兽世界中刚登录或清理 Cache 后，未在背包/提示中见过的装备（如妖术师金度的 19884“金度的裁决”、19885“金度的邪眼”以及哈卡的 19857“吞噬披风”），官方 API `GetItemInfo(itemID)` 初始必定返回 `nil`。
+  2. **异步回调闭环缺失**: 旧代码在 `ContinueOnItemLoad` 拿到数据后，只回填了局部表，**既没有监听 `GET_ITEM_INFO_RECEIVED` 全局事件，也没有在数据返回后自动触发 `ApplyFilterAndSort` 和 `RefreshScrollView`**。导致玩家打入“金”或“吞”时，直接判定 0 件匹配并 `Hide()` 所有行；哪怕 100 毫秒后服务器返回了数据，界面也永远保持全黑死锁。
+  3. **哈/血能搜而金/吞不能的玄机**: 玩家 WTF 存档中曾记录过哈卡之血 (19939)、血领主护臂 (19867) 等装备超链接，内存中碰巧已有缓存；而金度与吞噬披风在当前角色会话中从未出现过，导致名字只能 fallback 成 `"Item:19884"`，被搜索过滤硬核剔除。
+
+- **三位一体终极架构防御**:
+  1. **内置离线中文装备名称数据库 (`Core/ItemNameDB.lua`)**:
+     - 整合时光服、经典60、WLK 等共计 8886 件团本掉落装备的简体中文名称静态索引；
+     - 在 `PreloadItemInfo` 与 `ApplyFilterAndSort` 中，只要装备尚未拉取到官方属性，0 毫秒优先使用 `ns.ItemNameDB[itemID]` 进行秒级包含匹配与文字降级展示；玩家输入“金”瞬间命中“金度的裁决”、“金度的邪眼”，输入“吞”瞬间命中“吞噬披风”！
+  2. **Tooltip 穿透式底层网络强制拉取**:
+     - 创建无锚点隐藏扫描 Tooltip `BGLitePresetScanTip`，对未缓存装备调用 `scanTip:SetHyperlink("item:" .. itemID)`，强力穿透游戏客户端排队队列，最高优先级触发服务器物品数据包下发。
+  3. **注册 `GET_ITEM_INFO_RECEIVED` 与 0.08 秒防抖自动重绘**:
+     - 捕获游戏客户端任何物品数据到达事件，并在面板显示状态下执行 0.08 秒防抖调度，自动重新过滤与渲染视图，实现全异步网络数据的无缝自动呈现。
+  4. **TOC 依赖注册**:
+     - 在 `BGLite_Plus.toc` 中将 `Core\ItemNameDB.lua` 置于 `Core\AuctionPreset.lua` 之前加载，全局由 `ns.ItemNameDB` 共享。
+
+- **下一步计划**:
+  - 指引玩家游戏内执行 `/reload` 验证搜索“金”与“吞”的 0 毫秒秒出与正确展示。
+
+### 20. 搜索逻辑精简 (2026-09-12)
+- **改动说明**: 彻底移除冗余的多词空格匹配（如"金 裁决"）分支逻辑，保持最纯粹、最高效的原生单词/字符精准包含匹配（`string.find(cleanKw, 1, true)`）。输入单个汉字（如“金”、“吞”）直达目标装备。
+
+### 21. 预设价格 UI 重构、主窗口适配与设置面板双向联动注入 (2026-09-12)
+
+- **业务背景与痛点**:
+  1. **顶栏操作不直观**：原“自动拍卖”为折叠在红色按钮内的下拉菜单，团长无法直接一览状态和快捷一键操作；
+  2. **主窗口过度撑满**：预设价格原配置为 18 行，底部与主窗口底栏挤压重叠，缺乏呼吸空间；
+  3. **冗余提示文字**：底栏“建议配合预设价格使用。最佳实践：...”黄色说明文字占用视觉空间，团长要求精简；
+  4. **底栏复选框重叠遮挡**：右侧“拾取后自动拍卖”由于旧代码采用硬编码绝对坐标（-210 与 -90），其文本及说明按钮直接覆盖了后面的“免确认秒开”复选框；
+  5. **全局设置面板缺失联动**：BGLite 官方设置面板中已有“锁定拍卖竞价窗口”选项，但缺乏自动拍卖与免确认的配置入口，且两处开关未做双向状态同步。
+
+- **核心落地与技术实现**:
+  1. **顶栏「自动拍卖」Label 加冒号与三态独立快捷按钮**:
+     - 替换掉原下拉按钮，重构为 `自动拍卖:` Label；
+     - 部署三个独立快捷按钮：`【全选】`、`【全关】`、`【恢复默认】`，并配备详尽 Tooltip；
+     - **严格实现「恢复默认」业务过滤规则**：
+       - 智能剔除橙装（`quality == 5`，保留人工拍卖安全保护）；
+       - 智能剔除蓝绿白装（`quality <= 3`）；
+       - 智能剔除套装兑换物/代币/印记/任务道具（`IsTierTokenItem`，精准识别 ExchangeItems、失落的/战败的/征服者/保卫者/胜利者/印记/徽记/奖章/勋服/代币/兑换物/头颅/之心/精华/碎片等）；
+       - 仅普通紫装默认开启自动拍卖（`autoDB[itemID] = 1`），其余一律设为 `0`（人工处理）。
+  2. **表格高度与主窗口完美适配**:
+     - `VISIBLE_ROWS` 由 18 行下调为 16 行（立省 52px 纵向高度）；
+     - 主框架锚点优化为 `f:SetPoint("BOTTOMRIGHT", parent, "BOTTOMRIGHT", -15, 42)`，为主窗口底部的 Tab 栏与状态栏留出整整 42px 呼吸安全间距，主窗口无论缩放均完美适配。
+  3. **底栏冗余说明彻底清除**:
+     - 彻底删除 `bottomTip` 及其文本与生命周期计数更新逻辑，界面彻底纯粹清爽。
+  4. **底栏复选框链式相对排布（彻底根除遮挡）**:
+     - 摒弃脆弱的固定硬编码坐标，改用链式相对锚点：
+       `autoCheck` 锚定于 `BOTTOMLEFT, 15, 6` -> `autoText` -> `autoHelpBtn` [?] -> 相对向右 35px -> `instantCheck` -> `instText`；
+     - 无论客户端字体大小或本地化语言长度如何变动，永远绝对零重叠、零遮挡。
+  5. **BGLite 设置面板挂载与双向数据绑定**:
+     - 锚定 `BG.options["buttonauctionMoveByShift"]`（“锁定拍卖竞价窗口”复选框），在其下方动态注入：
+       - `开启自动拍卖` (`BG_Button_OptAutoAuctionOnLoot`)
+       - `免确认` (`BG_Button_OptAutoAuctionInstant`)
+     - 实现了 100% 严密的双向实时联动：
+       - 在设置面板中点击勾选/取消，实时同步修改预设价格面板底部的 CheckButton 状态；
+       - 在预设价格面板中点击勾选/取消，实时同步修改设置面板中的 CheckButton 状态；
+       - 两端在 `OnShow` 时均自动从 `BiaoGe.options` 同步最新持久化值；
+       - 通过 `hooksecurefunc(BG, "OpenOption", ...)` 与模块初始化双重挂载，确保任何途径打开设置面板均可靠注入。
+
+## 22. 预设价格搜索筛选机制深度重构与对齐原版 BiaoGe (2026-09-12)
+* **核心现象与问题定位**：
+  * **现象**：在预设价格列表中，用户搜索“哈”（18件）或“血”（19件）可以正常筛选展示，但搜索“吞”（吞噬披风，仅1件）或“金”（金度装备，仅4件）时列表直接变成全黑/空界面，筛选彻底失败。
+  * **病根溯源 (深层根因分析)**：
+    1. **暴雪 FrameXML 底层隐藏机制冲突 (致命核心)**：
+       - 此前界面采用了 `FauxScrollFrameTemplate`。暴雪原生 `FauxScrollFrame_Update(frame, numItems, numToDisplay, ...)` 在满足 `numItems <= numToDisplay`（即结果数量 <= 16 行）时，底层代码会强制执行 `frame:Hide()`（直接将 scrollFrame 自身隐藏）！
+       - 由于此前行列表容器 `contentFrame` 及各行 `rowFrames` 挂载在 `scrollFrame` 之上，当搜索“吞”（1件 <= 16）或“金”（4件 <= 16）时，`scrollFrame:Hide()` 导致子容器全部不可见，整张表整齐黑屏！而搜索“血”（19件 > 16）或“哈”（18件 > 16）时，超过了 16 行，暴雪执行 `frame:Show()`，因此正常显示！
+    2. **对比原版 BiaoGe 实现机制**：
+       - 原版 BiaoGe（`BiaoGe/Core/Module/AuctionPreset.lua`）**根本不使用 FauxScrollFrameTemplate**，而是使用普通容器搭配独立滚动条，通过 `bar:SetMinMaxValues(0, max(0, #db - MAXBUTTONS))` 自主计算偏移并控制显示，行容器绝不会被暴雪底层代码随意 Hide；
+       - 原版 BiaoGe 统一在加载阶段通过 `Item:CreateFromItemID(itemID):ContinueOnItemLoad` 预热装备名称，保证过滤比对时 `v.name` 100% 存在，过滤逻辑极其纯粹直接（`v.name:find(name, nil, true)`）。
+* **重构与优化实施方案**：
+  1. **容器解耦与自主滚动条控制**：
+     - 将列表容器 `contentFrame` 直接挂载于主面板 `f`（`CreateFrame("Frame", "BGLite_AuctionPresetContentFrame", f)`），彻底斩断暴雪底层 `frame:Hide()` 的连带隐藏链；
+     - 采用原生 Slider 滚动条，自主设置范围 `(0, max(0, total - VISIBLE_ROWS))`，当结果 `<= VISIBLE_ROWS` 时仅隐藏/禁用滚动条，列表行严格按照 `filteredItems[idx]` 正常展示并调用 `row:Show()`；
+     - `contentFrame` 与单行均支持平滑鼠标滚轮（`OnMouseWheel`）。
+  2. **极简高效的名称与ID双重匹配引擎**：
+     - 结合本地内存缓存、官方实时 API 与离线装备库 `ns.ItemNameDB`（8886件装备全量中文覆盖），确保任何装备在第 0 毫秒即拥有准确中文名；
+     - 支持纯数字 ID 精准匹配、装备中文名称包含匹配、去超链接方括号匹配与大小写不敏感匹配。
+  3. **交互体验与视觉增强**：
+     - 在搜索框右侧引入实时命中件数统计文字（如 `(1件)`、`(4件)`、未找到时红色 `(0件)`）；
+     - 当搜索无结果时，在列表正中央优雅显示“没有符合当前搜索条件的装备”提示，体验对齐原版 BiaoGe。
+
+* **表格高度全自动自适应与主窗口充满优化 (2026-09-12)**：
+  * **背景问题**：此前代码中硬编码 `VISIBLE_ROWS = 16`，由于主框架内部高度达 600+px（可容纳约 23 行），导致列表第 16 行到底部复选框之间遗留了将近 200px 的黑色大片空白区域，未能占满主窗口。
+  * **解决方案**：
+    1. 预分配最多 32 行控件池（`MAX_ROWS = 32`）；
+    2. 将 `contentFrame` 底部锚点精准贴合底栏上方（`-26, 32`），监听 `OnSizeChanged` 与 `OnShow`；
+    3. 引入 `UpdateVisibleRowCount()` 动态函数：实时根据 `contentFrame:GetHeight()` 计算当前物理高度下最契合的可视行数（`math.floor(height / ROW_HEIGHT)`，标准主窗口下自适应为 23 行）；
+    4. 渲染时根据 `visibleCount` 动态展开，超出部分隐藏，整整齐齐填满主窗口，彻底消除底部空隙。
+
+* **修复 SecureScrollTemplates 模板默认回调引发的 nil 调用报错 (2026-09-12)**：
+  * **问题堆栈**：`SecureScrollTemplates.lua:24: attempt to call a nil value` (in `SetValue`)。
+  * **根因定位**：暴雪官方 `UIPanelScrollBarTemplate` 继承自 `SecureScrollTemplates`，其默认 `OnValueChanged` 在 `SetValue(0)` 时会尝试调用 `self:GetParent():OnScrollBarValueChanged(value)`；此前由于父级 `f` 为普通 Frame 且尚未覆盖 `SetScript("OnValueChanged")`，导致触发了暴雪的默认回调并尝试调用父级未定义的 nil 方法。
+  * **解决方案**：
+    1. 为父级 `f` 预置 `f.OnScrollBarValueChanged = function(self, value) RefreshScrollView() end` 双向防卫兜底；
+    2. 在创建 `scrollBar` 实例后**第一时间**绑定自定义的 `OnValueChanged` 脚本，杜绝暴雪原生无保护回调被触发。
+
+## 23. 装备库 Tab (ItemLib) 与心愿汇总修复及渲染机制评估 (2026-09-12)
+* **用户问题反馈**：
+  1. 装备库 Tab 界面中心愿单状态（左侧列表的心愿星标/文字状态）有时显示不正确；
+  2. 装备库右侧的心愿单表格（`mainFrame.Hope` 心愿汇总）无法显示/空白；
+  3. 评估当前装备库表格渲染方法是否正常。
+* **深层根因定位与原版 BiaoGe 对比分析**：
+  1. **数据源角色 Key 不一致引发的严重断联**：
+     - 上游 BGLite 在部分逻辑中使用了带服全名 `BG.playerName`（如 `"角色-吉安娜"`），而模块内顶层使用的是短名 `UnitName("player")`。
+     - 在插件加载阶段，若 `UnitName("player")` 返回空或角色名格式不匹配，导致访问 `BiaoGe.Hope[RealmID][player]` 命中空表，导致心愿装备无法读取，左侧星标不亮、右侧汇总为空。
+  2. **Boss 键越界引发的 Fatal Lua Error（导致右侧心愿表格渲染流产）**：
+     - `Core/Lib.lua` 此前 `InitHopeDB` 在早期执行时未能获取到各副本完整的 Boss 列表，默认仅预分配了 15 个 Boss（`boss1`~`boss14`）；
+     - 时光服多 Boss 副本（如 TOC 包含 16~22 个 Boss 索引），`UpdateItemLib_RightHope_All()` 倒序循环从 `b = HopeMaxb[FB], 1, -1` 遍历；
+     - 第一轮访问 `boss16` 时因键值为 `nil`，直接抛出致命异常：`attempt to index field 'boss16' (a nil value)`，导致整个函数第一步就彻底崩溃中断，后续所有心愿条目完全无法填入右侧表格！
+  3. **异步渲染导致心愿状态刷新时序脱节**：
+     - `ItemLibMainFrame` 在 `OnShow` 时通过 `BG.After(0.2, ...)` 异步调用 `BG.UpdateItemLib()` 重新生成左侧按钮列表，但 `BG.UpdateItemLib_LeftHope_All()` 却在当前帧同步执行。等 0.2 秒后按钮列表真正生成完成时，由于没有再次触发状态同步，导致新生成的所有行心愿图标全部停留在默认 Hide 状态。
+  4. **BG.IsHope 过度依赖尚未加载的 UI 控件**：
+     - `BG.IsHope` 原先只检查心愿单界面的输入框控件（`BG.HopeFrame`），若玩家登录后尚未点开过心愿单主界面，控件为空，`CreateAllItemInfoCache` 构建的 `vv.hope` 全部误判为 `false`。
+  5. **界面层级与显隐状态控制缺陷**：
+     - `mainFrame.Hope` 缺少显式 FrameLevel 提升，容易被背景 Backdrop 压盖，且在列表更新后未显式调用 `mainFrame.Hope:Show()`。
+* **重构与修复实施方案**：
+  1. **角色名指针双向同步引擎 (`BG.GetHopeDB`)**：
+     - 在 `Core/Lib.lua` 中实现 `BG.GetHopeDB(realmID, player)`，自动将当前角色的全名与短名指向同一个内存 table 引用，并在初始化时严格预分配全副本 `n = 1..4` 和 `b = 1..30`，彻底免疫 nil 索引。
+  2. **心愿状态双重安全读取 (`Hope.lua`)**：
+     - 重构 `BG.SetHope`、`BG.DeleteHope`、`BG.IsHope`：即使玩家尚未打开过心愿单界面，也能直接与 `charHopeDB` 数据库同步读写，在任何时机均能 100% 精确识别心愿。
+  3. **链式安全防崩溃与多层判空 (`ItemLib.lua`)**：
+     - 对 `UpdateItemLib_LeftHope_All` 和 `UpdateItemLib_RightHope_All` 实施多层链式判空（Safe Navigation），杜绝任何越界访问崩溃。
+     - 增加 `BG.GetEquipLocName` 自愈预初始化机制，防止 `BG.invtypetable2` 提前调用报错。
+  4. **渲染完成闭环驱动与 FrameLevel 修正**：
+     - 在 `SetItemLib()` 完成所有行控件创建后，显式调用 `mainFrame.Hope:Show()`，并全量刷新 `LeftHope_All`、`LeftLib_IsHaved_All`、`LeftLib_IsLooted_All`、`RightHope_All` 等，实现行渲染完毕即刻点亮心愿与拥有状态；
+     - 显式为 `mainFrame.Hope` 及各个格子按钮、EditBox 提升 FrameLevel（`baseLevel + 5` / `baseLevel + 10`），杜绝层级压盖。
+* **关于当前表格渲染方法的评估**：
+  - **机制一致性**：原版 BiaoGe 与当前均采用“清空旧行、按筛选后 `db` 重新循环 `CreateFrame` 批量创建行框架”的非对象池模式。该机制与原版 BiaoGe 原生设计完全一致，逻辑上是正常且符合原版行为规范的；
+  - **性能与平稳性评估**：对于装备库每页数十条数据的体量，WoW 原生单次批量创建在主流配置下性能开销在毫秒级内，且无需维护复杂的对象池状态重置。本次通过在生成末尾补齐状态驱动与高度计算，保证了渲染完整度与数据一致性。
+
+## 24. 团队阵容天赋分析窗口交互增强 (2026-09-12)
+* **需求目标**：
+  1. 团队阵容天赋分析窗口（`BG_RaidCompMatrixModalFrame`）支持鼠标点击顶部手柄/空白处自由拖动移动；
+  2. 支持按键盘 ESC 键单独关闭该分析弹窗，而不影响背后其他主界面的显示状态。
+* **实现方案 (`Core/RaidCompUI.lua`)**：
+  1. **鼠标拖拽移动与屏幕边界约束**：
+     - 为主窗体 `f` 设置 `f:SetMovable(true)` 与 `f:SetClampedToScreen(true)`（杜绝窗口被拖出屏幕外丢失）；
+     - 构建顶部透明拖拽手柄区域 `dragBar`（宽避开右上角关闭和刷新按钮），注册 `LeftButton` 拖拽事件（`StartMoving` / `StopMovingOrSizing`）；
+     - 显式提高右上角关闭按钮 `closeBtn` 与 `btnRescan` 的 `FrameLevel`（`dragBar:GetFrameLevel() + 5`），确保点击关闭或刷新时不与拖拽冲突。
+  2. **ESC 独立关闭支持**：
+     - 将 `BG_RaidCompMatrixModalFrame` 注册至官方全局特殊窗口表 `UISpecialFrames`；
+     - 当该分析弹窗显示时，按 ESC 键由暴雪原生事件栈优先捕获并单独 Hide 关闭该弹窗，体验流畅自然。
+
+## 25. 掉落记录（防漏少记）模块 (LootHistory) (2026-09-12)
+* **需求目标**：
+  1. 在金团活动与团队副本进行中，全面实时记录所有团员的掉落拾取流水；
+  2. 针对金团记账场景，具备核心的“防漏少记”对账功能，实时与当前金团主表格进行数据比对，明确标注每件装备是否已被记入表格；
+  3. 挂载在主界面底部 Tab 栏最末尾（作为现有 Tab 的平滑延展），提供完整的搜索过滤、未记入高亮及一键团队通报功能。
+* **架构设计与模块组织**：
+  - **核心逻辑文件**：`Core/LootHistory.lua`（独立实现，零侵入上游 BGLite）。
+  - **模块入口注册**：在 `BGLite_Plus.toc` 中引入 `Core\LootHistory.lua`，并在 `Core/Init.lua` 中通过 `securecall(ns.InitLootHistoryModule)` 安全挂载。
+  - **Tab 栏位与顺序**：分配 Tab 编号 `BG.LootHistoryMainFrameTabNum = 107`，并在 `TAB_ORDER` 中赋予权重 `10`，排在所有现有 Tab（表格、对账、交易、邮件、预设、装备库、心愿单、团队工具、碎片统计）的最后一位。
+* **核心业务逻辑与技术实现**：
+  1. **掉落捕获与健壮解析引擎 (`ParseLootMessage`)**：
+     - 监听 `CHAT_MSG_LOOT`，仅在团队或小队活动期间生效。
+     - 模式串采用暴雪原生本地化常量（`LOOT_ITEM`、`LOOT_ITEM_SELF` 等）与精准正则表达式双层匹配，支持多数量（`x2`）与单数量，并兼容中英文客户端。
+     - 自动结合玩家与队友缓存获取拾取者真实职业（Class），实现标准职业颜色着色渲染。
+  2. **智能过滤与轻量持久化**：
+     - 默认过滤灰色、白色普通杂物，记录精良（蓝色）、史诗（紫色）、传说（橙色）及重要配方/宝珠/牌子。
+     - 按当前副本为键保存至 `BiaoGe[fb].lootHistory`，单副本最大保留 400 条记录（先进先出淘汰），随角色与账号 WTF 自动持久化。
+  3. **主表格对账与防漏核心算法 (`CheckIsTabled`)**：
+     - 遍历当前副本 `fb` 下的所有 Boss（`boss1`~`bossMax`）的所有装备格子（`zhuangbei1`~`zhuangbeiMax`），比对拾取物品的 `itemID`（支持 `BG.IsSame` 同源判定）；
+     - 若已记入，返回 `true, bossName`；界面显示为绿色 `✔ 已记入表格 (Boss名称)`；
+     - 若尚未记入，返回 `false`；界面以高对比鲜艳红色标注 `✖ 未记入表格 (请核对!)`，极为醒目。
+  4. **高可用 UI 交互与视图过滤**：
+     - **斑马纹滚动列表**：内置 21 行虚拟滚动条（`FauxScrollFrame` 规范），每行包含序号、时间、来源、拾取人（职业色）、物品图标与品质超链接（支持鼠标悬停 Tips、Ctrl 装扮试衣间、Shift 贴入聊天框）、数量以及账本记入状态。
+     - **防漏筛选器**：勾选【仅看未记入】复选框，即时仅呈现尚未记入金团表格的装备，团长与记录员打完 Boss 或分账前一眼查漏补缺。
+     - **品质筛选器**：勾选【仅看紫装/橙装】，屏蔽低级蓝绿装与材料杂项。
+     - **实时文本搜索**：支持按物品名称或拾取玩家名字即时模糊搜索。
+     - **一键通报团队**：点击【通报未记入】按钮，自动汇总未记入表格的高品质掉落，一键发送至团队/小队频道（无队伍时本地系统提示），公开透明。
+     - **清空记录**：提供二次弹窗确认的清空当前副本掉落历史记录功能。
+  5. **多语言与界面联动**：
+     - 在 `Locales/zhCN.lua`、`zhTW.lua`、`enUS.lua` 中全面补充本地化词条；
+     - 挂接 `BG.ClickTabButton` 与 `HideAllSubFrames`，彻底实现防透光与智能显隐。
+  6. **滚动条初始化时序与 SetVerticalScroll 缺省报错修复 (2026-09-12)**：
+     - **病因分析**：暴雪原生模板 `UIPanelScrollBarTemplate` 默认的 `OnValueChanged` 脚本硬编码调用了 `self:GetParent():SetVerticalScroll(value)`；在初版代码中，`scrollBar:SetValue(0)` 发生在 `scrollBar:SetScript("OnValueChanged", ...)` 之前，导致调用 `SetValue(0)` 时触发了模板自带脚本，由于普通 Frame 缺乏 `SetVerticalScroll` 方法，从而在 `SecureScrollTemplates.lua:24` 抛出 `attempt to call a nil value`。
+     - **解决方案**：
+       a. 在父级框架 `f` 上显式注入兜底空方法 `f.SetVerticalScroll = function(self, value) end`，杜绝任何底层模板脚本误调抛错；
+       b. 将自定义的 `OnValueChanged` 脚本绑定调整至 `scrollBar:SetValue(0)` 之前，优先覆盖原生脚本，实现双重防御。
+
+
+
+## 26. 自动拍卖单Boss掉落多件相同装备仅拍卖一次 Bug 修复 (2026-09-12)
+* **用户反馈问题**：
+  * 在修改了自动拍卖后，发现一个严重 Bug：当一个 Boss 掉落多件相同装备（如同时掉落2件相同的武器、2个相同饰品，或代币/印记x2）时，系统只能拍卖一次，多余的相同装备被遗漏未拍卖。
+* **深层根因分析 (四大防御缺陷叠加)**：
+  1. **全局防抖池粗暴按 `itemID_link` 拦截 (致命误杀)**：
+     - 原 `IsRecentlyQueued(itemID, link, slotKey)` 中，第 1 件装备入队后将全局键 `recentQueuedItems[itemID .. "_" .. link]` 打上了当前时间戳；
+     - 第 2 件相同装备几乎在同一瞬间到达，虽然拥有独立的表格槽位（如 `FB_1_2`），但在检查完槽位未锁定后，直接无条件跌入第 2 步的全局防抖检查；
+     - 因全局 key 在 45 秒内存在，第 2 件装备直接被误判为“45秒内重复广播”强行丢弃！
+  2. **待拍批次缓冲池 `pendingLootQueue` 查重逻辑写错**：
+     - 在 1.5 秒防抖合并窗口内，原代码在入队前通过 `queued.id == itemID and queued.link == link` 查重；
+     - 导致同一个 Boss 的待拍批次中绝对无法容纳两件同 ID 同 Link 的装备，第二件在入队时被当场 return 抹杀！
+  3. **表格匹配并发竞态条件 (`FindItemInBiaoGeTable`)**：
+     - 掉落多件相同装备时，两条拾取事件相隔极短（几十毫秒）；
+     - 原代码仅校验槽位是否有买家、是否有金额、是否已被终生锁定，**未检查该槽位是否已被当前的待拍队列预定**；
+     - 导致后续事件如果并发查询，会再次命中同一槽位，造成槽位错乱与竞争丢失。
+  4. **代币/印记同一格子多数量 (`x2`) 丢失**：
+     - 掉落套装代币或堆叠物品时，BGLite 会在同一格记入 `link .. "x" .. count`；
+     - 原自动拍卖代码未从消息和表格中提取 `x%d+` 数量，按单件处理，导致实际掉落 2 个却只开拍了 1 次。
+* **修复与架构落地实施 (`Core/AutoAuctionOnLoot.lua`)**：
+  1. **槽位优先防抖与独立放行机制**：
+     - 重构 `IsRecentlyQueued`：若具备明确的有效表格槽位 `slotKey`，严格基于槽位级锁定与待拍占用判定；只要该槽位未被锁定且未在待拍队列中，**直接放行，绝不被全局 `itemID_link` 拦截**；全局防抖仅在缺乏 `slotKey` 时作为最终兜底。
+  2. **队列查重重构为基于 `slotKey`**：
+     - `pendingLootQueue` 查重全面改为比对 `queued.slotKey == slotKey`，同一 Boss 掉落在不同格子的同名装备正常入队合并。
+  3. **待拍队列占用排查与自动顺延**：
+     - 引入 `IsSlotInPendingQueue(slotKey)` 判定；
+     - 在 `FindItemInBiaoGeTable` 寻找可用槽位时，主动排除已被待拍队列占用的槽位，遇同名装备自动顺延定位至下一个可用格子（如 `FB_1_2`）。
+  4. **全链路支持多件数量 (`count`) 展开独立拍卖**：
+     - `CHAT_MSG_LOOT` 与 `FindItemInBiaoGeTable` 统一解析 `x%d+` 数量；
+     - `QueueItemForAuction` 接收并持久化 `count` 字段；
+     - `ExecuteAutoAuction` 按 `count` 循环发起相应次数的 `BG.SendStartAuctionMsg` 独立拍卖（间隔 1.2 秒平滑发送），生成各自独立的拍卖窗口；
+     - 倒计时悬浮条与团队广播动态汇总累加真实总件数。
+  5. **调试命令增强**：
+     - 新增 `/bgloot testsame` 指令，可一键模拟 Boss 掉落 2 件相同装备的倒计时浮动条与批量开拍测试。

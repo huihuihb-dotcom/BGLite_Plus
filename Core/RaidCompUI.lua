@@ -245,17 +245,47 @@ function RaidCompUI.CreateMatrixModal()
     f:SetBackdropColor(0.05, 0.05, 0.05, 0.96)
     f:SetBackdropBorderColor(0.2, 0.7, 1, 0.95)
     f:EnableMouse(true)
+    f:SetMovable(true)
+    f:SetClampedToScreen(true)
+    f:RegisterForDrag("LeftButton")
+    f:SetScript("OnDragStart", function(self) self:StartMoving() end)
+    f:SetScript("OnDragStop", function(self) self:StopMovingOrSizing() end)
     f:Hide()
     modalFrame = f
+
+    -- 注册 ESC 键独立关闭窗口
+    local frameName = "BG_RaidCompMatrixModalFrame"
+    local alreadyInSpecial = false
+    if UISpecialFrames then
+        for _, name in ipairs(UISpecialFrames) do
+            if name == frameName then
+                alreadyInSpecial = true
+                break
+            end
+        end
+        if not alreadyInSpecial then
+            tinsert(UISpecialFrames, frameName)
+        end
+    end
+
+    -- 顶部手柄拖拽区域 (避开右上角关闭和刷新按钮)
+    local dragBar = CreateFrame("Frame", nil, f)
+    dragBar:SetPoint("TOPLEFT", f, "TOPLEFT", 0, 0)
+    dragBar:SetPoint("BOTTOMRIGHT", f, "TOPRIGHT", -135, -50)
+    dragBar:EnableMouse(true)
+    dragBar:RegisterForDrag("LeftButton")
+    dragBar:SetScript("OnDragStart", function() f:StartMoving() end)
+    dragBar:SetScript("OnDragStop", function() f:StopMovingOrSizing() end)
 
     -- 标题与关闭按钮
     local title = f:CreateFontString(nil, "OVERLAY")
     title:SetFont(BIAOGE_TEXT_FONT, 16, "OUTLINE")
     title:SetPoint("TOPLEFT", 18, -14)
-    title:SetText(BG.STC_g1("【25人团队阵容天赋分析 & Buff/Debuff 全家福矩阵】"))
+    title:SetText(BG.STC_g1("团队阵容天赋分析"))
 
     local closeBtn = CreateFrame("Button", nil, f, "UIPanelCloseButton")
     closeBtn:SetPoint("TOPRIGHT", -4, -4)
+    closeBtn:SetFrameLevel(dragBar:GetFrameLevel() + 5)
     closeBtn:SetScript("OnClick", function() f:Hide() end)
 
     -- 顶部摘要与一键重新扫描
@@ -268,6 +298,7 @@ function RaidCompUI.CreateMatrixModal()
     local btnRescan = BG.CreateButton(f)
     btnRescan:SetSize(80, 22)
     btnRescan:SetPoint("TOPRIGHT", -45, -34)
+    btnRescan:SetFrameLevel(dragBar:GetFrameLevel() + 5)
     btnRescan:SetText("刷新扫描")
     btnRescan:SetScript("OnClick", function()
         RaidComp.StartScan(true)

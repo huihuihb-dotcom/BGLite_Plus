@@ -1057,6 +1057,9 @@ end
 -- 参数1（必选）：link。类型：string
 -- 参数2（可选）：表格ID。不传参数则对当前表格添加心愿。类型：string
 -- 返回：true或false，true代表心愿设置成功了。类型：boolean
+-- 参数1（必选）：link。类型：string
+-- 参数2（可选）：表格ID。不传参数则对当前表格添加心愿。类型：string
+-- 返回：true或false，true代表心愿设置成功了。类型：boolean
 function BG.SetHope(link, FB, isBiaoGe)
     if type(link) ~= "string" then error(L["物品链接类型错误，需要string类型。"]) end
     local itemID = GetItemID(link)
@@ -1073,17 +1076,36 @@ function BG.SetHope(link, FB, isBiaoGe)
         end
     end
 
+    local charHopeDB = (BG.GetHopeDB and BG.GetHopeDB())
+    if not charHopeDB and BiaoGe and BiaoGe.Hope then
+        local rID = GetRealmID()
+        local pName = UnitName("player") or BG.playerName or ""
+        charHopeDB = BiaoGe.Hope[rID] and BiaoGe.Hope[rID][pName]
+    end
+
     for i = 1, HopeMaxi do
-        local hope = BG.HopeFrame[FB]["nandu" .. n]["boss" .. b]["zhuangbei" .. i]
-        if hope and hope:GetText() == "" then
-            hope:SetText(link)
-            hope:SetCursorPosition(0)
-            BiaoGe.Hope[RealmID][player][FB]["nandu" .. n]["boss" .. b]["zhuangbei" .. i] = link
-            if BG.ItemLibMainFrame:IsVisible() then
-                BG.UpdateItemLib_LeftHope_All()
-                BG.UpdateItemLib_RightHope_All()
+        local hopeFrameExist = BG.HopeFrame and BG.HopeFrame[FB] and BG.HopeFrame[FB]["nandu" .. n] and BG.HopeFrame[FB]["nandu" .. n]["boss" .. b]
+        local hopeUI = hopeFrameExist and BG.HopeFrame[FB]["nandu" .. n]["boss" .. b]["zhuangbei" .. i]
+        local currentLink = (hopeUI and hopeUI:GetText()) or (charHopeDB and charHopeDB[FB] and charHopeDB[FB]["nandu" .. n] and charHopeDB[FB]["nandu" .. n]["boss" .. b] and charHopeDB[FB]["nandu" .. n]["boss" .. b]["zhuangbei" .. i])
+
+        if not currentLink or currentLink == "" then
+            if hopeUI then
+                hopeUI:SetText(link)
+                hopeUI:SetCursorPosition(0)
             end
-            BG.SetBiaoGeGuanZhu(itemID)
+            if charHopeDB then
+                charHopeDB[FB] = charHopeDB[FB] or {}
+                charHopeDB[FB]["nandu" .. n] = charHopeDB[FB]["nandu" .. n] or {}
+                charHopeDB[FB]["nandu" .. n]["boss" .. b] = charHopeDB[FB]["nandu" .. n]["boss" .. b] or {}
+                charHopeDB[FB]["nandu" .. n]["boss" .. b]["zhuangbei" .. i] = link
+            end
+            if BG.ItemLibMainFrame and BG.ItemLibMainFrame:IsVisible() then
+                if BG.UpdateItemLib_LeftHope_All then BG.UpdateItemLib_LeftHope_All() end
+                if BG.UpdateItemLib_RightHope_All then BG.UpdateItemLib_RightHope_All() end
+            end
+            if BG.SetBiaoGeGuanZhu then
+                BG.SetBiaoGeGuanZhu(itemID)
+            end
             return true
         end
     end
@@ -1104,19 +1126,34 @@ function BG.DeleteHope(LINKorID, FB)
         itemID = GetItemID(LINKorID)
     end
     if not itemID then error(L["物品链接错误，没有读取到物品ID。"]) end
-    local FBs = FB and BG.phaseFBtable[FB] or BG.FBtable
+    local FBs = FB and BG.phaseFBtable and BG.phaseFBtable[FB] or BG.FBtable
     if not FBs then error(L["表格ID错误"]) end
 
+    local charHopeDB = (BG.GetHopeDB and BG.GetHopeDB())
+    if not charHopeDB and BiaoGe and BiaoGe.Hope then
+        local rID = GetRealmID()
+        local pName = UnitName("player") or BG.playerName or ""
+        charHopeDB = BiaoGe.Hope[rID] and BiaoGe.Hope[rID][pName]
+    end
+
     for _, FB in pairs(FBs) do
-        for n = 1, HopeMaxn[FB] do
-            for b = 1, HopeMaxb[FB] do
+        for n = 1, (HopeMaxn[FB] or 3) do
+            for b = 1, (HopeMaxb[FB] or 25) do
                 for i = 1, HopeMaxi do
-                    local hope = BG.HopeFrame[FB]["nandu" .. n]["boss" .. b]["zhuangbei" .. i]
-                    if hope then
-                        if itemID == GetItemID(hope:GetText()) then
-                            hope:SetText("")
-                            BiaoGe.Hope[RealmID][player][FB]["nandu" .. n]["boss" .. b]["zhuangbei" .. i] = nil
-                        end
+                    local hopeFrameExist = BG.HopeFrame and BG.HopeFrame[FB] and BG.HopeFrame[FB]["nandu" .. n] and BG.HopeFrame[FB]["nandu" .. n]["boss" .. b]
+                    local hopeUI = hopeFrameExist and BG.HopeFrame[FB]["nandu" .. n]["boss" .. b]["zhuangbei" .. i]
+                    local dbLink = charHopeDB and charHopeDB[FB] and charHopeDB[FB]["nandu" .. n] and charHopeDB[FB]["nandu" .. n]["boss" .. b] and charHopeDB[FB]["nandu" .. n]["boss" .. b]["zhuangbei" .. i]
+
+                    local matched = false
+                    if hopeUI and itemID == GetItemID(hopeUI:GetText()) then
+                        hopeUI:SetText("")
+                        matched = true
+                    end
+                    if dbLink and itemID == GetItemID(dbLink) then
+                        matched = true
+                    end
+                    if matched and charHopeDB and charHopeDB[FB] and charHopeDB[FB]["nandu" .. n] and charHopeDB[FB]["nandu" .. n]["boss" .. b] then
+                        charHopeDB[FB]["nandu" .. n]["boss" .. b]["zhuangbei" .. i] = nil
                     end
                 end
             end
@@ -1125,7 +1162,7 @@ function BG.DeleteHope(LINKorID, FB)
 end
 
 -- 参数1（必选）：link或itemID。类型：string或number
--- 参数2（可选）：表格ID。不传参数则历遍全部表格的心愿进行匹配删除。类型：string
+-- 参数2（可选）：表格ID。不传参数则历遍全部表格的心愿进行匹配。类型：string
 -- 返回：true或false，true代表是心愿。类型：boolean
 function BG.IsHope(LINKorID, FB)
     local itemID
@@ -1135,17 +1172,35 @@ function BG.IsHope(LINKorID, FB)
         itemID = GetItemID(LINKorID)
     end
     if not itemID then error(L["物品链接错误，没有读取到物品ID。"]) end
-    local FBs = FB and BG.phaseFBtable[FB] or BG.FBtable
+    local FBs = FB and BG.phaseFBtable and BG.phaseFBtable[FB] or BG.FBtable
     if not FBs then error(L["表格ID错误"]) end
 
+    local charHopeDB = (BG.GetHopeDB and BG.GetHopeDB())
+    if not charHopeDB and BiaoGe and BiaoGe.Hope then
+        local rID = GetRealmID()
+        local pName = UnitName("player") or BG.playerName or ""
+        charHopeDB = BiaoGe.Hope[rID] and BiaoGe.Hope[rID][pName]
+    end
+
     for _, FB in pairs(FBs) do
-        for n = 1, HopeMaxn[FB] do
-            for b = 1, HopeMaxb[FB] do
+        for n = 1, (HopeMaxn[FB] or 3) do
+            for b = 1, (HopeMaxb[FB] or 25) do
                 for i = 1, HopeMaxi do
-                    local hope = BG.HopeFrame[FB]["nandu" .. n]["boss" .. b]["zhuangbei" .. i]
-                    if hope then
-                        if BG.IsSame(itemID, hope) then
-                            return true
+                    -- 1. 优先查 UI 控件 (如果在当前已初始化的心愿单中)
+                    local hopeFrameExist = BG.HopeFrame and BG.HopeFrame[FB] and BG.HopeFrame[FB]["nandu" .. n] and BG.HopeFrame[FB]["nandu" .. n]["boss" .. b]
+                    local hopeUI = hopeFrameExist and BG.HopeFrame[FB]["nandu" .. n]["boss" .. b]["zhuangbei" .. i]
+                    if hopeUI and BG.IsSame(itemID, hopeUI) then
+                        return true
+                    end
+
+                    -- 2. 查持久化数据库 (即使未打开心愿单 UI 也保证精确判定)
+                    if charHopeDB and charHopeDB[FB] and charHopeDB[FB]["nandu" .. n] and charHopeDB[FB]["nandu" .. n]["boss" .. b] then
+                        local link = charHopeDB[FB]["nandu" .. n]["boss" .. b]["zhuangbei" .. i]
+                        if link and link ~= "" then
+                            local dbItemID = GetItemID(link)
+                            if dbItemID and (dbItemID == itemID or (BG.IsSame and BG.IsSame(itemID, dbItemID))) then
+                                return true
+                            end
                         end
                     end
                 end

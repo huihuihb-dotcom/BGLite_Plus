@@ -82,6 +82,9 @@ local function HideAllSubFrames()
     SafeHide(BG.TradeHistoryMainFrame)
     SafeHide(BG.AuctionPresetMainFrame)
     SafeHide(BG.TitanGoblinMainFrame)
+    if BG.LootHistoryMainFrame then
+        SafeHide(BG.LootHistoryMainFrame)
+    end
     if _G["BG_RaidCompMatrixModalFrame"] then
         SafeHide(_G["BG_RaidCompMatrixModalFrame"])
     end
@@ -141,13 +144,25 @@ local function InitPlusUI()
     if ns.TitanGoblin and ns.TitanGoblin.CreateMainFrame then
         ns.TitanGoblin.CreateMainFrame(BG.MainFrame)
     end
+    if ns.InitLootHistoryModule then
+        securecall(ns.InitLootHistoryModule)
+        if ns.LootHistory and ns.LootHistory.MainFrame then
+            BG.LootHistoryMainFrame = ns.LootHistory.MainFrame
+        end
+    end
     if BG.OpenOption and not ns.hasHookedOpenOptionForRaidTool then
         ns.hasHookedOpenOptionForRaidTool = true
         hooksecurefunc(BG, "OpenOption", function()
             if ns.InitRaidToolOthersOptions then
                 ns.InitRaidToolOthersOptions()
             end
+            if ns.InitAuctionPresetOptions then
+                ns.InitAuctionPresetOptions()
+            end
         end)
+    end
+    if ns.InitAuctionPresetOptions then
+        ns.InitAuctionPresetOptions()
     end
 
     -- 1. 职业过滤初始化
@@ -218,6 +233,9 @@ local function InitPlusUI()
             end
 
             -- 关键修复：OnShow 时触发装备库检索与列表更新
+            if self.Hope then
+                SafeShow(self.Hope)
+            end
             if BG.UpdateItemLib then
                 BG.After(self.first and 0.2 or 0, function()
                     BG.UpdateItemLib()
@@ -227,6 +245,8 @@ local function InitPlusUI()
             if BG.UpdateItemLib_LeftLib_IsHaved_All then BG.UpdateItemLib_LeftLib_IsHaved_All() end
             if BG.UpdateItemLib_LeftLib_IsLooted_All then BG.UpdateItemLib_LeftLib_IsLooted_All() end
             if BG.UpdateItemLib_RightHope_All then BG.UpdateItemLib_RightHope_All() end
+            if BG.UpdateItemLib_RightHope_IsHaved_All then BG.UpdateItemLib_RightHope_IsHaved_All() end
+            if BG.UpdateItemLib_RightHope_IsLooted_All then BG.UpdateItemLib_RightHope_IsLooted_All() end
             self.first = nil
         end)
 
@@ -408,6 +428,7 @@ local function InitPlusUI()
             [BG.HopeMainFrameTabNum or 21] = 7,            -- 心愿清单
             [BG.RaidToolMainFrameTabNum or 22] = 8,        -- 团队工具
             [BG.TitanGoblinMainFrameTabNum or 105] = 9,   -- 碎片统计
+            [BG.LootHistoryMainFrameTabNum or 107] = 10,  -- 掉落记录
         }
 
         local validItems = {}
@@ -579,6 +600,9 @@ local function InitPlusUI()
                 end
                 if num ~= BG.TradeHistoryMainFrameTabNum and BG.TradeHistoryMainFrame then
                     SafeHide(BG.TradeHistoryMainFrame)
+                end
+                if num ~= BG.LootHistoryMainFrameTabNum and BG.LootHistoryMainFrame then
+                    SafeHide(BG.LootHistoryMainFrame)
                 end
                 if num ~= (BG.FBMainFrameTabNum or 1) then
                     if ns.TeamInfo and ns.TeamInfo.topBtn then SafeHide(ns.TeamInfo.topBtn) end

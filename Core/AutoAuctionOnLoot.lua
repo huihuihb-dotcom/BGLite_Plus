@@ -4,13 +4,29 @@ local L = ns.L or {}
 local AutoAuctionOnLoot = {}
 ns.AutoAuctionOnLoot = AutoAuctionOnLoot
 
+-- 安全提取装备 ID 工具函数（杜绝全局 GetItemID 不存在导致的运行时报错崩溃）
+local function SafeGetItemID(text)
+    if not text then return nil end
+    if type(text) == "number" then return text end
+    local id = text:match("item:(%d+)") or text:match("Hitem:(%d+)")
+    return id and tonumber(id) or nil
+end
+local GetItemID = ns.GetItemID or SafeGetItemID
+
 -- 1. 配置项缺省自愈与默认开启
 local function EnsureOptions()
     BiaoGe = BiaoGe or {}
     BiaoGe.options = BiaoGe.options or {}
-    -- 默认开箱即用：默认开启 1（带 5 秒倒计时浮动条确认）
+    -- 一次性安全自愈迁移：重置历史开启状态为默认关闭 0，建议团长按最佳实践配置预设后再主动开启
+    -- 注意：BG.Once 必须传入 3 个参数：(name, dt, func)
+    if BG and BG.Once then
+        BG.Once("autoAuctionDefaultOff", 260911, function()
+            BiaoGe.options.autoAuctionOnLoot = 0
+        end)
+    end
+    -- 默认出厂为关闭 0（建议配合预设价格配置后主动开启）
     if BiaoGe.options.autoAuctionOnLoot == nil then
-        BiaoGe.options.autoAuctionOnLoot = 1
+        BiaoGe.options.autoAuctionOnLoot = 0
     end
     if BiaoGe.options.autoAuctionConfirmTime == nil then
         BiaoGe.options.autoAuctionConfirmTime = 5 -- 默认 5 秒倒计时浮动条确认
@@ -23,10 +39,10 @@ local function EnsureOptions()
     end
 end
 
--- 2. 权限与环境校验 (严格限定大型团队副本 Raid，严禁 5 人小队或野外触发)
+-- 2. 权限与环境校验 (严格限定大型团队副本 Raid，严禁 5 人小队或野外普通怪物触发)
 local function CanInitiateAuction(isManualTest)
-    -- 2.1 若为手动测试指令 (/bgloot test)，直接允许通过
-    if isManualTest then return true end
+    -- 2.1 若为手动测试指令 (/bgloot test) 或开发者调试模式，直接放行
+    if isManualTest or (BG and (BG.DeBug or BG.DEBUG)) then return true end
 
     -- 2.2 核心限制：必须处于团队 (Raid) 中！5 人小队 (Party)、单人、野外一律严格拦截
     local inRaid = IsInRaid and (IsInRaid(1) or IsInRaid())
@@ -42,54 +58,183 @@ local function CanInitiateAuction(isManualTest)
         end
     end
 
-    -- 2.4 身份检测：必须是团队领袖 (团长) 或 物品分配者 (Master Looter)
+    -- 2.4 身份检测：优先直接使用 BGLite 权威计算的团长/分配者状态
+    if BG and (BG.IsML or BG.IsLeader or (BG.ImMLorLeader and BG.ImMLorLeader())) then
+        return true
+    end
+
+    -- 团队领袖 (团长) 兜底检测
     if UnitIsGroupLeader and UnitIsGroupLeader("player") then
         return true
     end
 
-    if IsMasterLooter and IsMasterLooter() then
-        return true
-    end
-
-    -- 经典旧世/时光服/WLK 中，若当前玩家是分配者，GetLootMethod 返回的 raidMaster/partyMaster 为 0
-    local lootmethod, partyMaster, raidMaster = GetLootMethod()
-    if lootmethod == "master" then
-        if raidMaster == 0 or partyMaster == 0 then
-            return true
-        elseif raidMaster and UnitIsUnit("raid" .. raidMaster, "player") then
-            return true
+    -- 物品分配者 (Master Looter) 兜底检测 (兼容 C_PartyInfo 新 API，杜绝 GetLootMethod 为空报错)
+    local GetLootMethodFunc = GetLootMethod or (C_PartyInfo and C_PartyInfo.GetLootMethod)
+    if GetLootMethodFunc then
+        local lootmethod, partyMaster, raidMaster = GetLootMethodFunc()
+        if lootmethod == "master" or lootmethod == 2 then
+            if raidMaster == 0 or partyMaster == 0 then
+                return true
+            elseif raidMaster and UnitIsUnit("raid" .. raidMaster, "player") then
+                return true
+            end
         end
     end
 
-    if BG and (BG.IsML or BG.IsLeader) then
+    if type(IsMasterLooter) == "function" and IsMasterLooter() then
         return true
     end
 
     return false
 end
 
--- 3. 待拍防抖批处理缓冲池与 45 秒防重击穿池
+-- 3. 表格槽位级“只拍一次”终生锁定池 (支持跨 /reload 持久化与生命周期自愈)
+local function GetAuctionedSlotsDB()
+    BiaoGe = BiaoGe or {}
+    BiaoGe.autoAuctionedSlots = BiaoGe.autoAuctionedSlots or {}
+    return BiaoGe.autoAuctionedSlots
+end
+AutoAuctionOnLoot.GetAuctionedSlotsDB = GetAuctionedSlotsDB
+
+local function IsSlotAuctioned(slotKey)
+    if not slotKey or slotKey == "" then return false end
+    local db = GetAuctionedSlotsDB()
+    return db[slotKey] == true
+end
+
+local function MarkSlotAuctioned(slotKey)
+    if not slotKey or slotKey == "" then return end
+    local db = GetAuctionedSlotsDB()
+    db[slotKey] = true
+end
+
+local function ClearSlotAuctioned(slotKey)
+    if not slotKey or slotKey == "" then return end
+    local db = GetAuctionedSlotsDB()
+    db[slotKey] = nil
+end
+
+local function ResetAllAuctionedSlots()
+    local db = GetAuctionedSlotsDB()
+    wipe(db)
+end
+AutoAuctionOnLoot.ResetAllAuctionedSlots = ResetAllAuctionedSlots
+
+-- 3.1 非 Boss 掉落交互状态追踪（杜绝队友交易归还、邮寄、商店回购等引发误拍）
+local isTradeOpen = false
+local lastTradeTime = 0
+local lastTradeCompleteTime = 0
+local isMailOpen = false
+local lastMailTime = 0
+local isMerchantOpen = false
+local lastMerchantTime = 0
+
+local interactionWatcher = CreateFrame("Frame")
+interactionWatcher:RegisterEvent("TRADE_SHOW")
+interactionWatcher:RegisterEvent("TRADE_CLOSED")
+interactionWatcher:RegisterEvent("TRADE_ACCEPT_UPDATE")
+interactionWatcher:RegisterEvent("UI_INFO_MESSAGE")
+interactionWatcher:RegisterEvent("MAIL_SHOW")
+interactionWatcher:RegisterEvent("MAIL_CLOSED")
+interactionWatcher:RegisterEvent("MERCHANT_SHOW")
+interactionWatcher:RegisterEvent("MERCHANT_CLOSED")
+
+interactionWatcher:SetScript("OnEvent", function(self, event, ...)
+    local now = GetTime()
+    if event == "TRADE_SHOW" then
+        isTradeOpen = true
+    elseif event == "TRADE_CLOSED" then
+        isTradeOpen = false
+        lastTradeTime = now
+    elseif event == "TRADE_ACCEPT_UPDATE" then
+        -- 交易状态保持活跃
+    elseif event == "UI_INFO_MESSAGE" then
+        local _, text = ...
+        if (ERR_TRADE_COMPLETE and text == ERR_TRADE_COMPLETE) or (text and text:find("交易完成")) then
+            lastTradeCompleteTime = now
+            lastTradeTime = now
+        end
+    elseif event == "MAIL_SHOW" then
+        isMailOpen = true
+    elseif event == "MAIL_CLOSED" then
+        isMailOpen = false
+        lastMailTime = now
+    elseif event == "MERCHANT_SHOW" then
+        isMerchantOpen = true
+    elseif event == "MERCHANT_CLOSED" then
+        isMerchantOpen = false
+        lastMerchantTime = now
+    end
+end)
+
+local function IsNonLootInteractionActive()
+    local now = GetTime()
+    if isTradeOpen or (now - lastTradeTime < 3.5) or (now - lastTradeCompleteTime < 3.5) then
+        return true, "交易状态"
+    end
+    if isMailOpen or (now - lastMailTime < 3.0) then
+        return true, "邮件状态"
+    end
+    if isMerchantOpen or (now - lastMerchantTime < 3.0) then
+        return true, "商人/回购状态"
+    end
+    return false
+end
+AutoAuctionOnLoot.IsNonLootInteractionActive = IsNonLootInteractionActive
+
+-- 3.2 待拍防抖批处理缓冲池与防重复防击穿池
 local pendingLootQueue = {}
-local recentQueuedItems = {} -- [itemID .. "_" .. link] = timestamp
+local recentQueuedItems = {} -- [key] = timestamp
 local debounceTimer = nil
 local countDownFrame = nil
 
+-- 检查某个槽位是否当前正处于未开拍的待拍缓冲队列中（防止并发查找命中同一槽位）
+local function IsSlotInPendingQueue(slotKey)
+    if not slotKey or slotKey == "" then return false end
+    for _, item in ipairs(pendingLootQueue) do
+        if item.slotKey == slotKey then
+            return true
+        end
+    end
+    return false
+end
+AutoAuctionOnLoot.IsSlotInPendingQueue = IsSlotInPendingQueue
+
 local function IsRecentlyQueued(itemID, link, slotKey)
-    -- 若来自摸尸体的具体独立槽位（如 slot_1, slot_2），允许同名多件掉落正常入队
+    local now = GetTime()
+    -- 1. 槽位级终生锁定与短期防抖校验（优先依据独立槽位判定，彻底杜绝误伤同名装备）
     if slotKey and slotKey ~= "" then
+        if IsSlotAuctioned(slotKey) then
+            return true
+        end
+        local slotTimeKey = "slot_" .. slotKey
+        if recentQueuedItems[slotTimeKey] and (now - recentQueuedItems[slotTimeKey] < 45) then
+            return true
+        end
+        if IsSlotInPendingQueue(slotKey) then
+            return true
+        end
+        -- 有明确且未锁定的独立槽位，直接放行，绝不能被全局 itemID 拦截！
         return false
     end
+
+    -- 2. 仅当没有 slotKey 时（如手动调试指令），才使用全局 itemID + link 短期防抖兜底
     local key = tostring(itemID) .. "_" .. tostring(link or "")
-    local now = GetTime()
     if recentQueuedItems[key] and (now - recentQueuedItems[key] < 45) then
         return true
     end
     return false
 end
 
-local function MarkItemQueued(itemID, link)
-    local key = tostring(itemID) .. "_" .. tostring(link or "")
-    recentQueuedItems[key] = GetTime()
+local function MarkItemQueued(itemID, link, slotKey)
+    local now = GetTime()
+    if slotKey and slotKey ~= "" then
+        recentQueuedItems["slot_" .. slotKey] = now
+        MarkSlotAuctioned(slotKey)
+    else
+        local key = tostring(itemID) .. "_" .. tostring(link or "")
+        recentQueuedItems[key] = now
+    end
 end
 
 -- 执行拍卖广播 (仅限团队 RAID 频道广播)
@@ -105,18 +250,24 @@ local function ExecuteAutoAuction(itemsToAuction, fallbackPrice, bossName)
 
     if BG and BG.PlaySound then BG.PlaySound(1) end
 
+    -- 统计待拍实际总件数（考虑单格子带 xN 数量的情况）
+    local totalItemCount = 0
+    for _, it in ipairs(itemsToAuction) do
+        totalItemCount = totalItemCount + (it.count or 1)
+    end
+
     -- 仅向团队频道发送一条汇总开拍提示（严禁向 5 人小队 PARTY 频道发送）
     local inRaid = IsInRaid and (IsInRaid(1) or IsInRaid())
     if inRaid then
-        local msg = format("[BGLite] 团长已发起【%s】自动拍卖（共 %d 件装备），请在拍卖窗口出价！", bossName or "Boss", #itemsToAuction)
+        local msg = format("[BGLite] 团长已发起【%s】自动拍卖（共 %d 件装备），请在拍卖窗口出价！", bossName or "Boss", totalItemCount)
         SendChatMessage(msg, "RAID")
     end
 
     if DEFAULT_CHAT_FRAME then
-        DEFAULT_CHAT_FRAME:AddMessage(format("|cff00BFFF[BGLite]|r 正在为【%s】发起全部 %d 件装备拍卖（平滑发送中，间隔1.2秒）...", bossName or "Boss", #itemsToAuction))
+        DEFAULT_CHAT_FRAME:AddMessage(format("|cff00BFFF[BGLite]|r 正在为【%s】发起全部 %d 件装备拍卖（平滑发送中，间隔1.2秒）...", bossName or "Boss", totalItemCount))
     end
     if UIErrorsFrame then
-        UIErrorsFrame:AddMessage(format("已发起【%s】共 %d 件装备自动拍卖", bossName or "Boss", #itemsToAuction), 0, 1, 0)
+        UIErrorsFrame:AddMessage(format("已发起【%s】共 %d 件装备自动拍卖", bossName or "Boss", totalItemCount), 0, 1, 0)
     end
 
     local delay = 0
@@ -124,12 +275,16 @@ local function ExecuteAutoAuction(itemsToAuction, fallbackPrice, bossName)
         local finalMoney = it.presetMoney or fallbackPrice or 100
         local itemID = it.id
         local link = it.link
-        C_Timer.After(delay, function()
-            if BG and BG.SendStartAuctionMsg then
-                BG.SendStartAuctionMsg(isGen2, itemID, finalMoney, duration, mod, link, resetThreshold)
-            end
-        end)
-        delay = delay + 1.2
+        local itCount = it.count or 1
+        -- 支持同一装备/代币循环发起相应次数的拍卖，分别生成独立拍卖框
+        for c = 1, itCount do
+            C_Timer.After(delay, function()
+                if BG and BG.SendStartAuctionMsg then
+                    BG.SendStartAuctionMsg(isGen2, itemID, finalMoney, duration, mod, link, resetThreshold)
+                end
+            end)
+            delay = delay + 1.2
+        end
     end
 end
 
@@ -276,12 +431,15 @@ local function GetOrCreateCountDownFrame()
         self.bar:SetValue(self.totalTime)
         self.bar:SetStatusBarColor(0.2, 0.8, 0.2, 0.9)
 
+        local totalItemCount = 0
         local unpresetCount = 0
         for _, it in ipairs(itemsToAuction) do
-            if not it.presetMoney then unpresetCount = unpresetCount + 1 end
+            local c = it.count or 1
+            totalItemCount = totalItemCount + c
+            if not it.presetMoney then unpresetCount = unpresetCount + c end
         end
 
-        self.subText:SetText(format("【%s】共 %d 件", self.bossName, #itemsToAuction))
+        self.subText:SetText(format("【%s】共 %d 件", self.bossName, totalItemCount))
         if unpresetCount > 0 then
             local fallback = tonumber(BiaoGe.options.autoAuctionFallbackPrice) or 100
             self.infoText:SetText(format("%d件未设底价(按%dG)", unpresetCount, fallback))
@@ -383,58 +541,129 @@ combatWatcher:SetScript("OnEvent", function()
     end
 end)
 
--- 判断是否为套装代币 (Token) 或团本核心掉落拍卖品
-local function IsSetTokenOrRaidItem(itemID, link, name, FB)
-    if not itemID then return false end
+-- 检查物品是否已被正式【记录进拍卖表格】(BiaoGe[FB])
+-- checkAvailableOnly: 是否严格只匹配【尚未开拍且尚未记账结账】的有效待拍槽位
+local function FindItemInBiaoGeTable(itemID, link, FB, checkAvailableOnly)
+    if not BiaoGe then return false end
+    local targetID = itemID and tonumber(itemID)
+    if not targetID and link then
+        targetID = SafeGetItemID(link)
+    end
+    if not targetID then return false end
 
-    -- 1. BGLite 官方套装兑换物数据库匹配 (ExchangeItems)
-    if BG and BG.Loot then
-        -- 优先匹配当前活跃副本的兑换物
-        if FB and BG.Loot[FB] and BG.Loot[FB].ExchangeItems and BG.Loot[FB].ExchangeItems[itemID] then
-            return true
-        end
-        -- 全局遍历所有副本的兑换物表兜底
-        for fbKey, fbData in pairs(BG.Loot) do
-            if type(fbData) == "table" and fbData.ExchangeItems and fbData.ExchangeItems[itemID] then
-                return true
-            end
+    -- 确定待检查副本列表：优先传入FB -> BG.FB2 -> BG.FB1 -> 预设当前FB -> 全量BiaoGe
+    local fbsToCheck = {}
+    local addedFB = {}
+    local function AddFB(fbName)
+        if fbName and type(fbName) == "string" and fbName ~= "" and BiaoGe[fbName] and not addedFB[fbName] then
+            tinsert(fbsToCheck, fbName)
+            addedFB[fbName] = true
         end
     end
 
-    -- 2. 当前副本 Boss 掉落列表或金团表格中存在该物品
-    if FB and BG and BG.Frame and BG.Frame[FB] and BG.Maxb and BG.Maxb[FB] then
-        for b = 1, BG.Maxb[FB] - 1 do
-            local maxI = (BG.GetMaxi and BG.GetMaxi(FB, b)) or 30
-            for i = 1, maxI do
-                local cell = BG.Frame[FB]["boss" .. b] and BG.Frame[FB]["boss" .. b]["zhuangbei" .. i]
-                if cell then
-                    local txt = cell:GetText()
-                    if txt and (txt:find("item:" .. itemID) or (link and txt == link)) then
-                        return true
+    AddFB(FB)
+    AddFB(BG and BG.FB2)
+    AddFB(BG and BG.FB1)
+    AddFB(BiaoGe.auctionPreset and BiaoGe.auctionPreset.currentFB)
+
+    for fbName, fbData in pairs(BiaoGe) do
+        if type(fbData) == "table" and fbData.boss1 ~= nil then
+            AddFB(fbName)
+        end
+    end
+
+    for _, fbName in ipairs(fbsToCheck) do
+        local maxb = (BG and BG.Maxb and BG.Maxb[fbName]) or 30
+        for b = 1, maxb do
+            if BiaoGe[fbName]["boss" .. b] then
+                local maxi = (BG and BG.GetMaxi and BG.GetMaxi(fbName, b)) or 30
+                for i = 1, maxi do
+                    local txt = BiaoGe[fbName]["boss" .. b]["zhuangbei" .. i]
+                    local slotKey = tostring(fbName) .. "_" .. tostring(b) .. "_" .. tostring(i)
+
+                    if txt and txt ~= "" then
+                        local id = SafeGetItemID(txt)
+                        if (id and id == targetID) or (link and (txt == link or txt:find(link, 1, true))) then
+                            local jine = BiaoGe[fbName]["boss" .. b]["jine" .. i]
+                            local maijia = BiaoGe[fbName]["boss" .. b]["maijia" .. i]
+                            local hasMoney = (jine and tonumber(jine) and tonumber(jine) > 0)
+                            local hasBuyer = (maijia and maijia ~= "")
+                            local isAuctioned = IsSlotAuctioned(slotKey)
+                            local isPending = IsSlotInPendingQueue(slotKey)
+
+                            -- 解析槽位文本中可能包含的数量后缀（例如 [北伐奖章]x2）
+                            local slotCount = 1
+                            local countMatch = txt:match("x(%d+)$") or txt:match("x(%d+)%s*$")
+                            if countMatch then
+                                slotCount = tonumber(countMatch) or 1
+                            end
+
+                            local bName = nil
+                            if BG and BG.Boss and BG.Boss[fbName] and BG.Boss[fbName]["boss" .. b] then
+                                bName = BG.Boss[fbName]["boss" .. b].name2 or BG.Boss[fbName]["boss" .. b].name
+                            end
+
+                            if checkAvailableOnly then
+                                -- 严格过滤：若该槽位已记账有金额、已有买家、此前已自动开拍过、或当前正处于待拍批次中，一律视为已占用槽位跳过
+                                if not hasMoney and not hasBuyer and not isAuctioned and not isPending then
+                                    return true, b, i, bName, fbName, slotKey, slotCount
+                                end
+                            else
+                                return true, b, i, bName, fbName, slotKey, slotCount
+                            end
+                        end
+                    else
+                        -- 槽位已被团长在表格中删空，自愈释放该槽位锁定
+                        if IsSlotAuctioned(slotKey) then
+                            ClearSlotAuctioned(slotKey)
+                        end
                     end
                 end
             end
         end
     end
-    if FB and BG and BG.Loot and BG.Loot.itemToBoss and BG.Loot.itemToBoss[FB] and BG.Loot.itemToBoss[FB][itemID] then
+    return false
+end
+AutoAuctionOnLoot.FindItemInBiaoGeTable = FindItemInBiaoGeTable
+
+-- 判断是否为套装代币 (Token) 或团本指定兑换物
+local function IsSetTokenOrRaidItem(itemID, link, name, FB)
+    if not itemID then return false end
+    local idNum = tonumber(itemID)
+
+    -- 1. BGLite 官方套装兑换物数据库匹配 (ExchangeItems)
+    if BG and BG.Loot then
+        if FB and BG.Loot[FB] and BG.Loot[FB].ExchangeItems and (BG.Loot[FB].ExchangeItems[itemID] or (idNum and BG.Loot[FB].ExchangeItems[idNum])) then
+            return true
+        end
+        for fbKey, fbData in pairs(BG.Loot) do
+            if type(fbData) == "table" and fbData.ExchangeItems and (fbData.ExchangeItems[itemID] or (idNum and fbData.ExchangeItems[idNum])) then
+                return true
+            end
+        end
+    end
+
+    -- 2. 官方白名单物品 (如废墟技能书、萨弗拉斯之眼、源质矿石等)
+    if BG and BG.Loot and BG.Loot.whitelist and (BG.Loot.whitelist[itemID] or (idNum and BG.Loot.whitelist[idNum])) then
         return true
     end
 
-    -- 3. 白名单物品
-    if BG and BG.Loot and BG.Loot.whitelist and BG.Loot.whitelist[itemID] then
-        return true
-    end
-
-    -- 4. 套装代币名称特征模式匹配（涵盖全版本套装印记、兑换物、奖章）
+    -- 3. 套装代币专有名称特征模式匹配（严格限定专属前缀，绝不包含头盔/胸甲等泛用防具槽位词）
     local checkText = name or link or ""
-    if checkText:find("失落") or checkText:find("战败") or checkText:find("征服者") or checkText:find("保卫者")
-       or checkText:find("胜利者") or checkText:find("勇猛") or checkText:find("英雄") or checkText:find("圣洁")
-       or checkText:find("北伐") or checkText:find("十字军") or checkText:find("代币") or checkText:find("印记")
-       or checkText:find("徽记") or checkText:find("奖章") or checkText:find("之核") or checkText:find("雕像")
-       or checkText:find("硬币") or checkText:find("头盔") or checkText:find("胸甲") or checkText:find("护腿")
-       or checkText:find("肩铠") or checkText:find("护手") or checkText:find("护腕") or checkText:find("腰带")
-       or checkText:find("长靴") then
-        return true
+    local isTokenName = checkText:find("失落的") or checkText:find("战败的") or checkText:find("征服者的")
+       or checkText:find("保卫者的") or checkText:find("胜利者的") or checkText:find("勇猛") or checkText:find("英雄")
+       or checkText:find("圣洁勋服") or checkText:find("圣洁徽记") or checkText:find("北伐奖章") or checkText:find("十字军奖章")
+       or checkText:find("代币") or checkText:find("印记") or checkText:find("徽记") or checkText:find("奖章")
+       or checkText:find("兑换物")
+
+    if isTokenName then
+        local equipLoc = select(9, GetItemInfo(itemID))
+        -- 套装兑换物必须为非直接穿戴槽位
+        if not equipLoc or equipLoc == "" or equipLoc == "INVTYPE_NON_EQUIP" then
+            return true
+        elseif checkText:find("失落的") or checkText:find("战败的") or checkText:find("征服者的") or checkText:find("保卫者的") or checkText:find("胜利者的") or checkText:find("印记") then
+            return true
+        end
     end
 
     return false
@@ -499,7 +728,7 @@ function AutoAuctionOnLoot.IsItemAutoEnabled(itemID, FB)
 end
 
 -- 6. 统一的装备加入待拍队列入口
-function AutoAuctionOnLoot.QueueItemForAuction(link, explicitBossName, isManualTest, slotKey)
+function AutoAuctionOnLoot.QueueItemForAuction(link, explicitBossName, isManualTest, slotKey, requireInTable, count)
     EnsureOptions()
     if BiaoGe.options.autoAuctionOnLoot ~= 1 then return end
     if not CanInitiateAuction(isManualTest) then return end
@@ -508,19 +737,8 @@ function AutoAuctionOnLoot.QueueItemForAuction(link, explicitBossName, isManualT
     local itemID = GetItemInfoInstant(link)
     if not itemID then return end
 
-    -- 解析副本
-    local FB = (BG and BG.FB2) or (BG and BG.FB1) or "TOCtitan"
-
-    -- 核心：校验单件装备是否配置为【不自动拍卖】（保留最后人工处理）
-    if not AutoAuctionOnLoot.IsItemAutoEnabled(itemID, FB) then
-        if DEFAULT_CHAT_FRAME then
-            DEFAULT_CHAT_FRAME:AddMessage(format("|cff00BFFF[BGLite 自动拍卖]|r 装备：%s 已配置为【不自动拍卖】（保留人工处理），已跳过。", link))
-        end
-        return
-    end
-
-    -- 防重复防击穿判断 (若带 slotKey 槽位标识则允许同名多件掉落同时入队)
-    if IsRecentlyQueued(itemID, link, slotKey) then
+    -- 绝对物理防御：链接中直接包含白色 |cffffffff 或灰色 |cff9d9d9d 的物品，100% 绝对拦截！
+    if not isManualTest and (link:find("|cffffffff") or link:find("|cff9d9d9d")) then
         return
     end
 
@@ -533,6 +751,47 @@ function AutoAuctionOnLoot.QueueItemForAuction(link, explicitBossName, isManualT
         elseif link:find("|cffe6cc80") then quality = 6
         elseif link:find("|cff0070dd") then quality = 3
         else quality = 1 end
+    end
+
+    -- 绝对物理防御：灰色(0)和白色(1)物品绝对不进入拍卖流程！
+    if not isManualTest and quality and quality <= 1 then
+        return
+    end
+
+    -- 绿色(2)物品必须是官方白名单物品，否则一律拦截
+    if not isManualTest and quality == 2 and not (BG and BG.Loot and BG.Loot.whitelist and (BG.Loot.whitelist[itemID] or (tonumber(itemID) and BG.Loot.whitelist[tonumber(itemID)]))) then
+        return
+    end
+
+    -- 解析副本
+    local FB = (BG and BG.FB2) or (BG and BG.FB1) or "TOCtitan"
+
+    -- 核心关键机制：必须已被正式【记录进拍卖表格】且未开拍未结账，才展开自动拍卖！
+    local inTable, tableBossNum, tableSlot, tableBossName, foundFB, resolvedSlotKey, resolvedCount = FindItemInBiaoGeTable(itemID, link, FB, not isManualTest)
+    if not isManualTest and requireInTable and not inTable then
+        -- 未入库进金团拍卖表格，或该装备已售出/已开拍过，绝对不展开自动拍卖
+        return
+    end
+    if foundFB then FB = foundFB end
+    slotKey = slotKey or resolvedSlotKey
+    local finalCount = count or resolvedCount or 1
+
+    -- 绝对防线：若该表格槽位已完成自动拍卖过，终生绝不开拍第二次！
+    if not isManualTest and slotKey and IsSlotAuctioned(slotKey) then
+        return
+    end
+
+    -- 核心：校验单件装备是否配置为【不自动拍卖】（保留最后人工处理）
+    if not AutoAuctionOnLoot.IsItemAutoEnabled(itemID, FB) then
+        if DEFAULT_CHAT_FRAME then
+            DEFAULT_CHAT_FRAME:AddMessage(format("|cff00BFFF[BGLite 自动拍卖]|r 装备：%s 已配置为【不自动拍卖】（保留人工处理），已跳过。", link))
+        end
+        return
+    end
+
+    -- 防重复防击穿判断 (基于 slotKey 终生锁池与全局 45 秒防抖池双重防护)
+    if IsRecentlyQueued(itemID, link, slotKey) then
+        return
     end
 
     -- 判断是否为套装代币或团本指定拍卖品
@@ -548,15 +807,22 @@ function AutoAuctionOnLoot.QueueItemForAuction(link, explicitBossName, isManualT
         if classID == 0 or classID == 12 or bindType == 4 then return end
         -- 排除黑名单
         if BG and BG.Loot and BG.Loot.blacklist and BG.Loot.blacklist[itemID] then return end
-        -- 普通装备必须史诗(紫色 quality >= 4)及以上
-        if quality < 4 then return end
+        -- 普通装备必须史诗(紫色 quality >= 4)及以上，小团本允许蓝装(quality >= BG.lootQuality[FB])
+        local minQuality = (BG and BG.lootQuality and FB and BG.lootQuality[FB]) or 4
+        if quality < minQuality then return end
     else
         -- 是套装兑换物/团本掉落：绝对放行，仅过滤明确的黑名单
         if BG and BG.Loot and BG.Loot.blacklist and BG.Loot.blacklist[itemID] then return end
     end
 
-    -- 解析对应副本及 Boss
-    local bossName = explicitBossName
+    -- 解析对应副本及 Boss (优先采用表格中记录的准确 Boss 名称)
+    local bossName = tableBossName or explicitBossName
+
+    if not bossName or bossName == "" or bossName == "Boss掉落" then
+        if tableBossNum and BG and BG.Boss and FB and BG.Boss[FB] and BG.Boss[FB]["boss" .. tableBossNum] then
+            bossName = BG.Boss[FB]["boss" .. tableBossNum].name2 or BG.Boss[FB]["boss" .. tableBossNum].name
+        end
+    end
 
     if not bossName or bossName == "" or bossName == "Boss掉落" then
         if BG and BG.Frame and BG.Frame[FB] and BG.Maxb and BG.Maxb[FB] then
@@ -599,25 +865,36 @@ function AutoAuctionOnLoot.QueueItemForAuction(link, explicitBossName, isManualT
         presetMoney, presetTips = BG.GetAuctionPreset(FB, itemID)
     end
 
-    -- 队列查重
-    for _, queued in ipairs(pendingLootQueue) do
-        if queued.id == itemID and queued.link == link then
-            return
+    -- 待拍队列查重：按表格槽位 slotKey 查重，防止同一个格子重复入队；无槽位时按 itemID 和 link 查重
+    if slotKey and slotKey ~= "" then
+        for _, queued in ipairs(pendingLootQueue) do
+            if queued.slotKey == slotKey then
+                return
+            end
+        end
+    else
+        for _, queued in ipairs(pendingLootQueue) do
+            if queued.id == itemID and queued.link == link and (not queued.slotKey or queued.slotKey == "") then
+                return
+            end
         end
     end
 
-    MarkItemQueued(itemID, link)
+    MarkItemQueued(itemID, link, slotKey)
 
     tinsert(pendingLootQueue, {
         id = itemID,
         link = link,
+        count = finalCount,
         presetMoney = (presetMoney and tonumber(presetMoney) and tonumber(presetMoney) > 0) and tonumber(presetMoney) or nil,
         presetTips = presetTips,
         bossName = bossName,
+        slotKey = slotKey,
     })
 
     if DEFAULT_CHAT_FRAME then
-        DEFAULT_CHAT_FRAME:AddMessage(format("|cff00BFFF[BGLite 自动拍卖]|r 捕获掉落装备：%s（归属【%s】），已加入待拍批次...", link, bossName))
+        local countStr = (finalCount and finalCount > 1) and format(" x%d", finalCount) or ""
+        DEFAULT_CHAT_FRAME:AddMessage(format("|cff00BFFF[BGLite 自动拍卖]|r 捕获掉落装备：%s%s（归属【%s】），已加入待拍批次...", link, countStr, bossName))
     end
 
     -- 1.5 秒防抖窗口合并同 Boss 掉落
@@ -627,31 +904,7 @@ function AutoAuctionOnLoot.QueueItemForAuction(link, explicitBossName, isManualT
     debounceTimer = C_Timer.NewTimer(1.5, ProcessPendingAuctions)
 end
 
--- 7. 触发源 A：LOOT_OPENED (摸尸体/打开掉落列表时立即捕获)
-local lootOpenedFrame = CreateFrame("Frame")
-lootOpenedFrame:RegisterEvent("LOOT_OPENED")
-lootOpenedFrame:SetScript("OnEvent", function(self, event, ...)
-    EnsureOptions()
-    if BiaoGe.options.autoAuctionOnLoot ~= 1 then return end
-    if not CanInitiateAuction() then return end
-
-    local numItems = GetNumLootItems and GetNumLootItems()
-    if not numItems or numItems <= 0 then return end
-
-    local targetName = UnitName("target")
-    if not targetName or targetName == "" then
-        targetName = "Boss掉落"
-    end
-
-    for slot = 1, numItems do
-        local link = GetLootSlotLink(slot)
-        if link then
-            AutoAuctionOnLoot.QueueItemForAuction(link, targetName, false, "slot_" .. slot)
-        end
-    end
-end)
-
--- 8. 触发源 B：CHAT_MSG_LOOT (装备进包/分配时捕获，采用绝对可靠的通用超链接正则)
+-- 7. 触发源 A：CHAT_MSG_LOOT (仅当装备被 BGLite 确认【记录进拍卖表格】后延时捕获)
 local lootMsgFrame = CreateFrame("Frame")
 lootMsgFrame:RegisterEvent("CHAT_MSG_LOOT")
 lootMsgFrame:SetScript("OnEvent", function(self, event, msg, ...)
@@ -660,39 +913,98 @@ lootMsgFrame:SetScript("OnEvent", function(self, event, msg, ...)
     if BiaoGe.options.autoAuctionOnLoot ~= 1 then return end
     if not CanInitiateAuction() then return end
 
-    -- 使用通用超链接正则提取装备链接，完全避开易损坏的本地化全局字符串
-    local link = msg:match("(|c%x+|Hitem:%d+.-|h%[.-%]|h|r)")
-    if not link then return end
-
-    -- 校验归属：在团队/小队中，仅当该物品属于当前玩家（自己/分配者获得）时触发
-    local isMine = false
-    if msg:find("你获得了") or msg:find("你收到了") or msg:find("You receive loot") or msg:find("You create") then
-        isMine = true
-    end
-    if not isMine then
-        local myName = UnitName("player")
-        if myName and msg:find(myName) then
-            isMine = true
-        end
-    end
-
-    -- 若在组队状态且非当前玩家获得，则不在此处重复触发
-    if (IsInRaid() or IsInGroup()) and not isMine then
+    -- 第一道绝对防线：非掉落交互状态拦截（交易中、交易关闭3.5秒内、邮件、商店）直接物理丢弃！
+    local isNonLoot, reason = IsNonLootInteractionActive()
+    if isNonLoot then
         return
     end
 
-    AutoAuctionOnLoot.QueueItemForAuction(link, nil)
+    -- 使用通用超链接正则提取装备链接与可能存在的数量后缀 (如 x2)
+    local link, countText = msg:match("(|c%x+|Hitem:%d+.-|h%[.-%]|h|r)%s*x?(%d*)")
+    if not link then return end
+    local msgCount = tonumber(countText) or 1
+
+    -- 绝对防御：灰白色链接立即丢弃
+    if link:find("|cffffffff") or link:find("|cff9d9d9d") then return end
+
+    local itemID = SafeGetItemID(link) or (GetItemInfoInstant and GetItemInfoInstant(link))
+    if not itemID then return end
+
+    -- 延时多段对账：等待 BGLite 的 Loot.lua 完成对金团表格 (BiaoGe[FB]) 的自动录入
+    -- 阶段1：0.15秒（BGLite 延迟0.10秒写入）
+    -- 阶段2：0.40秒（兜底网络延迟或掉帧）
+    -- 阶段3：0.80秒（最终超时对账）
+    local function TryQueueAfterTableCheck(attempt)
+        attempt = attempt or 1
+        -- 异步回调中再次检测交易状态（防止在延时窗口内突然打开交易或产生交易事件）
+        if IsNonLootInteractionActive() then return end
+
+        local FB = (BG and BG.FB2) or (BG and BG.FB1) or "TOCtitan"
+        -- 严格模式查找：只匹配尚未开拍且未记账结账的有效槽位（排查已被待拍队列占用的槽位）
+        local inTable, b, i, bossName, foundFB, slotKey, slotCount = FindItemInBiaoGeTable(itemID, link, FB, true)
+        if inTable and slotKey then
+            local finalCount = (slotCount and slotCount > 1) and slotCount or msgCount
+            AutoAuctionOnLoot.QueueItemForAuction(link, bossName, false, slotKey, true, finalCount)
+        elseif attempt < 3 then
+            C_Timer.After(attempt == 1 and 0.25 or 0.40, function()
+                TryQueueAfterTableCheck(attempt + 1)
+            end)
+        end
+    end
+
+    C_Timer.After(0.15, function()
+        TryQueueAfterTableCheck(1)
+    end)
 end)
 
--- 9. 触发源 C：BG.AddLootItem 外部调用的额外兜底
+-- 8. 触发源 B：BG.AddLootItem 外部调用的额外兜底
 if BG and BG.AddLootItem then
     hooksecurefunc(BG, "AddLootItem", function(FB, numb, link, Texture, level, Hope, count, typeID, lootplayer)
         if not link then return end
+        EnsureOptions()
+        if BiaoGe.options.autoAuctionOnLoot ~= 1 then return end
+        if not CanInitiateAuction() then return end
+        if IsNonLootInteractionActive() then return end
+
         local bName = nil
         if numb and BG and BG.Boss and FB and BG.Boss[FB] and BG.Boss[FB]["boss" .. numb] then
             bName = BG.Boss[FB]["boss" .. numb].name2 or BG.Boss[FB]["boss" .. numb].name
         end
-        AutoAuctionOnLoot.QueueItemForAuction(link, bName)
+        -- 外部或手动调用 AddLootItem 录入表格时，延时 0.2 秒待表格写入完成后触发
+        C_Timer.After(0.2, function()
+            if IsNonLootInteractionActive() then return end
+            AutoAuctionOnLoot.QueueItemForAuction(link, bName, false, nil, true, count)
+        end)
+    end)
+end
+
+-- 9. 联动清空表格：当团长清空表格或某 Boss 掉落时，同步释放对应的已拍槽位记忆
+if BG and BG.ClearBiaoGeByIndex then
+    hooksecurefunc(BG, "ClearBiaoGeByIndex", function(FB, b)
+        if not FB or not b then return end
+        local db = GetAuctionedSlotsDB()
+        local prefix = tostring(FB) .. "_" .. tostring(b) .. "_"
+        for k in pairs(db) do
+            if k:find("^" .. prefix) then
+                db[k] = nil
+            end
+        end
+    end)
+end
+
+if BG and BG.ClearBiaoGe then
+    hooksecurefunc(BG, "ClearBiaoGe", function(_type, FB)
+        local db = GetAuctionedSlotsDB()
+        if FB then
+            local prefix = tostring(FB) .. "_"
+            for k in pairs(db) do
+                if k:find("^" .. prefix) then
+                    db[k] = nil
+                end
+            end
+        else
+            wipe(db)
+        end
     end)
 end
 
@@ -707,11 +1019,23 @@ SlashCmdList["BGLOOTCMD"] = function(msg)
     elseif arg == "off" then
         BiaoGe.options.autoAuctionOnLoot = 0
         DEFAULT_CHAT_FRAME:AddMessage("|cff00BFFF[BGLite]|r 掉落自动拍卖功能已：|cffff0000关闭|r")
+    elseif arg == "reset" then
+        ResetAllAuctionedSlots()
+        wipe(recentQueuedItems)
+        DEFAULT_CHAT_FRAME:AddMessage("|cff00BFFF[BGLite]|r |cff00ff00已清空全部已自动拍卖槽位记忆，新掉落或重新录入可再次触发自动拍卖。|r")
     elseif arg == "test" then
         DEFAULT_CHAT_FRAME:AddMessage("|cff00BFFF[BGLite]|r 正在模拟拾取 2 件装备测试自动拍卖...")
         local testItems = {
-            { id = 40395, link = "|cffa335ee|Hitem:40395::::::::80:::::::::|h[火炬]|h|r", bossName = "测试 Boss", presetMoney = 1000 },
-            { id = 40384, link = "|cffa335ee|Hitem:40384::::::::80:::::::::|h[背叛者的下场]|h|r", bossName = "测试 Boss", presetMoney = nil },
+            { id = 40395, link = "|cffa335ee|Hitem:40395::::::::80:::::::::|h[火炬]|h|r", bossName = "测试 Boss", presetMoney = 1000, slotKey = "test_1", count = 1 },
+            { id = 40384, link = "|cffa335ee|Hitem:40384::::::::80:::::::::|h[背叛者的下场]|h|r", bossName = "测试 Boss", presetMoney = nil, slotKey = "test_2", count = 1 },
+        }
+        local frame = GetOrCreateCountDownFrame()
+        frame:StartCountdown(testItems, "测试 Boss")
+    elseif arg == "testsame" then
+        DEFAULT_CHAT_FRAME:AddMessage("|cff00BFFF[BGLite]|r 正在模拟拾取 2 件相同装备测试自动拍卖...")
+        local testItems = {
+            { id = 40395, link = "|cffa335ee|Hitem:40395::::::::80:::::::::|h[火炬]|h|r", bossName = "测试 Boss", presetMoney = 1000, slotKey = "test_same_1", count = 1 },
+            { id = 40395, link = "|cffa335ee|Hitem:40395::::::::80:::::::::|h[火炬]|h|r", bossName = "测试 Boss", presetMoney = 1000, slotKey = "test_same_2", count = 1 },
         }
         local frame = GetOrCreateCountDownFrame()
         frame:StartCountdown(testItems, "测试 Boss")
@@ -728,14 +1052,19 @@ SlashCmdList["BGLOOTCMD"] = function(msg)
         local statusStr = (BiaoGe.options.autoAuctionOnLoot == 1) and "|cff00ff00开启|r" or "|cffff0000关闭|r"
         local instantStr = (BiaoGe.options.autoAuctionInstant == 1) and "|cffff8000极速秒拍|r" or "|cff00ff005秒倒计时确认|r"
         local canAuction = CanInitiateAuction() and "|cff00ff00拥有发起权限|r" or "|cffff0000无权限(非团长/非分配者)|r"
+        local db = GetAuctionedSlotsDB()
+        local slotCount = 0
+        for _ in pairs(db) do slotCount = slotCount + 1 end
         DEFAULT_CHAT_FRAME:AddMessage("|cff00BFFF[BGLite 掉落自动拍卖状态]|r")
         DEFAULT_CHAT_FRAME:AddMessage("  - 当前功能开关: " .. statusStr)
         DEFAULT_CHAT_FRAME:AddMessage("  - 开拍触发模式: " .. instantStr)
         DEFAULT_CHAT_FRAME:AddMessage("  - 当前团长/分配权限: " .. canAuction)
         DEFAULT_CHAT_FRAME:AddMessage("  - 待拍池当前积压件数: " .. #pendingLootQueue)
+        DEFAULT_CHAT_FRAME:AddMessage("  - 已锁定的已拍槽位记忆: " .. slotCount .. " 个")
         DEFAULT_CHAT_FRAME:AddMessage("可用指令：")
         DEFAULT_CHAT_FRAME:AddMessage("  /bgloot on       - 启用掉落自动拍卖")
         DEFAULT_CHAT_FRAME:AddMessage("  /bgloot off      - 关闭掉落自动拍卖")
+        DEFAULT_CHAT_FRAME:AddMessage("  /bgloot reset    - 重置已拍槽位记忆(允许重新自动开拍)")
         DEFAULT_CHAT_FRAME:AddMessage("  /bgloot test     - 模拟 2 件装备弹出倒计时测试")
         DEFAULT_CHAT_FRAME:AddMessage("  /bgloot [装备]   - 手动输入装备链接测试加入队列")
     end
