@@ -329,10 +329,10 @@ function LH.CreateMainFrame(parent)
     summaryText:SetText("")
     f.summaryText = summaryText
 
-    -- 搜索框
+    -- 搜索框 (向左调整X轴起始位置，预留出右侧复选框与操作按钮的总宽度，彻底避免窄窗口时清空按钮溢出到外面)
     local searchBox = CreateFrame("EditBox", nil, f, "SearchBoxTemplate")
-    searchBox:SetSize(160, 22)
-    searchBox:SetPoint("TOPRIGHT", f, "TOPRIGHT", -380, -32)
+    searchBox:SetSize(150, 22)
+    searchBox:SetPoint("TOPRIGHT", f, "TOPRIGHT", -460, -32)
     searchBox:SetAutoFocus(false)
     searchBox.Instructions:SetText("搜索玩家或装备...")
     searchBox:HookScript("OnTextChanged", function(self)
@@ -343,7 +343,7 @@ function LH.CreateMainFrame(parent)
     -- 复选框 1：仅看未记入表格
     local chkOnlyNotTabled = CreateFrame("CheckButton", nil, f, "UICheckButtonTemplate")
     chkOnlyNotTabled:SetSize(22, 22)
-    chkOnlyNotTabled:SetPoint("LEFT", searchBox, "RIGHT", 15, 0)
+    chkOnlyNotTabled:SetPoint("LEFT", searchBox, "RIGHT", 10, 0)
     chkOnlyNotTabled.text = chkOnlyNotTabled:CreateFontString(nil, "OVERLAY")
     chkOnlyNotTabled.text:SetFont(BIAOGE_TEXT_FONT, 13, "OUTLINE")
     chkOnlyNotTabled.text:SetPoint("LEFT", chkOnlyNotTabled, "RIGHT", 2, 0)
@@ -358,7 +358,7 @@ function LH.CreateMainFrame(parent)
     -- 复选框 2：仅看史诗/精良
     local chkOnlyRare = CreateFrame("CheckButton", nil, f, "UICheckButtonTemplate")
     chkOnlyRare:SetSize(22, 22)
-    chkOnlyRare:SetPoint("LEFT", chkOnlyNotTabled.text, "RIGHT", 12, 0)
+    chkOnlyRare:SetPoint("LEFT", chkOnlyNotTabled.text, "RIGHT", 10, 0)
     chkOnlyRare.text = chkOnlyRare:CreateFontString(nil, "OVERLAY")
     chkOnlyRare.text:SetFont(BIAOGE_TEXT_FONT, 13, "OUTLINE")
     chkOnlyRare.text:SetPoint("LEFT", chkOnlyRare, "RIGHT", 2, 0)
@@ -372,8 +372,8 @@ function LH.CreateMainFrame(parent)
 
     -- 操作按钮：通报未记入
     local btnReport = BG.CreateButton(f)
-    btnReport:SetSize(80, 22)
-    btnReport:SetPoint("LEFT", chkOnlyRare.text, "RIGHT", 15, 0)
+    btnReport:SetSize(78, 22)
+    btnReport:SetPoint("LEFT", chkOnlyRare.text, "RIGHT", 10, 0)
     btnReport:SetText("通报未记")
     btnReport:SetScript("OnClick", function()
         LH.ReportUnTabledItems()
@@ -383,8 +383,8 @@ function LH.CreateMainFrame(parent)
 
     -- 操作按钮：清空记录
     local btnClear = BG.CreateButton(f)
-    btnClear:SetSize(75, 22)
-    btnClear:SetPoint("LEFT", btnReport, "RIGHT", 8, 0)
+    btnClear:SetSize(72, 22)
+    btnClear:SetPoint("LEFT", btnReport, "RIGHT", 6, 0)
     btnClear:SetText("清空本场")
     btnClear:SetScript("OnClick", function()
         StaticPopupDialogs["BGLITE_CLEAR_LOOT_HISTORY"] = {
@@ -431,7 +431,7 @@ function LH.CreateMainFrame(parent)
         { name = "拾取人", width = 110, justify = "LEFT" },
         { name = "掉落物品", width = 280, justify = "LEFT" },
         { name = "数量", width = 50, justify = "CENTER" },
-        { name = "金团账本状态 (防漏少记)", width = 190, justify = "LEFT" },
+        { name = "金团账本状态", width = 190, justify = "LEFT" },
     }
 
     local curX = 6
@@ -795,9 +795,9 @@ function LH.RefreshScrollView()
             -- 账本状态 (已记入 / 红色未记入)
             if data.isTabled then
                 local bName = data.tabledBoss and (" (" .. data.tabledBoss .. ")") or ""
-                row.tStatus:SetText(BG.STC_g1("✔ 已记入表格" .. bName))
+                row.tStatus:SetText(BG.STC_g1("已记入表格" .. bName))
             else
-                row.tStatus:SetText(BG.STC_r1("✖ 未记入表格 (请核对!)"))
+                row.tStatus:SetText(BG.STC_r1("未记入表格"))
             end
 
             row:Show()

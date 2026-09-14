@@ -1268,7 +1268,7 @@ function BG.SetFBCD(self, position, click, refresh)
             mainFrame:SetClampedToScreen(true)
             mainFrame:EnableMouse(false)
             mainFrame:SetMovable(false)
-            if position and position == "minimap" then
+            if position and (position == "minimap" or position == "mainIcon") then
                 if SafeButtonIsInRight(self) then
                     if SafeButtonIsInTop(self) then
                         mainFrame:SetPoint("TOPRIGHT", self, "BOTTOMLEFT", 0, 0)

@@ -718,12 +718,27 @@ function AutoAuctionOnLoot.IsItemAutoEnabled(itemID, FB)
     end
 
     -- 5. 橙装 (Legendary, quality == 5) 出厂保护：默认必须人工处理，除非团长显式配置为开启 (1)
-    local _, _, quality = GetItemInfo(itemID)
+    local name, link, quality = GetItemInfo(itemID)
     if quality == 5 then
         return false -- 橙装默认不自动，保留人工处理
     end
 
-    -- 6. 普通装备默认跟随全局开启
+    -- 5.1 图纸配方保护 (设计图/图样/配方/结构图)：默认必须人工处理，除非团长在预设面板显式勾选开启 (1)
+    local checkName = name or link or (ns.ItemNameDB and ns.ItemNameDB[itemID]) or ""
+    if checkName:find("设计图", 1, true) or checkName:find("图样", 1, true) or checkName:find("配方", 1, true) or checkName:find("结构图", 1, true) then
+        return false -- 图纸配方默认绝不自动开拍，保留人工处理
+    end
+
+    -- 6. 普通装备保护：必须配置过预设起拍底价！未设底价的新装备绝不自动开拍，保留人工处理！
+    if BG and BG.GetAuctionPreset then
+        local presetMoney = BG.GetAuctionPreset(FB, itemID)
+        local priceNum = tonumber(presetMoney) or 0
+        if priceNum <= 0 then
+            return false -- 无预设起拍底价，默认不自动开拍，保留人工处理！
+        end
+    end
+
+    -- 7. 已配置底价的普通装备跟随全局开启
     return true
 end
 
@@ -784,7 +799,7 @@ function AutoAuctionOnLoot.QueueItemForAuction(link, explicitBossName, isManualT
     -- 核心：校验单件装备是否配置为【不自动拍卖】（保留最后人工处理）
     if not AutoAuctionOnLoot.IsItemAutoEnabled(itemID, FB) then
         if DEFAULT_CHAT_FRAME then
-            DEFAULT_CHAT_FRAME:AddMessage(format("|cff00BFFF[BGLite 自动拍卖]|r 装备：%s 已配置为【不自动拍卖】（保留人工处理），已跳过。", link))
+            DEFAULT_CHAT_FRAME:AddMessage(format("|cff00BFFF[BGLite 自动拍卖]|r 装备：%s 未配置开启或未设预设底价（保留人工处理），已跳过自动拍卖。", link))
         end
         return
     end

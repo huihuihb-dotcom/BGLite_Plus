@@ -70,6 +70,66 @@ local function HookMinimap()
     end
 end
 
+local function HookMainIcon()
+    local f = BG.MainIcon
+    if not f then return end
+    if f._hasHookedPlusHover then return end
+    f._hasHookedPlusHover = true
+
+    f:SetScript("OnEnter", function(self)
+        if self.isMoving then return end
+        if (not BG.FBCDall_table or #BG.FBCDall_table == 0) and BG.RoleOverviewUI then
+            pcall(BG.RoleOverviewUI)
+        end
+        if BG.SetFBCD then
+            local ok, err = pcall(BG.SetFBCD, self, "mainIcon")
+            if not ok and BG.FBCDFrame and not BG.FBCDFrame.click then
+                SafeHide(BG.FBCDFrame)
+            end
+        end
+    end)
+
+    local orig_OnLeave = f:GetScript("OnLeave")
+    f:SetScript("OnLeave", function(self)
+        if BG.FBCDFrame and not BG.FBCDFrame.click then
+            SafeHide(BG.FBCDFrame)
+        end
+        GameTooltip:Hide()
+        if orig_OnLeave then
+            orig_OnLeave(self)
+        end
+    end)
+
+    f:HookScript("OnDragStart", function(self)
+        if BG.FBCDFrame and not BG.FBCDFrame.click then
+            SafeHide(BG.FBCDFrame)
+        end
+    end)
+
+    local orig_OnMouseUp = f:GetScript("OnMouseUp")
+    if orig_OnMouseUp then
+        f:SetScript("OnMouseUp", function(self, button)
+            if not self.isMoving and button == "LeftButton" and not IsControlKeyDown() then
+                if BG.FBCDFrame and not BG.FBCDFrame.click then
+                    SafeHide(BG.FBCDFrame)
+                end
+            end
+            orig_OnMouseUp(self, button)
+        end)
+    end
+end
+
+local function HookMainIconOptionClick()
+    if BG and BG.options and BG.options["buttonmainIcon"] and not BG.options["buttonmainIcon"]._hasHookedMainIconClick then
+        BG.options["buttonmainIcon"]._hasHookedMainIconClick = true
+        BG.options["buttonmainIcon"]:HookScript("OnClick", function(self)
+            if self:GetChecked() then
+                C_Timer.After(0.05, HookMainIcon)
+            end
+        end)
+    end
+end
+
 local function HideAllSubFrames()
     if BG.ItemLibMainFrame then
         SafeHide(BG.ItemLibMainFrame)
@@ -159,6 +219,8 @@ local function InitPlusUI()
             if ns.InitAuctionPresetOptions then
                 ns.InitAuctionPresetOptions()
             end
+            HookMainIcon()
+            HookMainIconOptionClick()
         end)
     end
     if ns.InitAuctionPresetOptions then
@@ -703,8 +765,10 @@ local function InitPlusUI()
         end)
     end
 
-    -- 8. 小地图钩子
+    -- 8. 小地图与悬浮窗钩子
     HookMinimap()
+    HookMainIcon()
+    HookMainIconOptionClick()
 
     -- 9. 底部 Plus 版本控件
     if ns.CreatePlusVerFrame then
@@ -718,9 +782,20 @@ frame:RegisterEvent("PLAYER_ENTERING_WORLD")
 frame:SetScript("OnEvent", function(self, event)
     InitPlusUI()
     HookMinimap()
+    HookMainIcon()
+    HookMainIconOptionClick()
     if ns.CreatePlusVerFrame then
         ns.CreatePlusVerFrame()
     end
+    -- 延迟多阶段兜底，确保在不同客户端加载时机下 100% 成功挂载悬浮窗
+    C_Timer.After(0.2, function()
+        HookMainIcon()
+        HookMainIconOptionClick()
+    end)
+    C_Timer.After(1.0, function()
+        HookMainIcon()
+        HookMainIconOptionClick()
+    end)
 end)
 
 --------------------------------------------------------------------------------

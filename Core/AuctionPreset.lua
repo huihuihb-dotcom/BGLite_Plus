@@ -393,7 +393,7 @@ function ns.InitAuctionPresetModule()
                                     itemInfoCache[itemID] = itemInfoCache[itemID] or {}
                                     itemInfoCache[itemID].name = cachedName
                                 end
-                                tinsert(items, { itemID = itemID, bossNum = b, hard = "N", cachedName = cachedName })
+                                tinsert(items, { itemID = itemID, bossNum = b, hard = "N", cachedName = cachedName, isDynamic = true })
                                 PreloadItemInfo(itemID)
                             end
                         end
@@ -509,6 +509,7 @@ function ns.InitAuctionPresetModule()
                     tips = tVal,
                     autoAuction = aVal, -- nil: 默认跟随, 1: 开启, 0: 关闭(人工处理)
                     bossNum = item.bossNum,
+                    isDynamic = item.isDynamic,
                 })
             end
         end
@@ -598,6 +599,26 @@ function ns.InitAuctionPresetModule()
                     row.indexText:SetText(tostring(idx))
                     row.levelText:SetText(data.level > 0 and tostring(data.level) or "")
 
+                    -- 价格与起拍语输入框
+                    row.priceEdit:SetText(data.price > 0 and tostring(data.price) or "")
+                    row.tipsEdit:SetText(data.tips or "")
+
+                    -- 自动拍卖复选框渲染 (橙装、动态新增项、图纸配方、或未设底价的新装备：默认绝对不自动开拍，保留人工处理！)
+                    local function UpdateAutoCheckState(currentDisplayName)
+                        if row.autoCheck then
+                            local isAuto
+                            local checkText = currentDisplayName or data.link or data.name or (ns.ItemNameDB and ns.ItemNameDB[data.itemID]) or (itemInfoCache[data.itemID] and itemInfoCache[data.itemID].name) or ""
+                            local isRecipe = checkText:find("设计图", 1, true) or checkText:find("图样", 1, true) or checkText:find("配方", 1, true) or checkText:find("结构图", 1, true)
+                            local priceNum = tonumber(data.price) or 0
+                            if data.quality == 5 or data.isDynamic or isRecipe or (data.autoAuction == nil and priceNum <= 0) then
+                                isAuto = (data.autoAuction == 1) -- 必须显式主动勾选(1)才开启，否则默认未勾选(0)！
+                            else
+                                isAuto = (data.autoAuction == nil) or (data.autoAuction == 1)
+                            end
+                            row.autoCheck:SetChecked(isAuto)
+                        end
+                    end
+
                     -- 异步获取装备完整信息并实时渲染
                     local function RenderRowItem()
                         local name, link, quality, level, _, _, _, _, _, texture = GetItemInfo(data.itemID)
@@ -630,6 +651,8 @@ function ns.InitAuctionPresetModule()
                         row.nameText:SetText(displayName)
                         row.levelText:SetText(level and level > 0 and tostring(level) or (data.level > 0 and tostring(data.level) or ""))
                         row.levelText:SetTextColor(r, g, b)
+
+                        UpdateAutoCheckState(displayName)
                     end
 
                     RenderRowItem()
@@ -638,21 +661,6 @@ function ns.InitAuctionPresetModule()
                             RenderRowItem()
                         end
                     end)
-
-                    -- 价格与起拍语输入框
-                    row.priceEdit:SetText(data.price > 0 and tostring(data.price) or "")
-                    row.tipsEdit:SetText(data.tips or "")
-
-                    -- 自动拍卖复选框渲染 (橙装 quality == 5 默认必须人工处理；普通装备默认开启自动)
-                    if row.autoCheck then
-                        local isAuto
-                        if data.quality == 5 then
-                            isAuto = (data.autoAuction == 1)
-                        else
-                            isAuto = (data.autoAuction == nil) or (data.autoAuction == 1)
-                        end
-                        row.autoCheck:SetChecked(isAuto)
-                    end
 
                     row:Show()
                 else
@@ -986,8 +994,14 @@ function ns.InitAuctionPresetModule()
                     -- 全部关闭：所有装备人工处理
                     val = 0
                 elseif mode == "default" then
-                    -- 恢复默认规则：去掉橙装、蓝绿装、套装等（设为不自动人工处理），普通紫装开启自动
-                    if isLegendary or isLowQuality or isToken then
+                    -- 恢复默认规则：去掉橙装、蓝绿装、套装、图纸配方、动态新增项及无底价项（设为不自动人工处理），普通紫装开启自动
+                    local itemName, itemLink = GetItemInfo(itemID)
+                    local checkName = itemName or itemLink or item.cachedName or (ns.ItemNameDB and ns.ItemNameDB[itemID]) or ""
+                    local isRecipe = checkName:find("设计图", 1, true) or checkName:find("图样", 1, true) or checkName:find("配方", 1, true) or checkName:find("结构图", 1, true)
+                    local presetMoney = BG.GetAuctionPreset and BG.GetAuctionPreset(currentFB, itemID)
+                    local priceNum = tonumber(presetMoney) or 0
+                    local hasPrice = (priceNum > 0)
+                    if isLegendary or isLowQuality or isToken or isRecipe or item.isDynamic or not hasPrice then
                         val = 0 -- 不自动 (人工处理)
                     else
                         val = 1 -- 自动
