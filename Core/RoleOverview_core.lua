@@ -1592,27 +1592,31 @@ function BG.SetFBCD(self, position, click, refresh)
                     for questName, v in pairs(_G[db].QuestCD[realmID][player]) do
                         for ii, vv in ipairs(FBCDchoice_table) do
                             if questName == vv.name then
-                                local x, y = GetYesPoint(FBCDchoice_table, ii, text_table, n, playerIndex, isNewUI)
-                                if v.count then
-                                    local t = mainFrame:CreateFontString()
-                                    t:SetPoint("CENTER", BG.FBCDFrame, "TOPLEFT", x, y)
-                                    t:SetFont(BIAOGE_TEXT_FONT, fontsize, "OUTLINE")
-                                    t:SetText(v.count)
-                                    local max = GetMaxDailyQuests()
-                                    if max > 0 and v.count >= max then
-                                        t:SetTextColor(1, 0, 0)
+                                local curTime = GetServerTime and GetServerTime() or time()
+                                local isExpired = (v.endtime and curTime >= v.endtime)
+                                if not isExpired then
+                                    local x, y = GetYesPoint(FBCDchoice_table, ii, text_table, n, playerIndex, isNewUI)
+                                    if v.count then
+                                        local t = mainFrame:CreateFontString()
+                                        t:SetPoint("CENTER", BG.FBCDFrame, "TOPLEFT", x, y)
+                                        t:SetFont(BIAOGE_TEXT_FONT, fontsize, "OUTLINE")
+                                        t:SetText(v.count)
+                                        local max = GetMaxDailyQuests()
+                                        if max > 0 and v.count >= max then
+                                            t:SetTextColor(1, 0, 0)
+                                        else
+                                            t:SetTextColor(1, .82, 0)
+                                        end
                                     else
-                                        t:SetTextColor(1, .82, 0)
-                                    end
-                                else
-                                    local t = BG.FBCDFrame:CreateTexture(nil, "OVERLAY")
-                                    t:SetSize(16, 16)
-                                    t:SetPoint("CENTER", BG.FBCDFrame, "TOPLEFT", x, y)
-                                    if v.notFinish then
-                                        t:SetTexture("interface/raidframe/readycheck-notready")
-                                        t:SetAlpha(.5)
-                                    else
-                                        t:SetTexture("interface/raidframe/readycheck-ready")
+                                        local t = BG.FBCDFrame:CreateTexture(nil, "OVERLAY")
+                                        t:SetSize(16, 16)
+                                        t:SetPoint("CENTER", BG.FBCDFrame, "TOPLEFT", x, y)
+                                        if v.notFinish then
+                                            t:SetTexture("interface/raidframe/readycheck-notready")
+                                            t:SetAlpha(.5)
+                                        else
+                                            t:SetTexture("interface/raidframe/readycheck-ready")
+                                        end
                                     end
                                 end
                             end

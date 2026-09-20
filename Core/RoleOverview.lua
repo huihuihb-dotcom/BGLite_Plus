@@ -79,6 +79,23 @@ function BG.RoleOverviewUI()
                 BiaoGe.FBCDchoice.TKtitan = 1
             end
         end)
+        -- 一次性自愈清洗：清除历史错误残留的 holiday CD 记录，使此前被异常写入明天到期的角色即时恢复干净无 CD 状态
+        BG.Once("CleanLegacyHolidayCD_260920", 260920, function()
+            for _, dbName in ipairs({ "BiaoGe", "BiaoGeAccounts" }) do
+                local db = _G[dbName]
+                if db and db.QuestCD then
+                    for rID, rData in pairs(db.QuestCD) do
+                        if type(rData) == "table" then
+                            for pName, pData in pairs(rData) do
+                                if type(pData) == "table" and pData.holiday then
+                                    pData.holiday = nil
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+        end)
     end
     if not BiaoGe.FBCDchoice then
         BiaoGe.FBCDchoice = {}
@@ -1459,8 +1476,8 @@ GameTooltip:SetCurrencyByID(697)
         end
         local function SaveDayQuest(questName, questID, count)
             local currentTimestamp = GetServerTime()
-            local secondsUntilNext7am = BG.GetNextDayTime()
-            local timestamp = currentTimestamp + secondsUntilNext7am
+            local secondsUntilNext7am, tomorrow7amTimestamp = BG.GetNextDayTime()
+            local timestamp = tomorrow7amTimestamp or (currentTimestamp + secondsUntilNext7am)
 
             local colorplayer = SetClassCFF(player, "player")
             BiaoGe.QuestCD[realmID][player][questName] = {
@@ -1550,14 +1567,57 @@ GameTooltip:SetCurrencyByID(697)
         end
 
         -- 节日本
-        local init
+        local initHoliday
         function BG.InitHoliday()
-            if init then return end
-            init = true
+            if initHoliday then return end
+            initHoliday = true
+
+            -- 1. 地下城查找器完成结算 (LFG_COMPLETION_REWARD)
             BG.RegisterEvent("LFG_COMPLETION_REWARD", function()
                 local dungeonID = select(10, GetInstanceInfo())
                 if dungeonID and BG.ValueInTable(holidayDungeonIDs, dungeonID) then
                     SaveDayQuest("holiday")
+                end
+            end)
+
+            -- 2. 副本内摸到节日专属宝箱 (CHAT_MSG_LOOT) - 仅在副本内生效，严禁背包物品扫描
+            local holidayChestIDs = {
+                [54536] = true, -- 桶装宝箱 (美酒节)
+                [54537] = true, -- 塞满的南瓜 (万圣节)
+                [54538] = true, -- 心型护盒 (情人节)
+                [54535] = true, -- 结冰的袋子 (火焰节)
+            }
+            BG.RegisterEvent("CHAT_MSG_LOOT", function(self, event, msg)
+                if not msg then return end
+                local inInstance = IsInInstance()
+                if not inInstance then return end
+                for chestID in pairs(holidayChestIDs) do
+                    if msg:find("item:" .. chestID) then
+                        SaveDayQuest("holiday")
+                        break
+                    end
+                end
+            end)
+
+            -- 3. 节日 Boss 击杀监听 (科林·烈酒 23872, 洛瑟里士 23682/23775, 药剂师汉弗莱 36296, 埃霍恩 25740)
+            local holidayBossIDs = {
+                [23872] = true, -- 科林·烈酒
+                [23682] = true, -- 洛瑟里士
+                [23775] = true, -- 洛瑟里士之影
+                [36296] = true, -- 药剂师汉弗莱
+                [25740] = true, -- 埃霍恩
+            }
+            BG.RegisterEvent("COMBAT_LOG_EVENT_UNFILTERED", function()
+                local _, subEvent, _, _, _, _, _, destGUID = CombatLogGetCurrentEventInfo()
+                if subEvent == "UNIT_DIED" and destGUID then
+                    local npcID = select(6, strsplit("-", destGUID))
+                    npcID = tonumber(npcID)
+                    if npcID and holidayBossIDs[npcID] then
+                        local inInstance, instanceType = IsInInstance()
+                        if inInstance and (instanceType == "party" or instanceType == "scenario") then
+                            SaveDayQuest("holiday")
+                        end
+                    end
                 end
             end)
         end
@@ -1577,7 +1637,7 @@ GameTooltip:SetCurrencyByID(697)
             for _, db in pairs({ "BiaoGe", "BiaoGeAccounts" }) do
                 if _G[db] and _G[db].QuestCD then
                     for realmID in pairs(_G[db].QuestCD) do
-                        if type(realmID) == "number" and type(_G[db].QuestCD[realmID]) == "table" then
+                        if (type(realmID) == "number" or tonumber(realmID)) and type(_G[db].QuestCD[realmID]) == "table" then
                             for player in pairs(_G[db].QuestCD[realmID]) do
                                 local questList = {}
                                 for questName in pairs(_G[db].QuestCD[realmID][player]) do
@@ -1642,7 +1702,9 @@ GameTooltip:SetCurrencyByID(697)
             UpdateDayQuestCount()
         end
 
+        BG.InitHoliday()
         BG.Init2(function()
+            BG.InitHoliday()
             BG.After(3, function()
                 CheckQuestsCompleted()
                 UpdateQuestEndTime()
