@@ -261,6 +261,13 @@ local function OnLootCaptured(lootPlayer, itemLink, count)
     local fb = BG.FB1 or "TOC"
     local db = LH.GetHistoryDB(fb)
 
+    -- 实时记录当前副本表格的打本真实开始与活跃时间
+    if BiaoGe and BiaoGe[fb] then
+        local nowTs = (GetServerTime and GetServerTime()) or time()
+        BiaoGe[fb].raidTime = BiaoGe[fb].raidTime or nowTs
+        BiaoGe[fb].lastRaidTime = nowTs
+    end
+
     local pClass = GetPlayerClass(lootPlayer)
     local timeStr = date("%H:%M:%S")
 

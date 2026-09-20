@@ -146,6 +146,9 @@ local function HideAllSubFrames()
     if BG.LootHistoryMainFrame then
         SafeHide(BG.LootHistoryMainFrame)
     end
+    if BG.WorkerReportMainFrame then
+        SafeHide(BG.WorkerReportMainFrame)
+    end
     if _G["BG_RaidCompMatrixModalFrame"] then
         SafeHide(_G["BG_RaidCompMatrixModalFrame"])
     end
@@ -436,6 +439,33 @@ local function InitPlusUI()
         securecall(ns.InitRaidCompModule)
     end
 
+    -- 4.7 打工人收益看板模块初始化 (WorkerReport)
+    if ns.WorkerReport and ns.WorkerReport.CreateUI then
+        securecall(ns.WorkerReport.CreateUI, BG.MainFrame)
+        BG.WorkerReportMainFrame = ns.WorkerReport.MainFrame
+    end
+
+    if BG.WorkerReportMainFrame then
+        BG.WorkerReportMainFrame:SetScript("OnShow", function(self)
+            BG.FrameHide(0)
+            SafeHide(BG.FBMainFrame)
+            SafeHide(BG.ItemLibMainFrame)
+            SafeHide(BG.HopeMainFrame)
+            SafeHide(BG.DuiZhangMainFrame)
+            SafeHide(BG.HistoryMainFrame)
+            SafeHide(BG.RaidToolMainFrame)
+            SafeHide(BG.TradeHistoryMainFrame)
+            SafeHide(BG.AuctionPresetMainFrame)
+            SafeHide(BG.TitanGoblinMainFrame)
+            if BG.LootHistoryMainFrame then SafeHide(BG.LootHistoryMainFrame) end
+            SafeHide(BG.TabButtonsFB)
+            BiaoGe.lastFrame = "WorkerReport"
+            if ns.WorkerReport and ns.WorkerReport.UpdateUI then
+                pcall(ns.WorkerReport.UpdateUI)
+            end
+        end)
+    end
+
     -- 5. 挂载底部 TabButtons
     BG.ItemLibMainFrameTabNum = BG.ItemLibMainFrameTabNum or 20
     BG.HopeMainFrameTabNum = BG.HopeMainFrameTabNum or 21
@@ -465,6 +495,21 @@ local function InitPlusUI()
                 end, 0.5, true)
             end
         end
+
+        BG.WorkerReportMainFrameTabNum = BG.WorkerReportMainFrameTabNum or 108
+        if not BG.ButtonTabWorkerReport and BG.WorkerReportMainFrame then
+            BG.ButtonTabWorkerReport = BG.Create_TabButton(BG.WorkerReportMainFrameTabNum, L["团本报表"] or "团本报表", BG.WorkerReportMainFrame, 90)
+            if BG.OnEnterDelay then
+                BG.OnEnterDelay(BG.ButtonTabWorkerReport, function(self)
+                    GameTooltip:SetOwner(self, "ANCHOR_TOPLEFT", 0, 0)
+                    GameTooltip:ClearLines()
+                    GameTooltip:AddLine(L["< 团本报表 >"] or "< 团本报表 >", 0, 0.75, 1, true)
+                    GameTooltip:AddLine(L["周四07:00重置CD，多角色打工收益、装备消费与资金总览。"] or "周四07:00重置CD，多角色打工收益、装备消费与资金总览。", 1, 0.82, 0, true)
+                    GameTooltip:AddLine(L["由 BGLite_Plus 波比兔 出品"] or "由 BGLite_Plus 波比兔 出品", 0.5, 0.5, 0.5, true)
+                    GameTooltip:Show()
+                end, 0.5, true)
+            end
+        end
     end
 
     -- 5.1 底部 Tab 栏逻辑排序与绝对居中对齐机制
@@ -472,19 +517,20 @@ local function InitPlusUI()
         if not (BG and BG.tabButtons and BG.MainFrame) then return end
 
         -- 逻辑权重排序表：
-        -- 1. 表格 -> 2. 对账 -> 3. 交易记录 -> 4. 邮件记录 (账务与流水成组紧随表格)
-        -- 5. 预设价格 -> 6. 装备库 -> 7. 心愿清单 -> 8. 团队工具 (金团辅助与扩展工具平滑衔接)
+        -- 1. 表格 -> 2. 对账 -> 3. 交易记录 -> 4. 邮件记录 -> 5. 团本报表 (账务与打工收益成组紧随表格)
+        -- 6. 预设价格 -> 7. 装备库 -> 8. 心愿清单 -> 9. 团队工具 -> 10. 碎片统计 -> 11. 掉落记录
         local TAB_ORDER = {
             [BG.FBMainFrameTabNum or 1] = 1,              -- 表格
             [BG.DuiZhangMainFrameTabNum or 2] = 2,         -- 对账
             [BG.TradeHistoryMainFrameTabNum or 101] = 3,   -- 交易记录
             [BG.MailHistoryMainFrameTabNum or 102] = 4,    -- 邮件记录
-            [BG.AuctionPresetMainFrameTabNum or 104] = 5,  -- 预设价格
-            [BG.ItemLibMainFrameTabNum or 20] = 6,         -- 装备库
-            [BG.HopeMainFrameTabNum or 21] = 7,            -- 心愿清单
-            [BG.RaidToolMainFrameTabNum or 22] = 8,        -- 团队工具
-            [BG.TitanGoblinMainFrameTabNum or 105] = 9,   -- 碎片统计
-            [BG.LootHistoryMainFrameTabNum or 107] = 10,  -- 掉落记录
+            [BG.WorkerReportMainFrameTabNum or 108] = 5,   -- 团本报表
+            [BG.AuctionPresetMainFrameTabNum or 104] = 6,  -- 预设价格
+            [BG.ItemLibMainFrameTabNum or 20] = 7,         -- 装备库
+            [BG.HopeMainFrameTabNum or 21] = 8,            -- 心愿清单
+            [BG.RaidToolMainFrameTabNum or 22] = 9,        -- 团队工具
+            [BG.TitanGoblinMainFrameTabNum or 105] = 10,  -- 碎片统计
+            [BG.LootHistoryMainFrameTabNum or 107] = 11,  -- 掉落记录
         }
 
         local validItems = {}
@@ -784,6 +830,9 @@ frame:SetScript("OnEvent", function(self, event)
     if ns.CreatePlusVerFrame then
         ns.CreatePlusVerFrame()
     end
+    if ns.WorkerReport and ns.WorkerReport.CheckThursdayWeeklyReportNotice then
+        pcall(ns.WorkerReport.CheckThursdayWeeklyReportNotice)
+    end
     -- 延迟多阶段兜底，确保在不同客户端加载时机下 100% 成功挂载悬浮窗
     C_Timer.After(0.2, function()
         HookMainIcon()
@@ -800,7 +849,7 @@ end)
 --------------------------------------------------------------------------------
 ns.ver = (C_AddOns and C_AddOns.GetAddOnMetadata and C_AddOns.GetAddOnMetadata(AddonName, "Version"))
     or (GetAddOnMetadata and GetAddOnMetadata(AddonName, "Version"))
-    or "1.0.9"
+    or "1.1.0"
 
 BG.plusVer = ns.ver
 BG.raidPlusVersion = BG.raidPlusVersion or {}

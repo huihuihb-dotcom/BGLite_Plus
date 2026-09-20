@@ -1,13 +1,13 @@
 # BGLite_Plus - BGLite 全能增强功能包
 
 [![WoW Version](https://img.shields.io/badge/WoW-Classic%20%7C%20Titan%20%7C%20Retail-blue.svg)](https://worldofwarcraft.com)
-[![Version](https://img.shields.io/badge/Version-1.0.10-brightgreen.svg)]()
+[![Version](https://img.shields.io/badge/Version-1.1.0-brightgreen.svg)]()
 [![Platform](https://img.shields.io/badge/Platform-Windows-lightgrey.svg)]()
 [![License](https://img.shields.io/badge/License-MIT-orange.svg)]()
 
 **BGLite_Plus** 是专为魔兽世界怀旧服、泰坦时光服（Titan）、巫妖王之怒（WLK）、燃烧的远征（TBC）、大地的裂变（CTM）、熊猫人之谜（MOP）及经典旧世（Vanilla / SoD）打造的 **BGLite 全方位增强功能插件包**。
 
-在保持原生 BGLite 金团表格轻量高效的基础上，以**零侵入、纯挂接**的设计原则，无缝注入了**泰坦物资收益与碎片统计**、**自动交易防漏单安全修复**、**多角色多服团本CD总览**、**40人团队阵容拖拽调配**、**买家心理预算全自动竞拍**、**团长预设底价批量管理与Boss一键全开拍**、**团队关键信息留存抽屉**、**全频道语音号超链接生成**、**O键角色查询历史侧边栏**、**心愿清单追踪**及**装备库智能检索**等一系列强大功能。
+在保持原生 BGLite 金团表格轻量高效的基础上，以**零侵入、纯挂接**的设计原则，无缝注入了**团本报表（打工收益/消费总览/周四重置结算）**、**泰坦物资收益与碎片统计**、**自动交易防漏单安全修复**、**多角色多服团本CD总览**、**40人团队阵容拖拽调配**、**买家心理预算全自动竞拍**、**团长预设底价批量管理与Boss一键全开拍**、**团队关键信息留存抽屉**、**全频道语音号超链接生成**、**O键角色查询历史侧边栏**、**心愿清单追踪**及**装备库智能检索**等一系列强大功能。
 
 > ### 💡 我们的开发理念：最纯粹、最专注、最优雅
 > 

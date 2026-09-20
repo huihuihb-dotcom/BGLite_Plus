@@ -262,6 +262,80 @@ end
 BG.IsBiaoGeHasContent = IsBiaoGeHasContent
 
 -------------------------------------------------------------------------------
+-- 获取账单真实发生打本时间 (True Raid Time)
+-- 彻底杜绝打完隔天/跨周才按保存导致时间错误归入新CD的问题
+-------------------------------------------------------------------------------
+local function GetTrueRaidTime(FB)
+    if not (FB and BiaoGe and BiaoGe[FB]) then return nil end
+    local candidates = {}
+
+    -- 0. 优先获取当前副本表格记录的打本真实开始与活跃时间戳
+    if BiaoGe[FB].raidTime and tonumber(BiaoGe[FB].raidTime) and tonumber(BiaoGe[FB].raidTime) > 0 then
+        table.insert(candidates, tonumber(BiaoGe[FB].raidTime))
+    end
+    if BiaoGe[FB].lastRaidTime and tonumber(BiaoGe[FB].lastRaidTime) and tonumber(BiaoGe[FB].lastRaidTime) > 0 then
+        table.insert(candidates, tonumber(BiaoGe[FB].lastRaidTime))
+    end
+
+    -- 1. 击杀 BOSS 系统记录的真实时间戳 (原版 BGLite 实时生成)
+    if BiaoGe[FB].raidRoster and tonumber(BiaoGe[FB].raidRoster.time) and tonumber(BiaoGe[FB].raidRoster.time) > 0 then
+        table.insert(candidates, tonumber(BiaoGe[FB].raidRoster.time))
+    end
+
+    -- 2. 掉落记录装备拾取的真实时间戳 (打本分装真实时间)
+    if BiaoGe[FB].lootHistory and type(BiaoGe[FB].lootHistory) == "table" and #BiaoGe[FB].lootHistory > 0 then
+        for i = #BiaoGe[FB].lootHistory, 1, -1 do
+            local item = BiaoGe[FB].lootHistory[i]
+            if item and item.timestamp and tonumber(item.timestamp) and tonumber(item.timestamp) > 0 then
+                table.insert(candidates, tonumber(item.timestamp))
+                break
+            end
+        end
+    end
+
+    -- 3. 交易记录真实时间 (反查当前角色最近在副本中的交易时间)
+    if BiaoGe.tradeHistory and type(BiaoGe.tradeHistory) == "table" then
+        local myRealmID = GetRealmID and GetRealmID()
+        local myName = UnitName("player")
+        if myRealmID and BiaoGe.tradeHistory[myRealmID] and BiaoGe.tradeHistory[myRealmID][myName] then
+            local info = BiaoGe.tradeHistory[myRealmID][myName].info
+            if type(info) == "table" and #info > 0 then
+                local lastTrade = info[1]
+                if lastTrade and lastTrade.time and tonumber(lastTrade.time) then
+                    local tDiff = ((GetServerTime and GetServerTime()) or time()) - tonumber(lastTrade.time)
+                    if tDiff >= 0 and tDiff <= (86400 * 3) then -- 3天内有效交易
+                        table.insert(candidates, tonumber(lastTrade.time))
+                    end
+                end
+            end
+        end
+    end
+
+    -- 4. 团队通告/YY进本绑定时间 (TeamInfo 模块记录)
+    if BiaoGe[FB].teamInfo and BiaoGe[FB].teamInfo.notices and type(BiaoGe[FB].teamInfo.notices) == "table" and #BiaoGe[FB].teamInfo.notices > 0 then
+        for i = #BiaoGe[FB].teamInfo.notices, 1, -1 do
+            local n = BiaoGe[FB].teamInfo.notices[i]
+            if n and n.timestamp and tonumber(n.timestamp) and tonumber(n.timestamp) > 0 then
+                table.insert(candidates, tonumber(n.timestamp))
+                break
+            end
+        end
+    end
+
+    local now = (GetServerTime and GetServerTime()) or time()
+    local best = nil
+    for _, t in ipairs(candidates) do
+        if t <= (now + 60) then
+            if not best or t > best then
+                best = t
+            end
+        end
+    end
+    return best
+end
+ns.GetTrueRaidTime = GetTrueRaidTime
+
+-------------------------------------------------------------------------------
 -- 2. 核心：保存当前表格为历史表格（彻底去角色名 + 10份FIFO上限）
 -------------------------------------------------------------------------------
 function BG.SaveBiaoGe(FB, isSilent)
@@ -283,12 +357,14 @@ function BG.SaveBiaoGe(FB, isSilent)
     end
 
     local serverTime = GetServerTime()
-    local DT = tonumber(date("%y%m%d%H%M%S", serverTime))
+    local trueRaidTime = GetTrueRaidTime(FB) or serverTime
+    local recordTime = trueRaidTime or serverTime
+    local DT = tonumber(date("%y%m%d%H%M%S", recordTime))
     if BiaoGe.History[FB][DT] then
-        serverTime = serverTime + 1
-        DT = tonumber(date("%y%m%d%H%M%S", serverTime))
+        recordTime = recordTime + 1
+        DT = tonumber(date("%y%m%d%H%M%S", recordTime))
     end
-    local DTcn = date(L["%m月%d日%H:%M:%S\n"] or "%m月%d日%H:%M:%S\n", serverTime)
+    local DTcn = date(L["%m月%d日%H:%M:%S\n"] or "%m月%d日%H:%M:%S\n", recordTime)
 
     local record = {}
 
@@ -325,20 +401,81 @@ function BG.SaveBiaoGe(FB, isSilent)
         end
     end
 
-    -- 存储本场数据
-    BiaoGe.History[FB][DT] = record
+    -- 在保存历史前，预先计算当前角色本场消费、补贴、罚款及全团总流水并永久固化
+    local myName = UnitName("player")
+    local mySpend = 0
+    local mySpends = {}
+    local subsidy = 0
+    local penalty = 0
+
+    -- 检查本人消费 (1 到 maxb)
+    for b = 1, maxb do
+        local maxRow = BG.GetMaxi(FB, b)
+        for i = 1, maxRow do
+            local mj = (BG.Frame and BG.Frame[FB] and BG.Frame[FB]["boss" .. b] and BG.Frame[FB]["boss" .. b]["maijia" .. i])
+            local je = (BG.Frame and BG.Frame[FB] and BG.Frame[FB]["boss" .. b] and BG.Frame[FB]["boss" .. b]["jine" .. i])
+            local zb = (BG.Frame and BG.Frame[FB] and BG.Frame[FB]["boss" .. b] and BG.Frame[FB]["boss" .. b]["zhuangbei" .. i])
+            local buyerName = (mj and mj.GetText and mj:GetText()) or (BiaoGe[FB] and BiaoGe[FB]["boss" .. b] and BiaoGe[FB]["boss" .. b]["maijia" .. i])
+            local money = tonumber(je and je.GetText and je:GetText()) or tonumber(BiaoGe[FB] and BiaoGe[FB]["boss" .. b] and BiaoGe[FB]["boss" .. b]["jine" .. i]) or 0
+            local itemText = (zb and zb.GetText and zb:GetText()) or (BiaoGe[FB] and BiaoGe[FB]["boss" .. b] and BiaoGe[FB]["boss" .. b]["zhuangbei" .. i]) or ""
+
+            if buyerName == myName and money > 0 then
+                if itemText == (L["罚款"] or "罚款") or itemText:find(L["罚款"] or "罚款") then
+                    penalty = penalty + money
+                else
+                    mySpend = mySpend + money
+                    table.insert(mySpends, { item = itemText, money = money, boss = b })
+                end
+            end
+        end
+    end
+
+    -- 检查本人获得的补贴 (支出格 maxb + 1)
+    local bZhiChu = maxb + 1
+    local maxRowZhiChu = BG.GetMaxi(FB, bZhiChu)
+    for i = 1, maxRowZhiChu do
+        local mj = (BG.Frame and BG.Frame[FB] and BG.Frame[FB]["boss" .. bZhiChu] and BG.Frame[FB]["boss" .. bZhiChu]["maijia" .. i])
+        local je = (BG.Frame and BG.Frame[FB] and BG.Frame[FB]["boss" .. bZhiChu] and BG.Frame[FB]["boss" .. bZhiChu]["jine" .. i])
+        local buyerName = (mj and mj.GetText and mj:GetText()) or (BiaoGe[FB] and BiaoGe[FB]["boss" .. bZhiChu] and BiaoGe[FB]["boss" .. bZhiChu]["maijia" .. i])
+        local money = tonumber(je and je.GetText and je:GetText()) or tonumber(BiaoGe[FB] and BiaoGe[FB]["boss" .. bZhiChu] and BiaoGe[FB]["boss" .. bZhiChu]["jine" .. i]) or 0
+        if buyerName == myName and money > 0 then
+            subsidy = subsidy + money
+        end
+    end
 
     local fbShort = (BG.GetFBinfo and BG.GetFBinfo(FB, "shortName")) or FB
-    local totalPeople = (BG.Frame and BG.Frame[FB] and BG.Frame[FB]["boss" .. maxb + 2] and BG.Frame[FB]["boss" .. maxb + 2]["jine4"] and BG.Frame[FB]["boss" .. maxb + 2]["jine4"]:GetText()) or "0"
-    local wage = (BG.Frame and BG.Frame[FB] and BG.Frame[FB]["boss" .. maxb + 2] and BG.Frame[FB]["boss" .. maxb + 2]["jine5"] and BG.Frame[FB]["boss" .. maxb + 2]["jine5"]:GetText()) or "0"
+    local totalPeople = tonumber((BG.Frame and BG.Frame[FB] and BG.Frame[FB]["boss" .. maxb + 2] and BG.Frame[FB]["boss" .. maxb + 2]["jine4"] and BG.Frame[FB]["boss" .. maxb + 2]["jine4"]:GetText()) or (BiaoGe[FB] and BiaoGe[FB]["boss" .. maxb + 2] and BiaoGe[FB]["boss" .. maxb + 2]["jine4"])) or 0
+    local wageNum = tonumber((BG.Frame and BG.Frame[FB] and BG.Frame[FB]["boss" .. maxb + 2] and BG.Frame[FB]["boss" .. maxb + 2]["jine5"] and BG.Frame[FB]["boss" .. maxb + 2]["jine5"]:GetText()) or (BiaoGe[FB] and BiaoGe[FB]["boss" .. maxb + 2] and BiaoGe[FB]["boss" .. maxb + 2]["jine5"])) or 0
+    local grossMoney = tonumber((BG.Frame and BG.Frame[FB] and BG.Frame[FB]["boss" .. maxb + 2] and BG.Frame[FB]["boss" .. maxb + 2]["jine1"] and BG.Frame[FB]["boss" .. maxb + 2]["jine1"]:GetText()) or (BiaoGe[FB] and BiaoGe[FB]["boss" .. maxb + 2] and BiaoGe[FB]["boss" .. maxb + 2]["jine1"])) or 0
 
-    local titleSummary = string.format("%s %s人 工资:%s", fbShort, totalPeople, wage)
-    local d = { DT, titleSummary, date("%m/%d", serverTime), date("%H:%M:%S", serverTime) }
+    -- 存储本场数据并记录打工角色信息、收支明细与真实打本时间
+    record.charName = UnitName("player")
+    record.class = select(2, UnitClass("player"))
+    record.realm = GetRealmName()
+    record.raidTime = recordTime
+    record.totalPeople = totalPeople
+    record.wage = wageNum
+    record.grossMoney = grossMoney
+    record.mySpend = mySpend
+    record.mySpends = mySpends
+    record.subsidy = subsidy
+    record.penalty = penalty
+    record.netWage = wageNum + subsidy - penalty - mySpend
+
+    BiaoGe.History[FB][DT] = record
+
+    local titleSummary = string.format("%s %s人 工资:%s", fbShort, totalPeople, wageNum)
+    local d = { DT, titleSummary, date("%m/%d", recordTime), date("%H:%M:%S", recordTime) }
 
     table.insert(BiaoGe.HistoryList[FB], 1, d)
 
     -- 严格执行单个副本最多 10 份限制，自动物理淘汰最旧的存档
     EnforceHistoryLimit(FB)
+
+    -- 自动通知看板数据变动
+    if wageNum > 0 and ns.WorkerReport and ns.WorkerReport.AddRecordFromHistory then
+        ns.WorkerReport.AddRecordFromHistory(FB, recordTime, totalPeople, wageNum, grossMoney, mySpend, subsidy)
+    end
 
     BG.UpdateHistoryButton()
     if BG.CreatHistoryListButton then
@@ -1495,6 +1632,19 @@ local function StartHistoryModule()
         end
     end)
 end
+
+-- 实时监听团本 BOSS 战斗与击杀，自动标记真实打本时间戳
+local raidEventFrame = CreateFrame("Frame")
+raidEventFrame:RegisterEvent("ENCOUNTER_END")
+raidEventFrame:RegisterEvent("BOSS_KILL")
+raidEventFrame:SetScript("OnEvent", function(self, event, ...)
+    local fb = BG.FB2 or BG.FB1
+    if fb and BiaoGe and BiaoGe[fb] then
+        local now = (GetServerTime and GetServerTime()) or time()
+        BiaoGe[fb].raidTime = BiaoGe[fb].raidTime or now
+        BiaoGe[fb].lastRaidTime = now
+    end
+end)
 
 local loadFrame = CreateFrame("Frame")
 loadFrame:RegisterEvent("PLAYER_LOGIN")
