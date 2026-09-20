@@ -254,8 +254,9 @@ function BG.HopeUI(FB)
                                 end
                                 GameTooltip:ClearLines()
                                 GameTooltip:SetHyperlink(BG.SetSpecIDToLink(link))
-                                BG.SetZUGSetTooltip(itemID, point)
-                                -- BG.SetHistoryMoney(itemID)
+                                if BG.SetHistoryMoney then
+                                    BG.SetHistoryMoney(itemID)
+                                end
 
                                 BG.DressUpLastButton = self
                                 if IsControlKeyDown() and not IsShiftKeyDown() then

@@ -142,6 +142,7 @@ local function HideAllSubFrames()
     SafeHide(BG.TradeHistoryMainFrame)
     SafeHide(BG.AuctionPresetMainFrame)
     SafeHide(BG.TitanGoblinMainFrame)
+    SafeHide(BG.HistoryMainFrame)
     if BG.LootHistoryMainFrame then
         SafeHide(BG.LootHistoryMainFrame)
     end
@@ -154,16 +155,6 @@ local function InitPlusUI()
     if not (BG and BG.MainFrame) then return end
     if ns.hasInitedPlusUI then return end
     ns.hasInitedPlusUI = true
-
-    -- 0. 合规性：清理历史快照数据库（对齐官方新版零历史持久化要求）
-    if BG.Once then
-        BG.Once("CleanLegacyHistory_Compliance_260904", 260904, function()
-            if BiaoGe then
-                BiaoGe.History = nil
-                BiaoGe.HistoryList = nil
-            end
-        end)
-    end
 
     -- 0.1 保护上游 BGLite 拍卖聊天历史表，避免上游缺失初始化导致 tinsert 报 nil
     if BiaoGe and BiaoGe.auctionMSGhistory == nil then
@@ -265,6 +256,7 @@ local function InitPlusUI()
             SafeHide(BG.FBMainFrame)
             SafeHide(BG.HopeMainFrame)
             SafeHide(BG.DuiZhangMainFrame)
+            SafeHide(BG.HistoryMainFrame)
             SafeShow(BG.TabButtonsFB)
 
             for i, fb in ipairs(BG.FBtable or {}) do
@@ -363,6 +355,7 @@ local function InitPlusUI()
             SafeHide(BG.FBMainFrame)
             SafeHide(BG.ItemLibMainFrame)
             SafeHide(BG.DuiZhangMainFrame)
+            SafeHide(BG.HistoryMainFrame)
 
             for i, fb in ipairs(BG.FBtable or {}) do
                 SafeHide(BG["HopeFrame" .. fb])
@@ -426,6 +419,7 @@ local function InitPlusUI()
             SafeHide(BG.ItemLibMainFrame)
             SafeHide(BG.HopeMainFrame)
             SafeHide(BG.DuiZhangMainFrame)
+            SafeHide(BG.HistoryMainFrame)
             SafeHide(BG.TabButtonsFB)
             BiaoGe.lastFrame = "RaidTool"
             if ns.RaidTool and ns.RaidTool.SyncCurrentRaidRoster then
@@ -626,6 +620,9 @@ local function InitPlusUI()
         end)
 
         BG.FBMainFrame:HookScript("OnHide", function(self)
+            if BG.HistoryMainFrame and BG.HistoryMainFrame:IsShown() then
+                return
+            end
             if ns.TeamInfo and ns.TeamInfo.sideFrame then
                 SafeHide(ns.TeamInfo.sideFrame)
             end
