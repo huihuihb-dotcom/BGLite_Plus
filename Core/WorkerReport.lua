@@ -295,8 +295,8 @@ function WR.SetRecordTime(record, newTimestamp)
     end
 end
 
--- 编辑保存某条记录的全部财务明细 (分得工资、补贴、装备消费、罚款、打本时间)
-function WR.SaveRecordAdjustment(record, newWage, newSubsidy, newMySpend, newPenalty, newGross, newTimestamp)
+-- 编辑保存某条记录的全部财务明细 (分得工资、补贴、装备消费、罚款、打本时间、角色名称)
+function WR.SaveRecordAdjustment(record, newWage, newSubsidy, newMySpend, newPenalty, newGross, newTimestamp, newCharName)
     if not record then return end
     WR.InitDB()
 
@@ -308,6 +308,18 @@ function WR.SaveRecordAdjustment(record, newWage, newSubsidy, newMySpend, newPen
     newTimestamp = tonumber(newTimestamp) or (record.timestamp or time())
     local netWage = newWage + newSubsidy - newPenalty - newMySpend
 
+    local accountChars = (ns.GetAccountCharacters and ns.GetAccountCharacters()) or {}
+    local finalChar = (newCharName and newCharName ~= "") and newCharName:gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", ""):gsub("%s+", "") or record.charName
+    local finalClass
+    if finalChar == UnitName("player") then
+        finalClass = select(2, UnitClass("player")) or "WARRIOR"
+    else
+        finalClass = (accountChars[finalChar] and accountChars[finalChar].class)
+            or (ns.KnownCharClasses and ns.KnownCharClasses[finalChar])
+            or (record.charName == finalChar and record.class)
+            or "WARRIOR"
+    end
+
     if record.source == "manual" then
         for _, r in ipairs(BiaoGe.WorkerReport.manualRecords or {}) do
             if r.id == record.id or (r.timestamp == record.timestamp and r.charName == record.charName) then
@@ -318,6 +330,8 @@ function WR.SaveRecordAdjustment(record, newWage, newSubsidy, newMySpend, newPen
                 r.grossMoney = newGross
                 r.netWage = netWage
                 r.timestamp = newTimestamp
+                r.charName = finalChar
+                r.class = finalClass
                 break
             end
         end
@@ -331,6 +345,8 @@ function WR.SaveRecordAdjustment(record, newWage, newSubsidy, newMySpend, newPen
             hist.grossMoney = newGross
             hist.netWage = netWage
             hist.raidTime = newTimestamp
+            hist.charName = finalChar
+            hist.class = finalClass
 
             local maxb = GetFBMaxb and GetFBMaxb(record.fb) or 15
             if hist["boss" .. (maxb + 2)] then
@@ -364,10 +380,17 @@ function WR.SaveRecordAdjustment(record, newWage, newSubsidy, newMySpend, newPen
             grossMoney = newGross,
             timestamp = newTimestamp,
             netWage = netWage,
+            charName = finalChar,
+            class = finalClass,
         }
+        if BiaoGe and BiaoGe[record.fb] then
+            BiaoGe[record.fb].charName = finalChar
+            BiaoGe[record.fb].class = finalClass
+            BiaoGe[record.fb].raidTime = newTimestamp
+        end
     end
 
-    DEFAULT_CHAT_FRAME:AddMessage("|cff00BFFF[BGLite_Plus 波比兔]|r " .. string.format(L["已成功更新 <%s> 的收支明细 (净到手: %d G)。"] or "已成功更新 <%s> 的收支明细 (净到手: %d G)。", record.fbName or record.fb, netWage))
+    DEFAULT_CHAT_FRAME:AddMessage("|cff00BFFF[BGLite_Plus 波比兔]|r " .. string.format(L["已成功更新 <%s> 的收支明细 (角色: %s, 净到手: %d G)。"] or "已成功更新 <%s> 的收支明细 (角色: %s, 净到手: %d G)。", record.fbName or record.fb, finalChar, netWage))
 
     if WR.MainFrame and WR.MainFrame:IsShown() then
         WR.UpdateUI()
@@ -583,8 +606,25 @@ function WR.GetAllRecords()
                     if wage > 0 then
                         -- 计算打本真实时间戳：优先采用打本真实时间 raidTime
                         local ts = (tonumber(record.raidTime) and tonumber(record.raidTime) > 0 and tonumber(record.raidTime)) or DTToTimestamp(DT) or time()
-                        local cName = record.charName or curChar
-                        local cClass = record.class or curClass
+                        local cName = record.charName
+                        local cClass = record.class
+                        if not cName or cName == "" then
+                            if ns.DeduceTableOwner then
+                                cName, cClass = ns.DeduceTableOwner(FB, record)
+                            end
+                            cName = cName or curChar
+                        end
+                        cName = (cName and cName:gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", ""):gsub("%s+", ""):gsub("%-.+$", "")) or curChar
+                        local accountChars = (ns.GetAccountCharacters and ns.GetAccountCharacters()) or {}
+                        if not cClass or cClass == "" then
+                            if cName == curChar then
+                                cClass = curClass
+                            else
+                                cClass = (accountChars[cName] and accountChars[cName].class)
+                                    or (ns.KnownCharClasses and ns.KnownCharClasses[cName])
+                                    or "WARRIOR"
+                            end
+                        end
                         local cRealm = record.realm or curRealm
 
                         -- 如果历史记录中没有固化消费/补贴，尝试回退检查 (针对未清除名字的记录)
@@ -593,7 +633,9 @@ function WR.GetAllRecords()
                                 local maxRow = (BG.GetMaxi and BG.GetMaxi(FB, b)) or 22
                                 if record["boss" .. b] then
                                     for i = 1, maxRow do
-                                        if record["boss" .. b]["maijia" .. i] == cName then
+                                        local buyer = record["boss" .. b]["maijia" .. i]
+                                        local cleanBuyer = buyer and buyer:gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", ""):gsub("%s+", "")
+                                        if cleanBuyer == cName then
                                             local je = tonumber(record["boss" .. b]["jine" .. i]) or 0
                                             local zb = record["boss" .. b]["zhuangbei" .. i] or ""
                                             if zb:find(L["罚款"] or "罚款") then
@@ -610,7 +652,9 @@ function WR.GetAllRecords()
                             if record["boss" .. bZhiChu] then
                                 local maxRowZhiChu = (BG.GetMaxi and BG.GetMaxi(FB, bZhiChu)) or 20
                                 for i = 1, maxRowZhiChu do
-                                    if record["boss" .. bZhiChu]["maijia" .. i] == cName then
+                                    local buyer = record["boss" .. bZhiChu]["maijia" .. i]
+                                    local cleanBuyer = buyer and buyer:gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", ""):gsub("%s+", "")
+                                    if cleanBuyer == cName then
                                         subsidy = subsidy + (tonumber(record["boss" .. bZhiChu]["jine" .. i]) or 0)
                                     end
                                 end
@@ -660,18 +704,65 @@ function WR.GetAllRecords()
     end
 
     -- 4. 动态扫描当前在途活跃表格 (BiaoGe[FB])
-    for _, FB in ipairs(fbList) do
-        local maxb = GetFBMaxb(FB)
-        local wage, totalPeople, grossMoney = GetActiveOverviewData(FB)
+    local curWeekStart = WR.GetCDWeekStart(time())
+    local inInstance, instanceType = IsInInstance()
+    local curFBID = inInstance and select(8, GetInstanceInfo())
+    local curInstanceFB = (curFBID and BG and BG.FBIDtable and BG.FBIDtable[curFBID])
 
-        if wage > 0 then
-            local sig = string.format("%s_%d_%d", tostring(FB), wage, totalPeople)
-            -- 仅当历史存档中没有完全相同的记录时，才作为实时在途账单展示
-            if not registeredSignatures[sig] then
-                local trueRaidTime = (ns.GetTrueRaidTime and ns.GetTrueRaidTime(FB)) or (BiaoGe and BiaoGe[FB] and BiaoGe[FB].raidTime) or time()
+    for _, FB in ipairs(fbList) do
+        -- 方案 A：若玩家当前正身处该团本内部，说明该副本正处于打本/开荒进行中，暂不计入已完结结算报表
+        -- 一旦打完出本、传出副本、退团或换号，离开副本后立即自动作为已完结在途账单入账
+        local isCurrentlyInThisRaid = (inInstance and (instanceType == "raid" or instanceType == "party") and (curInstanceFB == FB))
+
+        if not isCurrentlyInThisRaid then
+            local maxb = GetFBMaxb(FB)
+            local wage, totalPeople, grossMoney = GetActiveOverviewData(FB)
+
+            if wage > 0 then
+                local sig = string.format("%s_%d_%d", tostring(FB), wage, totalPeople)
+                -- 仅当历史存档中没有完全相同的记录时，才作为实时在途账单展示
+                if not registeredSignatures[sig] then
+                    local trueRaidTime = (ns.GetTrueRaidTime and ns.GetTrueRaidTime(FB)) or (BiaoGe and BiaoGe[FB] and BiaoGe[FB].raidTime)
+                    -- 如果在途表格未检测到有效时间戳：
+                    if not trueRaidTime or trueRaidTime <= 0 then
+                        if inInstance and (instanceType == "raid" or instanceType == "party") then
+                            trueRaidTime = time()
+                    elseif BiaoGe and BiaoGe[FB] and BiaoGe[FB].lastActiveTime then
+                        trueRaidTime = BiaoGe[FB].lastActiveTime
+                    else
+                        -- 若没有任何打本时间痕迹且不在本内，严格判定为历史陈旧在途残留，归入上周 CD 之前，杜绝篡改为今天
+                        trueRaidTime = curWeekStart - 1
+                    end
+                end
+
                 local fbDisplayName = GetFBDisplayName(FB)
 
-                -- 统计当前表格中本人的消费与补贴
+                -- 智能识别该活跃表格真实归属角色（战网小号感知，彻底杜绝换号后张冠李戴）
+                local ownerName, ownerClass
+                if ns.DeduceTableOwner then
+                    ownerName, ownerClass = ns.DeduceTableOwner(FB)
+                end
+                ownerName = (ownerName and ownerName:gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", ""):gsub("%s+", ""):gsub("%-.+$", "")) or curChar
+                local accountChars = (ns.GetAccountCharacters and ns.GetAccountCharacters()) or {}
+                if not ownerClass or ownerClass == "" then
+                    if ownerName == curChar then
+                        ownerClass = curClass
+                    else
+                        ownerClass = (accountChars[ownerName] and accountChars[ownerName].class)
+                            or (ns.KnownCharClasses and ns.KnownCharClasses[ownerName])
+                            or "WARRIOR"
+                    end
+                end
+
+                -- 自动将推导出的真实打本角色固化至在途表格中，防止多小号切换时状态丢失
+                if BiaoGe and BiaoGe[FB] then
+                    if ownerName and ownerName ~= "未知角色" then
+                        BiaoGe[FB].charName = ownerName
+                        BiaoGe[FB].class = ownerClass
+                    end
+                end
+
+                -- 统计当前表格中打本角色本人的消费与补贴 (按真实打本角色匹配)
                 local curSpend = 0
                 local curSubsidy = 0
                 local curPenalty = 0
@@ -687,12 +778,15 @@ function WR.GetAllRecords()
                         local money = tonumber(je and je.GetText and je:GetText()) or tonumber(BiaoGe and BiaoGe[FB] and BiaoGe[FB]["boss" .. b] and BiaoGe[FB]["boss" .. b]["jine" .. i]) or 0
                         local itemText = (zb and zb.GetText and zb:GetText()) or (BiaoGe and BiaoGe[FB] and BiaoGe[FB]["boss" .. b] and BiaoGe[FB]["boss" .. b]["zhuangbei" .. i]) or ""
 
-                        if buyer == curChar and money > 0 then
-                            if itemText:find(L["罚款"] or "罚款") then
-                                curPenalty = curPenalty + money
-                            else
-                                curSpend = curSpend + money
-                                table.insert(mySpends, { item = itemText, money = money, boss = b })
+                        if buyer and money > 0 then
+                            local cleanBuyer = buyer:gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", ""):gsub("%s+", "")
+                            if cleanBuyer == ownerName then
+                                if itemText:find(L["罚款"] or "罚款") then
+                                    curPenalty = curPenalty + money
+                                else
+                                    curSpend = curSpend + money
+                                    table.insert(mySpends, { item = itemText, money = money, boss = b })
+                                end
                             end
                         end
                     end
@@ -704,8 +798,11 @@ function WR.GetAllRecords()
                     local je = (BG.Frame and BG.Frame[FB] and BG.Frame[FB]["boss" .. bZhiChu] and BG.Frame[FB]["boss" .. bZhiChu]["jine" .. i])
                     local buyer = (mj and mj.GetText and mj:GetText()) or (BiaoGe and BiaoGe[FB] and BiaoGe[FB]["boss" .. bZhiChu] and BiaoGe[FB]["boss" .. bZhiChu]["maijia" .. i])
                     local money = tonumber(je and je.GetText and je:GetText()) or tonumber(BiaoGe and BiaoGe[FB] and BiaoGe[FB]["boss" .. bZhiChu] and BiaoGe[FB]["boss" .. bZhiChu]["jine" .. i]) or 0
-                    if buyer == curChar and money > 0 then
-                        curSubsidy = curSubsidy + money
+                    if buyer and money > 0 then
+                        local cleanBuyer = buyer:gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", ""):gsub("%s+", "")
+                        if cleanBuyer == ownerName then
+                            curSubsidy = curSubsidy + money
+                        end
                     end
                 end
 
@@ -719,12 +816,27 @@ function WR.GetAllRecords()
                     curPenalty = adj.penalty or curPenalty
                     grossMoney = adj.grossMoney or grossMoney
                     trueRaidTime = adj.timestamp or trueRaidTime
+                    if adj.charName and adj.charName ~= "" then
+                        ownerName = adj.charName:gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", ""):gsub("%s+", "")
+                        local accountChars = (ns.GetAccountCharacters and ns.GetAccountCharacters()) or {}
+                        if adj.class and adj.class ~= "" then
+                            ownerClass = adj.class
+                        elseif ownerName == curChar then
+                            ownerClass = curClass
+                        else
+                            ownerClass = (accountChars[ownerName] and accountChars[ownerName].class)
+                                or (ns.KnownCharClasses and ns.KnownCharClasses[ownerName])
+                                or ownerClass
+                        end
+                    end
                 end
 
                 local netWage = wage + curSubsidy - curPenalty - curSpend
 
                 local noteText = "当前活跃账单(未归档)"
-                if curSubsidy > 0 and curSpend > 0 then
+                if trueRaidTime < curWeekStart then
+                    noteText = string.format("未清空旧账单 (%s)", date("%m/%d", trueRaidTime))
+                elseif curSubsidy > 0 and curSpend > 0 then
                     noteText = string.format("活跃账单: 补贴+%dG 消费-%dG", curSubsidy, curSpend)
                 elseif curSubsidy > 0 then
                     noteText = string.format("活跃账单: 补贴+%dG", curSubsidy)
@@ -735,9 +847,9 @@ function WR.GetAllRecords()
                 local entry = {
                     id = string.format("active_%s_%d", tostring(FB), trueRaidTime),
                     timestamp = trueRaidTime,
-                    charName = curChar,
+                    charName = ownerName,
                     realm = curRealm,
-                    class = curClass,
+                    class = ownerClass,
                     fb = FB,
                     fbName = fbDisplayName,
                     totalPeople = totalPeople,
@@ -753,6 +865,7 @@ function WR.GetAllRecords()
                 }
                 table.insert(allRecords, entry)
             end
+        end
         end
     end
 
@@ -1525,7 +1638,7 @@ function WR.ShowEditRecordModal(record)
     if not record then return end
     if not WR.EditRecordModal then
         local f = CreateFrame("Frame", "BG_WR_EditRecordModal", UIParent, "BackdropTemplate")
-        f:SetSize(380, 360)
+        f:SetSize(380, 395)
         f:SetPoint("CENTER")
         f:SetFrameStrata("DIALOG")
         f:SetMovable(true)
@@ -1600,13 +1713,15 @@ function WR.ShowEditRecordModal(record)
             return eb
         end
 
-        local timeEB = CreateRowInput(L["打本时间:"] or "打本时间:", -88)
-        local wageEB = CreateRowInput(L["分得工资 (G):"] or "分得工资 (G):", -118)
-        local subEB = CreateRowInput(L["额外补贴 (G):"] or "额外补贴 (G):", -148)
-        local spendEB = CreateRowInput(L["装备消费 (G):"] or "装备消费 (G):", -178)
-        local penaltyEB = CreateRowInput(L["罚款支出 (G):"] or "罚款支出 (G):", -208)
-        local grossEB = CreateRowInput(L["全团总流水 (G):"] or "全团总流水 (G):", -238)
+        local charEB = CreateRowInput(L["打工角色:"] or "打工角色:", -86)
+        local timeEB = CreateRowInput(L["打本时间:"] or "打本时间:", -114)
+        local wageEB = CreateRowInput(L["分得工资 (G):"] or "分得工资 (G):", -142)
+        local subEB = CreateRowInput(L["额外补贴 (G):"] or "额外补贴 (G):", -170)
+        local spendEB = CreateRowInput(L["装备消费 (G):"] or "装备消费 (G):", -198)
+        local penaltyEB = CreateRowInput(L["罚款支出 (G):"] or "罚款支出 (G):", -226)
+        local grossEB = CreateRowInput(L["全团总流水 (G):"] or "全团总流水 (G):", -254)
 
+        f.charEB = charEB
         f.timeEB = timeEB
         f.wageEB = wageEB
         f.subEB = subEB
@@ -1616,9 +1731,9 @@ function WR.ShowEditRecordModal(record)
 
         -- 净到手计算预览
         local netPreview = f:CreateFontString(nil, "OVERLAY")
-        netPreview:SetFont(BIAOGE_TEXT_FONT, 13, "OUTLINE")
+        netPreview:SetFont(BIAOGE_TEXT_FONT, 12, "OUTLINE")
         netPreview:SetTextColor(RGB("00FF7F"))
-        netPreview:SetPoint("TOPLEFT", f, "TOPLEFT", 20, -270)
+        netPreview:SetPoint("TOPLEFT", f, "TOPLEFT", 20, -286)
         f.netPreview = netPreview
 
         local function UpdateNetPreview()
@@ -1680,8 +1795,9 @@ function WR.ShowEditRecordModal(record)
             local sp = tonumber(spendEB:GetText()) or 0
             local pen = tonumber(penaltyEB:GetText()) or 0
             local gross = tonumber(grossEB:GetText()) or 0
+            local cName = charEB:GetText():gsub("%s+", "")
 
-            WR.SaveRecordAdjustment(f.targetRecord, w, sub, sp, pen, gross, ts)
+            WR.SaveRecordAdjustment(f.targetRecord, w, sub, sp, pen, gross, ts, cName)
             f:Hide()
         end)
 
@@ -1692,6 +1808,7 @@ function WR.ShowEditRecordModal(record)
     f.targetRecord = record
     f.title:SetText(string.format(L["编辑收支明细 - %s"] or "编辑收支明细 - %s", record.fbName or record.fb or "团本"))
     f.desc:SetText(string.format(L["角色: %s | 来源: %s"] or "角色: %s | 来源: %s", SetClassCFF(record.charName, record.class), (record.source == "manual" and "手工记录") or ((record.source == "history" and "历史存档") or "当前账单")))
+    f.charEB:SetText(record.charName or "")
     f.timeEB:SetText(date("%Y-%m-%d %H:%M", record.timestamp or time()))
     f.wageEB:SetText(tostring(record.wage or 0))
     f.subEB:SetText(tostring(record.subsidy or 0))
@@ -1784,10 +1901,14 @@ function WR.ShowManualAddModal()
             return
         end
 
+        local targetChar = (cName ~= "") and cName or UnitName("player")
+        local accountChars = (ns.GetAccountCharacters and ns.GetAccountCharacters()) or {}
+        local targetClass = (accountChars[targetChar] and accountChars[targetChar].class) or select(2, UnitClass("player")) or "WARRIOR"
+
         WR.AddRecord({
             timestamp = time(),
-            charName = (cName ~= "") and cName or UnitName("player"),
-            class = select(2, UnitClass("player")) or "WARRIOR",
+            charName = targetChar,
+            class = targetClass,
             realm = GetRealmName(),
             fb = fbName,
             fbName = fbName,
@@ -2420,4 +2541,20 @@ SlashCmdList["BGLITE_THURSDAY"] = function(msg)
         WR.CheckThursdayWeeklyReportNotice(true)
     end
 end
+
+-------------------------------------------------------------------------------
+-- 12. 出入副本区域切换监听：出本瞬间若报表打开，立即自动刷新入账
+-------------------------------------------------------------------------------
+local zoneEventFrame = CreateFrame("Frame")
+zoneEventFrame:RegisterEvent("ZONE_CHANGED_NEW_AREA")
+zoneEventFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
+zoneEventFrame:SetScript("OnEvent", function(self, event)
+    if WR.MainFrame and WR.MainFrame:IsShown() then
+        C_Timer.After(0.5, function()
+            if WR.MainFrame and WR.MainFrame:IsShown() then
+                WR.UpdateUI()
+            end
+        end)
+    end
+end)
 

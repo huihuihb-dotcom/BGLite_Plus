@@ -262,76 +262,350 @@ end
 BG.IsBiaoGeHasContent = IsBiaoGeHasContent
 
 -------------------------------------------------------------------------------
--- 获取账单真实发生打本时间 (True Raid Time)
--- 彻底杜绝打完隔天/跨周才按保存导致时间错误归入新CD的问题
+-- 战网小号与角色归属智能推导引擎
+-- 彻底根治因 BiaoGe 账号共享数据导致的换号后角色名“张冠李戴”问题
 -------------------------------------------------------------------------------
-local function GetTrueRaidTime(FB)
-    if not (FB and BiaoGe and BiaoGe[FB]) then return nil end
-    local candidates = {}
+local function CleanPlayerName(name)
+    if not name or name == "" then return "" end
+    return name:gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", ""):gsub("%s+", ""):gsub("%-.+$", "")
+end
 
-    -- 0. 优先获取当前副本表格记录的打本真实开始与活跃时间戳
-    if BiaoGe[FB].raidTime and tonumber(BiaoGe[FB].raidTime) and tonumber(BiaoGe[FB].raidTime) > 0 then
-        table.insert(candidates, tonumber(BiaoGe[FB].raidTime))
-    end
-    if BiaoGe[FB].lastRaidTime and tonumber(BiaoGe[FB].lastRaidTime) and tonumber(BiaoGe[FB].lastRaidTime) > 0 then
-        table.insert(candidates, tonumber(BiaoGe[FB].lastRaidTime))
-    end
+local function GetAccountCharacters()
+    local chars = {}
+    ns.KnownCharClasses = ns.KnownCharClasses or {}
 
-    -- 1. 击杀 BOSS 系统记录的真实时间戳 (原版 BGLite 实时生成)
-    if BiaoGe[FB].raidRoster and tonumber(BiaoGe[FB].raidRoster.time) and tonumber(BiaoGe[FB].raidRoster.time) > 0 then
-        table.insert(candidates, tonumber(BiaoGe[FB].raidRoster.time))
-    end
-
-    -- 2. 掉落记录装备拾取的真实时间戳 (打本分装真实时间)
-    if BiaoGe[FB].lootHistory and type(BiaoGe[FB].lootHistory) == "table" and #BiaoGe[FB].lootHistory > 0 then
-        for i = #BiaoGe[FB].lootHistory, 1, -1 do
-            local item = BiaoGe[FB].lootHistory[i]
-            if item and item.timestamp and tonumber(item.timestamp) and tonumber(item.timestamp) > 0 then
-                table.insert(candidates, tonumber(item.timestamp))
-                break
-            end
-        end
-    end
-
-    -- 3. 交易记录真实时间 (反查当前角色最近在副本中的交易时间)
-    if BiaoGe.tradeHistory and type(BiaoGe.tradeHistory) == "table" then
-        local myRealmID = GetRealmID and GetRealmID()
-        local myName = UnitName("player")
-        if myRealmID and BiaoGe.tradeHistory[myRealmID] and BiaoGe.tradeHistory[myRealmID][myName] then
-            local info = BiaoGe.tradeHistory[myRealmID][myName].info
-            if type(info) == "table" and #info > 0 then
-                local lastTrade = info[1]
-                if lastTrade and lastTrade.time and tonumber(lastTrade.time) then
-                    local tDiff = ((GetServerTime and GetServerTime()) or time()) - tonumber(lastTrade.time)
-                    if tDiff >= 0 and tDiff <= (86400 * 3) then -- 3天内有效交易
-                        table.insert(candidates, tonumber(lastTrade.time))
+    -- 1. 从 BiaoGe.playerInfo 获取本战网所有已知角色及其职业
+    if BiaoGe and BiaoGe.playerInfo then
+        for rID, rTable in pairs(BiaoGe.playerInfo) do
+            if type(rTable) == "table" then
+                for pName, pInfo in pairs(rTable) do
+                    if type(pInfo) == "table" and pName ~= "" then
+                        local cName = CleanPlayerName(pName)
+                        local cls = pInfo.class or "WARRIOR"
+                        chars[cName] = {
+                            class = cls,
+                            realmID = rID,
+                            level = pInfo.level or 80,
+                        }
+                        ns.KnownCharClasses[cName] = cls
                     end
                 end
             end
         end
     end
 
-    -- 4. 团队通告/YY进本绑定时间 (TeamInfo 模块记录)
-    if BiaoGe[FB].teamInfo and BiaoGe[FB].teamInfo.notices and type(BiaoGe[FB].teamInfo.notices) == "table" and #BiaoGe[FB].teamInfo.notices > 0 then
-        for i = #BiaoGe[FB].teamInfo.notices, 1, -1 do
-            local n = BiaoGe[FB].teamInfo.notices[i]
-            if n and n.timestamp and tonumber(n.timestamp) and tonumber(n.timestamp) > 0 then
-                table.insert(candidates, tonumber(n.timestamp))
-                break
+    -- 2. 从 BiaoGe.MONEY 获取可能存在的小号 (金币记录表包含了名下全角色)
+    if BiaoGe and BiaoGe.MONEY then
+        for rID, rTable in pairs(BiaoGe.MONEY) do
+            if type(rTable) == "table" then
+                for pName, pInfo in pairs(rTable) do
+                    local cName = CleanPlayerName(pName)
+                    if not chars[cName] then
+                        chars[cName] = {
+                            class = (pInfo and pInfo.class) or (ns.KnownCharClasses and ns.KnownCharClasses[cName]) or "WARRIOR",
+                            realmID = rID,
+                        }
+                    end
+                end
             end
         end
     end
 
-    local now = (GetServerTime and GetServerTime()) or time()
-    local best = nil
-    for _, t in ipairs(candidates) do
-        if t <= (now + 60) then
-            if not best or t > best then
-                best = t
+    -- 3. 从 BiaoGe.RoleOverviewSort 补充可能存在的小号
+    if BiaoGe and BiaoGe.RoleOverviewSort then
+        for rID, rList in pairs(BiaoGe.RoleOverviewSort) do
+            if type(rList) == "table" then
+                for _, item in ipairs(rList) do
+                    if type(item) == "table" and item.player and item.player ~= "" then
+                        local cName = CleanPlayerName(item.player)
+                        if not chars[cName] then
+                            local cls = item.class or "WARRIOR"
+                            chars[cName] = {
+                                class = cls,
+                                realmID = rID,
+                            }
+                            ns.KnownCharClasses[cName] = cls
+                        end
+                    end
+                end
             end
         end
     end
-    return best
+
+    -- 4. 当前登录角色兜底
+    local myName = UnitName("player")
+    local myClass = select(2, UnitClass("player")) or "WARRIOR"
+    if myName and myName ~= "" then
+        local cName = CleanPlayerName(myName)
+        chars[cName] = {
+            class = myClass,
+            realmID = (GetRealmID and GetRealmID()) or 0,
+        }
+        ns.KnownCharClasses[cName] = myClass
+    end
+    return chars
+end
+ns.GetAccountCharacters = GetAccountCharacters
+
+local function DeduceTableOwner(FB, bTblOrFB)
+    local accountChars = GetAccountCharacters()
+    local tbl = (bTblOrFB and type(bTblOrFB) == "table") and bTblOrFB or (BiaoGe and BiaoGe[FB])
+    local myName = UnitName("player") or "未知角色"
+    local myClass = select(2, UnitClass("player")) or "WARRIOR"
+    if not tbl then return myName, myClass end
+
+    local candidateScores = {}
+    local candidateClasses = {}
+
+    local function AddScore(name, pts, cls)
+        if not name or name == "" then return end
+        local cName = CleanPlayerName(name)
+        if accountChars[cName] then
+            candidateScores[cName] = (candidateScores[cName] or 0) + pts
+            if cls and cls ~= "" then
+                candidateClasses[cName] = cls
+                if ns.KnownCharClasses then ns.KnownCharClasses[cName] = cls end
+            end
+        end
+    end
+
+    local function ResolveCharClass(name, fallbackClass)
+        if not name or name == "" then return fallbackClass or "WARRIOR" end
+        local cName = CleanPlayerName(name)
+        if cName == CleanPlayerName(myName) then return myClass end
+        if candidateClasses[cName] and candidateClasses[cName] ~= "" then return candidateClasses[cName] end
+        if ns.KnownCharClasses and ns.KnownCharClasses[cName] and ns.KnownCharClasses[cName] ~= "" then return ns.KnownCharClasses[cName] end
+        if accountChars[cName] and accountChars[cName].class and accountChars[cName].class ~= "" then return accountChars[cName].class end
+        if BiaoGe and BiaoGe.playerInfo then
+            for _, rTable in pairs(BiaoGe.playerInfo) do
+                if type(rTable) == "table" and rTable[cName] and rTable[cName].class then
+                    return rTable[cName].class
+                end
+            end
+        end
+        return fallbackClass or "WARRIOR"
+    end
+
+    local raidTs = tonumber(tbl.raidTime) or (GetServerTime and GetServerTime()) or time()
+
+    -- 1. 优先校验权威官方团队成员名单 (raidRoster)
+    -- 原版 BiaoGe 在每次 Boss 掉落时由 Loot.lua 自动记录 25/10 人全团成员名单
+    -- 若某个战网小号赫然在列，说明该号 100% 亲身出勤了该团本！赋予最高置信度 100 分
+    if tbl.raidRoster and type(tbl.raidRoster) == "table" and tbl.raidRoster.roster then
+        local rrTime = tonumber(tbl.raidRoster.time)
+        if not (rrTime and raidTs and math.abs(rrTime - raidTs) > 86400) then
+            for _, rName in ipairs(tbl.raidRoster.roster) do
+                local cName = CleanPlayerName(rName)
+                if accountChars[cName] then
+                    AddScore(cName, 100)
+                end
+            end
+        end
+    end
+
+    -- 2. 扫描团队关键信息入队欢迎语 (teamInfo)
+    -- 如："欢迎 虚空水晶/暗夜卡莎 加入团队" 赋予 40 分（每号限计一次）
+    local seenRecruitPlayer = {}
+    if tbl.teamInfo and tbl.teamInfo.recruits and type(tbl.teamInfo.recruits) == "table" then
+        for _, rec in ipairs(tbl.teamInfo.recruits) do
+            local text = rec.text or ""
+            for accName in pairs(accountChars) do
+                if not seenRecruitPlayer[accName] and text:find(accName, 1, true) then
+                    seenRecruitPlayer[accName] = true
+                    AddScore(accName, 40)
+                end
+            end
+        end
+    end
+    if tbl.teamInfo and tbl.teamInfo.members then
+        for mName in pairs(tbl.teamInfo.members) do
+            local cM = CleanPlayerName(mName)
+            if accountChars[cM] and not seenRecruitPlayer[cM] then
+                seenRecruitPlayer[cM] = true
+                AddScore(cM, 30)
+            end
+        end
+    end
+
+    local maxb = (BG.GetMaxb and BG.GetMaxb(FB)) or 25
+
+    -- 3. 深度财务与交易加权打分 (Boss买家、补贴名单、交易记录)
+    -- 真金白银购买装备、领取补贴或发生金币交易：每个买家格子 +50 分，同时捕获职业
+    for b = 1, maxb + 2 do
+        local bossTbl = tbl["boss" .. b]
+        if type(bossTbl) == "table" then
+            for i = 1, 30 do
+                local buyer = bossTbl["maijia" .. i]
+                local bClass = bossTbl["class" .. i]
+                if buyer and buyer ~= "" then
+                    local cBuyer = CleanPlayerName(buyer)
+                    if accountChars[cBuyer] then
+                        AddScore(cBuyer, 50, bClass)
+                    end
+                end
+            end
+        end
+    end
+
+    -- 4. 扫描副本内部交易记录表 (tradeTbl)
+    -- 交易记录中买家/卖家/maijia +50 分，同时精确捕获交易职业（每号限计一次）
+    local seenTradePlayer = {}
+    if tbl.tradeTbl and type(tbl.tradeTbl) == "table" then
+        for _, tr in ipairs(tbl.tradeTbl) do
+            local p = tr.maijia or tr.buyer or tr.seller or tr.player
+            if p and p ~= "" then
+                local cP = CleanPlayerName(p)
+                if accountChars[cP] and not seenTradePlayer[cP] then
+                    seenTradePlayer[cP] = true
+                    AddScore(cP, 50, tr.class)
+                end
+            end
+        end
+    end
+
+    -- 5. 如果当前登录角色正好身处该副本内打本，当前角色具有高置信度 (+80分)
+    local inInstance, instanceType = IsInInstance()
+    if inInstance and (instanceType == "raid" or instanceType == "party") then
+        local curFBID = select(8, GetInstanceInfo())
+        if BG and BG.FBIDtable and BG.FBIDtable[curFBID] == FB then
+            AddScore(myName, 80, myClass)
+        end
+    end
+
+    -- 6. 扫描掉落拾取日志 (lootHistory) - 仅限本场24小时窗口内，严格过滤5人本地下城噪音（每号限计一次 +15分）
+    local seenLootPlayer = {}
+    if tbl.lootHistory and type(tbl.lootHistory) == "table" and #tbl.lootHistory > 0 then
+        for _, item in ipairs(tbl.lootHistory) do
+            if item.player and item.source then
+                local itemTs = tonumber(item.timestamp)
+                if not (itemTs and raidTs and math.abs(itemTs - raidTs) > 86400) then
+                    local s = tostring(item.source)
+                    if not (s:find("熔炉") or s:find("围栏") or s:find("地牢") or s:find("监狱") or s:find("迷宫") or s:find("破碎") or s:find("城墙") or s:find("沼泽") or s:find("幽暗") or s:find("平台")) then
+                        local cP = CleanPlayerName(item.player)
+                        if accountChars[cP] and not seenLootPlayer[cP] then
+                            seenLootPlayer[cP] = true
+                            AddScore(cP, 15, item.class or ResolveCharClass(cP))
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    -- 7. 表格原有 charName / player 作为历史先验弱参考 (+5 分，绝不独裁霸凌强证据)
+    if tbl.charName and tbl.charName ~= "" then
+        local cName = CleanPlayerName(tbl.charName)
+        if accountChars[cName] then
+            AddScore(cName, 5, tbl.class)
+        end
+    end
+    if tbl.player and tbl.player ~= "" then
+        local cName = CleanPlayerName(tbl.player)
+        if accountChars[cName] then
+            AddScore(cName, 5, tbl.class)
+        end
+    end
+
+    -- 8. 选出客观证据总分最高的真实战网角色
+    local bestChar, bestScore = nil, 0
+    for cName, score in pairs(candidateScores) do
+        if score > bestScore then
+            bestScore = score
+            bestChar = cName
+        end
+    end
+
+    if bestChar and bestScore > 0 then
+        local cClass = ResolveCharClass(bestChar)
+        -- 核心自愈：若发现表格此前被旧会话错误固化了其他小号名字，以压倒性证据自动纠偏并固化
+        if tbl.charName ~= bestChar then
+            tbl.charName = bestChar
+            tbl.class = cClass
+        end
+        return bestChar, cClass
+    end
+
+    -- 9. 最终兜底：无任何证据（空表格或无关联）时，若身处副本则采用当前角色；否则仅只读返回当前登录号，绝不反写污染表格
+    return myName, myClass
+end
+ns.DeduceTableOwner = DeduceTableOwner
+
+-------------------------------------------------------------------------------
+-- 获取账单真实发生打本时间 (True Raid Time)
+-- 优先采纳官方标准打本开始时间 raidTime；若缺失则扫描 Boss 掉落与交易，杜绝被5人本杂项时间篡改
+-------------------------------------------------------------------------------
+local function GetTrueRaidTime(FB)
+    if not (FB and BiaoGe and BiaoGe[FB]) then return nil end
+    local now = (GetServerTime and GetServerTime()) or time()
+
+    -- 1. 优先获取当前副本表格显式记录的打本真实开始时间戳 (raidTime)
+    -- 只要时间戳有效且不超前于当前系统时间（允许300秒时钟微差），它就是最权威的团本开打时间！
+    local rt = tonumber(BiaoGe[FB].raidTime)
+    if rt and rt > 1000000000 and rt <= (now + 300) then
+        return rt
+    end
+
+    -- 2. 若 raidTime 缺失，深度扫描该副本各 Boss 击杀掉落装备时间 (loot1..N) 与 内部交易时间 (tradeTbl)
+    local candidates = {}
+    local maxb = (BG.GetMaxb and BG.GetMaxb(FB)) or 25
+    for b = 1, maxb do
+        local bTbl = BiaoGe[FB]["boss" .. b]
+        if type(bTbl) == "table" then
+            for k, v in pairs(bTbl) do
+                if type(v) == "table" then
+                    local ts = tonumber(v.timestamp) or tonumber(v.time)
+                    if ts and ts > 1000000000 and ts <= (now + 300) then
+                        table.insert(candidates, ts)
+                    end
+                    if k == "auctionLog" then
+                        for _, aEntry in ipairs(v) do
+                            local aTs = tonumber(aEntry.time) or tonumber(aEntry.timestamp)
+                            if aTs and aTs > 1000000000 and aTs <= (now + 300) then
+                                table.insert(candidates, aTs)
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    -- 内部交易表时间戳
+    if BiaoGe[FB].tradeTbl and type(BiaoGe[FB].tradeTbl) == "table" then
+        for _, tr in ipairs(BiaoGe[FB].tradeTbl) do
+            local ts = tonumber(tr.time) or tonumber(tr.timestamp)
+            if ts and ts > 1000000000 and ts <= (now + 300) then
+                table.insert(candidates, ts)
+            end
+        end
+    end
+
+    -- 取最早的 Boss 掉落/开打时间作为开团时间戳（彻底杜绝被末尾外部事件篡改）
+    if #candidates > 0 then
+        table.sort(candidates)
+        return candidates[1]
+    end
+
+    -- 3. 检查团队通告/YY进本绑定时间 (TeamInfo 模块记录)
+    if BiaoGe[FB].teamInfo and BiaoGe[FB].teamInfo.notices and type(BiaoGe[FB].teamInfo.notices) == "table" and #BiaoGe[FB].teamInfo.notices > 0 then
+        for i = 1, #BiaoGe[FB].teamInfo.notices do
+            local n = BiaoGe[FB].teamInfo.notices[i]
+            if n and n.timestamp and tonumber(n.timestamp) and tonumber(n.timestamp) > 1000000000 and tonumber(n.timestamp) <= (now + 300) then
+                return tonumber(n.timestamp)
+            end
+        end
+    end
+
+    -- 4. 兜底检查 lastRaidTime 或 raidRoster.time
+    if BiaoGe[FB].raidRoster and tonumber(BiaoGe[FB].raidRoster.time) and tonumber(BiaoGe[FB].raidRoster.time) > 1000000000 and tonumber(BiaoGe[FB].raidRoster.time) <= (now + 300) then
+        return tonumber(BiaoGe[FB].raidRoster.time)
+    end
+    local lrt = tonumber(BiaoGe[FB].lastRaidTime)
+    if lrt and lrt > 1000000000 and lrt <= (now + 300) then
+        return lrt
+    end
+
+    return nil
 end
 ns.GetTrueRaidTime = GetTrueRaidTime
 
@@ -401,8 +675,9 @@ function BG.SaveBiaoGe(FB, isSilent)
         end
     end
 
-    -- 在保存历史前，预先计算当前角色本场消费、补贴、罚款及全团总流水并永久固化
-    local myName = UnitName("player")
+    -- 在保存历史前，智能推导出打本角色（即使换号后保存也准确归入原打本角色名下）
+    local ownerName, ownerClass = DeduceTableOwner(FB)
+    local myName = ownerName or UnitName("player")
     local mySpend = 0
     local mySpends = {}
     local subsidy = 0
@@ -419,7 +694,7 @@ function BG.SaveBiaoGe(FB, isSilent)
             local money = tonumber(je and je.GetText and je:GetText()) or tonumber(BiaoGe[FB] and BiaoGe[FB]["boss" .. b] and BiaoGe[FB]["boss" .. b]["jine" .. i]) or 0
             local itemText = (zb and zb.GetText and zb:GetText()) or (BiaoGe[FB] and BiaoGe[FB]["boss" .. b] and BiaoGe[FB]["boss" .. b]["zhuangbei" .. i]) or ""
 
-            if buyerName == myName and money > 0 then
+            if buyerName and CleanPlayerName(buyerName) == CleanPlayerName(myName) and money > 0 then
                 if itemText == (L["罚款"] or "罚款") or itemText:find(L["罚款"] or "罚款") then
                     penalty = penalty + money
                 else
@@ -438,7 +713,7 @@ function BG.SaveBiaoGe(FB, isSilent)
         local je = (BG.Frame and BG.Frame[FB] and BG.Frame[FB]["boss" .. bZhiChu] and BG.Frame[FB]["boss" .. bZhiChu]["jine" .. i])
         local buyerName = (mj and mj.GetText and mj:GetText()) or (BiaoGe[FB] and BiaoGe[FB]["boss" .. bZhiChu] and BiaoGe[FB]["boss" .. bZhiChu]["maijia" .. i])
         local money = tonumber(je and je.GetText and je:GetText()) or tonumber(BiaoGe[FB] and BiaoGe[FB]["boss" .. bZhiChu] and BiaoGe[FB]["boss" .. bZhiChu]["jine" .. i]) or 0
-        if buyerName == myName and money > 0 then
+        if buyerName and CleanPlayerName(buyerName) == CleanPlayerName(myName) and money > 0 then
             subsidy = subsidy + money
         end
     end
@@ -449,8 +724,8 @@ function BG.SaveBiaoGe(FB, isSilent)
     local grossMoney = tonumber((BG.Frame and BG.Frame[FB] and BG.Frame[FB]["boss" .. maxb + 2] and BG.Frame[FB]["boss" .. maxb + 2]["jine1"] and BG.Frame[FB]["boss" .. maxb + 2]["jine1"]:GetText()) or (BiaoGe[FB] and BiaoGe[FB]["boss" .. maxb + 2] and BiaoGe[FB]["boss" .. maxb + 2]["jine1"])) or 0
 
     -- 存储本场数据并记录打工角色信息、收支明细与真实打本时间
-    record.charName = UnitName("player")
-    record.class = select(2, UnitClass("player"))
+    record.charName = ownerName or UnitName("player")
+    record.class = ownerClass or select(2, UnitClass("player")) or "WARRIOR"
     record.realm = GetRealmName()
     record.raidTime = recordTime
     record.totalPeople = totalPeople
@@ -1633,7 +1908,44 @@ local function StartHistoryModule()
     end)
 end
 
--- 实时监听团本 BOSS 战斗与击杀，自动标记真实打本时间戳
+-- 自愈清洗被污染的在途表格数据（如外部5人本污染导致的时间戳偏离、非本团本拾取等）
+local function SanitizeActiveTables()
+    if not (BiaoGe and (BG.FBtable or BG.FBIDtable)) then return end
+    local fbList = BG.FBtable or {}
+    for _, fb in ipairs(fbList) do
+        if BiaoGe[fb] then
+            local rt = tonumber(BiaoGe[fb].raidTime)
+            local lrt = tonumber(BiaoGe[fb].lastRaidTime)
+            -- 若 lastRaidTime 比 raidTime 晚出 4 小时以上，说明被之后的 5 人本或日常拾取污染，自动纠正
+            if rt and lrt and (lrt - rt > 4 * 3600) then
+                BiaoGe[fb].lastRaidTime = rt
+            end
+            -- 清洗掉落拾取日志中的外部5人本条目
+            if BiaoGe[fb].lootHistory and type(BiaoGe[fb].lootHistory) == "table" then
+                local clean = {}
+                for _, item in ipairs(BiaoGe[fb].lootHistory) do
+                    local s = tostring(item.source or "")
+                    if not (s:find("熔炉") or s:find("围栏") or s:find("地牢") or s:find("监狱") or s:find("迷宫") or s:find("破碎") or s:find("城墙") or s:find("沼泽") or s:find("幽暗") or s:find("平台")) then
+                        table.insert(clean, item)
+                    end
+                end
+                BiaoGe[fb].lootHistory = clean
+            end
+            -- 重新推导打本角色：借助多重客观证据仲裁（raidRoster、买家、交易、入队记录）
+            -- 仅对包含实际内容的表格进行纠偏与固化，绝不盲目污染空表格
+            if IsBiaoGeHasContent and IsBiaoGeHasContent(fb) then
+                local owner, oClass = DeduceTableOwner(fb)
+                if owner and owner ~= "" and owner ~= "未知角色" then
+                    BiaoGe[fb].charName = owner
+                    BiaoGe[fb].class = oClass
+                end
+            end
+        end
+    end
+end
+ns.SanitizeActiveTables = SanitizeActiveTables
+
+-- 实时监听团本 BOSS 战斗与击杀，自动标记真实打本时间戳（仅限团队副本内）
 local raidEventFrame = CreateFrame("Frame")
 raidEventFrame:RegisterEvent("ENCOUNTER_END")
 raidEventFrame:RegisterEvent("BOSS_KILL")
@@ -1643,6 +1955,11 @@ raidEventFrame:SetScript("OnEvent", function(self, event, ...)
         local now = (GetServerTime and GetServerTime()) or time()
         BiaoGe[fb].raidTime = BiaoGe[fb].raidTime or now
         BiaoGe[fb].lastRaidTime = now
+        local myName = UnitName("player")
+        if myName and myName ~= "" then
+            BiaoGe[fb].charName = myName
+            BiaoGe[fb].class = select(2, UnitClass("player")) or "WARRIOR"
+        end
     end
 end)
 
@@ -1650,8 +1967,10 @@ local loadFrame = CreateFrame("Frame")
 loadFrame:RegisterEvent("PLAYER_LOGIN")
 loadFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
 loadFrame:SetScript("OnEvent", function(self, event)
+    SanitizeActiveTables()
     StartHistoryModule()
 end)
 
 -- 顶层立即预热执行
+SanitizeActiveTables()
 StartHistoryModule()

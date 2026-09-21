@@ -258,14 +258,30 @@ local function OnLootCaptured(lootPlayer, itemLink, count)
         return
     end
 
-    local fb = BG.FB1 or "TOC"
+    -- 严格检测当前是否处于团队副本内部，只有在该副本内掉落才关联该副本并更新时间戳
+    local inInstance, instanceType = IsInInstance()
+    local currentInstanceFB = nil
+    if inInstance and BG and BG.FBIDtable then
+        local FBID = select(8, GetInstanceInfo())
+        if FBID and BG.FBIDtable[FBID] then
+            currentInstanceFB = BG.FBIDtable[FBID]
+        end
+    end
+
+    -- 若玩家身处正规团本，fb采用该团本；若在5人本或野外，严禁污染BG.FB1团本的时间戳与表格数据
+    local fb = currentInstanceFB or BG.FB1 or "TOC"
     local db = LH.GetHistoryDB(fb)
 
-    -- 实时记录当前副本表格的打本真实开始与活跃时间
-    if BiaoGe and BiaoGe[fb] then
+    -- 实时记录当前副本表格的打本真实开始与活跃时间 (仅在身处该团本内部时才更新！)
+    if currentInstanceFB and BiaoGe and BiaoGe[currentInstanceFB] then
         local nowTs = (GetServerTime and GetServerTime()) or time()
-        BiaoGe[fb].raidTime = BiaoGe[fb].raidTime or nowTs
-        BiaoGe[fb].lastRaidTime = nowTs
+        BiaoGe[currentInstanceFB].raidTime = BiaoGe[currentInstanceFB].raidTime or nowTs
+        BiaoGe[currentInstanceFB].lastRaidTime = nowTs
+        local myName = UnitName("player")
+        if myName and myName ~= "" and (not BiaoGe[currentInstanceFB].charName or BiaoGe[currentInstanceFB].charName == "") then
+            BiaoGe[currentInstanceFB].charName = myName
+            BiaoGe[currentInstanceFB].class = select(2, UnitClass("player")) or "WARRIOR"
+        end
     end
 
     local pClass = GetPlayerClass(lootPlayer)
