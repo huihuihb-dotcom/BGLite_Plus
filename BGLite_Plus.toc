@@ -28,6 +28,7 @@ Core\WhoHistory.lua
 Core\TeamInfo.lua
 Core\TradeHistory.lua
 Core\TradeFix.lua
+Core\MailFix.lua
 Core\Reputation.lua
 Core\BestPrice.lua
 Core\ItemNameDB.lua

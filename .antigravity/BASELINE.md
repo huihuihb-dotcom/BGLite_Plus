@@ -1162,6 +1162,20 @@
     22. **v1.1.0 里程碑发版就绪 (2026-09-21)**:
         - 版本号正式定为 `1.1.0`，全面补齐 `BGLite_Plus.toc`、`Init.lua`（版本通信引擎兜底 `1.1.0`）及 `README.md` 中的「团本报表（打工收益/消费总览/周四重置结算）」简介；
         - 全库语法自检通过，已达工业级稳定发版标准。
+    23. **上游邮件与交易历史表 nil 索引根治：动态守护自愈盾 (2026-09-21)**:
+        - **故障定位**: 用户反馈收信/打开邮箱时偶发红字报错：
+          `Interface/AddOns/BGLite/Core/Module/MailHistory.lua:299: attempt to index field '?' (a nil value)`；
+        - **病根剖析**:
+          1. 上游 `MailHistory.lua` 和 `TradeHistory.lua` 在文件最顶层全局加载期缓存了 `local player = UnitName("player")` 与 `local realmID = GetRealmID()`，且仅在 `ADDON_LOADED` 阶段调用了一次 `EnsureCurrentCharacter()`；
+          2. 当玩家在多角色切换登录、跨服/时光漫游副本使用随身邮箱、或曾在下拉菜单中删除过历史角色记录时，当前角色的 `BiaoGe.mailHistory[realmID][player]` 在数据表中完全不存在（为 `nil`）；
+          3. 上游在 `SaveMail` 与 `RoadTrade` 写入时缺乏任何判空防御，裸调用 `tinsert(BiaoGe.mailHistory[realmID][player].info, ...)`，导致对 `nil` 的动态键索引引发 `attempt to index field '?' (a nil value)` 崩溃。
+        - **修复策略 (独立模块化隔离，便于后期官方修复后一键卸载)**:
+          1. **独立模块设计 (`Core/MailFix.lua`)**: 将所有守护与自愈逻辑完全隔离封装在 `Core/MailFix.lua` 独立模块中，并在 `BGLite_Plus.toc` 中挂载在 `TradeFix.lua` 之后；`Init.lua` 保持极简纯净调度；
+          2. **便捷卸载机制**: 若后期上游官方在 `BGLite` 中修复了此 Bug，只需在 `BGLite_Plus.toc` 中注销或直接删除 `Core/MailFix.lua` 即可 100% 干净卸载，零残留、零耦合；
+          3. **自动保护元表（Auto-Vivification Shield）**: 利用 Lua 元表 `__index` 动态拦截机制，当访问任何未初始化的 `realmID` 或 `player` 时，毫秒级自动补全并 `rawset` 生成合法的角色基础结构（`{ name, realmID, info = {}, class, level }`），彻底杜绝 `nil` 越界崩溃；
+          4. **多生命周期与事件触发自愈**: 在 `PLAYER_ENTERING_WORLD`、`MAIL_SHOW`、`MAIL_INBOX_UPDATE`、`TRADE_SHOW` 各事件节点自动进行主动检查与加固；
+          5. **协同覆盖**: 针对具备相同脆弱设计的 `BiaoGe.mailHistory` 与 `BiaoGe.tradeHistory` 执行全量协同防护，上游无需改动任何一行代码，实现全环境免疫。
+
 
 
 

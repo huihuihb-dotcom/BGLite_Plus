@@ -159,6 +159,11 @@ local function InitPlusUI()
     if ns.hasInitedPlusUI then return end
     ns.hasInitedPlusUI = true
 
+    -- 0.0 上游邮件记录 (MailHistory) 动态守护自愈 (由 Core/MailFix.lua 统一管理)
+    if ns.InitMailFix then
+        pcall(ns.InitMailFix)
+    end
+
     -- 0.1 保护上游 BGLite 拍卖聊天历史表，避免上游缺失初始化导致 tinsert 报 nil
     if BiaoGe and BiaoGe.auctionMSGhistory == nil then
         BiaoGe.auctionMSGhistory = {}
