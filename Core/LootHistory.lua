@@ -56,12 +56,15 @@ function LH.GetMaxStored()
     return BiaoGe.options.lootHistoryMaxRecords
 end
 
--- 修剪记录表，超过上限时自动移除最早的最前记录（末尾淘汰），严格保持不超过 500 条
+-- 修剪记录表，超过上限时自动移除最早的旧数据（末尾淘汰），严格保持不超过 500 条
 function LH.TrimDB(db)
     if not db or type(db) ~= "table" then return end
     local maxStored = LH.GetMaxStored()
-    while #db > maxStored do
-        table.remove(db)
+    local count = #db
+    if count > maxStored then
+        for i = count, maxStored + 1, -1 do
+            db[i] = nil
+        end
     end
 end
 
@@ -926,11 +929,11 @@ function ns.InitLootHistoryModule()
     if not (BG and BG.MainFrame) then return end
     LH.CreateMainFrame(BG.MainFrame)
 
-    -- 对所有副本的掉落记录进行存量修剪，严格保持不超过 500 条
-    if BiaoGe then
-        for _, fb in ipairs(BG.FBtable or {}) do
-            if BiaoGe[fb] and BiaoGe[fb].lootHistory then
-                LH.TrimDB(BiaoGe[fb].lootHistory)
+    -- 对所有副本的掉落记录进行存量修剪，严格保持不超过 500 条 (全量安全扫描，绝不遗漏)
+    if type(BiaoGe) == "table" then
+        for k, v in pairs(BiaoGe) do
+            if type(v) == "table" and type(v.lootHistory) == "table" then
+                LH.TrimDB(v.lootHistory)
             end
         end
     end
