@@ -682,7 +682,6 @@ function LH.CreateMainFrame(parent)
         if BG.DuiZhangMainFrame then BG.DuiZhangMainFrame:Hide() end
         if BG.TradeHistoryMainFrame then BG.TradeHistoryMainFrame:Hide() end
         if BG.AuctionPresetMainFrame then BG.AuctionPresetMainFrame:Hide() end
-        if BG.TitanGoblinMainFrame then BG.TitanGoblinMainFrame:Hide() end
         if BG.TabButtonsFB then BG.TabButtonsFB:Hide() end
 
         LH.UpdateVisibleRowCount()

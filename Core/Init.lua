@@ -141,7 +141,6 @@ local function HideAllSubFrames()
     SafeHide(BG.FilterClassItemMainFrame)
     SafeHide(BG.TradeHistoryMainFrame)
     SafeHide(BG.AuctionPresetMainFrame)
-    SafeHide(BG.TitanGoblinMainFrame)
     SafeHide(BG.HistoryMainFrame)
     if BG.LootHistoryMainFrame then
         SafeHide(BG.LootHistoryMainFrame)
@@ -199,9 +198,6 @@ local function InitPlusUI()
         if ns.AuctionPreset and ns.AuctionPreset.CreateMainFrame then
             ns.AuctionPreset.CreateMainFrame(BG.MainFrame)
         end
-    end
-    if ns.TitanGoblin and ns.TitanGoblin.CreateMainFrame then
-        ns.TitanGoblin.CreateMainFrame(BG.MainFrame)
     end
     if ns.InitLootHistoryModule then
         securecall(ns.InitLootHistoryModule)
@@ -461,7 +457,6 @@ local function InitPlusUI()
             SafeHide(BG.RaidToolMainFrame)
             SafeHide(BG.TradeHistoryMainFrame)
             SafeHide(BG.AuctionPresetMainFrame)
-            SafeHide(BG.TitanGoblinMainFrame)
             if BG.LootHistoryMainFrame then SafeHide(BG.LootHistoryMainFrame) end
             SafeHide(BG.TabButtonsFB)
             BiaoGe.lastFrame = "WorkerReport"
@@ -523,7 +518,7 @@ local function InitPlusUI()
 
         -- 逻辑权重排序表：
         -- 1. 表格 -> 2. 对账 -> 3. 交易记录 -> 4. 邮件记录 -> 5. 团本报表 (账务与打工收益成组紧随表格)
-        -- 6. 预设价格 -> 7. 装备库 -> 8. 心愿清单 -> 9. 团队工具 -> 10. 碎片统计 -> 11. 掉落记录
+        -- 6. 预设价格 -> 7. 装备库 -> 8. 心愿清单 -> 9. 团队工具 -> 10. 掉落记录
         local TAB_ORDER = {
             [BG.FBMainFrameTabNum or 1] = 1,              -- 表格
             [BG.DuiZhangMainFrameTabNum or 2] = 2,         -- 对账
@@ -534,8 +529,7 @@ local function InitPlusUI()
             [BG.ItemLibMainFrameTabNum or 20] = 7,         -- 装备库
             [BG.HopeMainFrameTabNum or 21] = 8,            -- 心愿清单
             [BG.RaidToolMainFrameTabNum or 22] = 9,        -- 团队工具
-            [BG.TitanGoblinMainFrameTabNum or 105] = 10,  -- 碎片统计
-            [BG.LootHistoryMainFrameTabNum or 107] = 11,  -- 掉落记录
+            [BG.LootHistoryMainFrameTabNum or 107] = 10,  -- 掉落记录
         }
 
         local validItems = {}

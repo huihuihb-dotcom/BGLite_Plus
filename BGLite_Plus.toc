@@ -34,8 +34,6 @@ Core\BestPrice.lua
 Core\ItemNameDB.lua
 Core\AuctionPreset.lua
 Core\AutoAuctionOnLoot.lua
-Core\DB_TitanExchange.lua
-Core\TitanGoblin.lua
 Core\LootHistory.lua
 Core\History.lua
 Core\WorkerReport.lua

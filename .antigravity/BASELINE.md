@@ -1282,3 +1282,11 @@
 
 
 
+
+    29. **模块边界与业务纯净化重构：剥离「碎片助手 (TitanGoblin)」至独立插件 (2026-09-25)**:
+        - **重构背景与决策**: 泰坦代币（碎片/余烬）兑换物资与拍卖行收益分析功能，本质上属于物资地精经济与个人变现工具，与金团表格（团队拍卖、账单记账、对账与分钱）的核心业务定位差异较大；
+        - **实施方案**:
+          1. 彻底将【碎片统计 / 碎片助手】功能从 BGLite_Plus 中剥离；
+          2. 物理移除 Core/TitanGoblin.lua 与 Core/DB_TitanExchange.lua，并从 BGLite_Plus.toc 中注销；
+          3. 清理 Core/Init.lua（移除 Tab 105 注册、SafeHide 及 Tab 排序链中的残留项）、Core/LootHistory.lua；
+          4. 碎片助手功能全面迁移并入独立的 BGLite_TitanCollector 插件中，升级为支持独立运行的全新泰坦物资工具。
