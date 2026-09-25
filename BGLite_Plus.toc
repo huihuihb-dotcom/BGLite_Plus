@@ -32,6 +32,7 @@ Core\MailFix.lua
 Core\Reputation.lua
 Core\BestPrice.lua
 Core\ItemNameDB.lua
+Core\Loot_ULDtitan.lua
 Core\AuctionPreset.lua
 Core\AutoAuctionOnLoot.lua
 Core\LootHistory.lua

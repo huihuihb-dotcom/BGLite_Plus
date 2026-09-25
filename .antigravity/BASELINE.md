@@ -1372,3 +1372,29 @@
     34. **修复 UpdateArrowVisual 局部作用域遮蔽导致的 nil 调用报错 (2026-09-26)**:
         - **报错根因**: 此前 `UpdateArrowVisual` 定义在 `WR.CreateUI(parent)` 闭包内部，而 `WR.UpdateUI()` 位于外部全局作用域，在执行折叠状态重绘时触发 `attempt to call a nil value`；
         - **修复措施**: 将 `UpdateArrowVisual(arrow, isCollapsed)` 提升至 `WorkerReport.lua` 模块文件级顶层全局作用域，并绑定至 `WR.UpdateArrowVisual`，彻底消除作用域隔离，保障点击展开/收起及重绘时 100% 顺畅执行。
+
+
+* **时光服 P6 奥杜尔 (ULDtitan) 全量掉落数据补丁集成 (2026-09-26)**:
+  * **背景与缺陷定位**:
+    1. 用户反馈 BGLite 缺少奥杜尔掉落。经深度逆向排查发现：BGLite 核心虽已预设了 `ULDtitan` 的界面布局 (`DB.lua: AddDB("ULDtitan", ...)`、Boss 名字 (`DB_BossName.lua`) 与击杀 ID (`DB_EncounterID.lua`)，但在底层 `DB_Loot_Titan.lua` 中**完全漏掉了奥杜尔的物品掉落数据** (`BG.Loot["ULDtitan"] = nil`)；
+    2. 导致打奥杜尔时无法自动摸尸体记账、表格中装备格点击弹窗无可选物品、心愿单 (Hope) 与装备库 (ItemLib) 均无法展示奥杜尔装备。
+  * **补丁架构实施 (零侵入上游 BGLite)**:
+    1. **数据源解析与精准提取**: 从 `AtlasLootMY_DungeonsAndRaids/data-wrath.lua` 中系统性提取了奥杜尔全部 14 个 Boss 及小怪/图纸/任务杂项的掉落 itemID（包含时光服魔改合并掉落与专属瓦兰奈尔碎片 `270187`）；
+    2. **Boss 映射校对**:
+       - boss1: 烈焰巨兽 (24 件)
+       - boss2: 锋鳞 (14 件)
+       - boss3: 掌炉者伊格尼斯 (16 件)
+       - boss4: XT-002 拆解者 (24 件)
+       - boss5: 钢铁议会 (28 件)
+       - boss6: 科隆加恩 (15 件)
+       - boss7: 欧尔利亚 (15 件)
+       - boss8: 霍迪尔 (21 件)
+       - boss9: 托里姆 (23 件)
+       - boss10: 弗蕾亚 (22 件)
+       - boss11: 米米尔隆 (21 件)
+       - boss12: 维扎克斯将军 (25 件)
+       - boss13: 尤格萨隆 (26 件)
+       - boss14: 观察者奥尔加隆 (33 件)
+       - boss15: 杂项（装绑紫装/专业图纸/任务/碎片，共 32 件）
+    3. **T8 套装兑换物与橙锤映射**: 注入了 `ExchangeItems` 映射字典（胸/头/腿/手/肩的 T8 Token 对应职业装备，以及瓦兰奈尔的碎片对应关系）；
+    4. **模块落成与加载防御**: 新建 [Loot_ULDtitan.lua](file:///e:/World%20of%20Warcraft/_classic_titan_/Interface/AddOns/BGLite_Plus/Core/Loot_ULDtitan.lua)，并在 [BGLite_Plus.toc](file:///e:/World%20of%20Warcraft/_classic_titan_/Interface/AddOns/BGLite_Plus/BGLite_Plus.toc) 中注册，启动即刻注入并挂钩 `PLAYER_LOGIN` 与 `PLAYER_ENTERING_WORLD` 确保防御自愈。
