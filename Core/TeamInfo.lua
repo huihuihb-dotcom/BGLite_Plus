@@ -3,6 +3,10 @@ local L = ns.L
 local LibBG = ns.LibBG
 local RGB = ns.RGB
 local SetClassCFF = ns.SetClassCFF
+local AddTexture = ns.AddTexture or (BG and BG.AddTexture) or function(tex, sz)
+    sz = sz or 16
+    return string.format("|T%s:%d:%d:0:0:64:64:4:60:4:60|t ", tostring(tex), sz, sz)
+end
 
 local TeamInfo = {}
 ns.TeamInfo = TeamInfo
@@ -426,6 +430,18 @@ function TeamInfo.GetCardState()
     InitDataPersistence()
     local currentFB = GetCurrentFB()
 
+    -- 历史表格查看态检测：如果正在查看历史账单，优先只读展示该历史快照中的 teamInfo
+    if BG and BG.HistoryMainFrame and BG.HistoryMainFrame:IsShown() and BG.History and BG.History.chooseNum then
+        local num = BG.History.chooseNum
+        local histList = BiaoGe and BiaoGe.HistoryList and BiaoGe.HistoryList[currentFB]
+        if histList and histList[num] then
+            local DT = histList[num][1]
+            local histData = BiaoGe.History and BiaoGe.History[currentFB] and BiaoGe.History[currentFB][DT]
+            local histTeam = histData and histData.teamInfo
+            return 3, histTeam or { yy = "", leader = "", recruits = {} }, currentFB, true
+        end
+    end
+
     local inGroup = IsInGroup() or IsInRaid()
     local fbData = BiaoGe and BiaoGe[currentFB] and BiaoGe[currentFB].teamInfo
     local hasFBData = fbData and ((fbData.leader and fbData.leader ~= "") or (fbData.recruits and #fbData.recruits > 0) or (fbData.yy and fbData.yy ~= ""))
@@ -617,6 +633,7 @@ end
 
 function TeamInfo.SetYY(yy)
     if not yy then return end
+    if BG and BG.HistoryMainFrame and BG.HistoryMainFrame:IsShown() then return end
     InitDataPersistence()
     local cleanYY = tostring(yy):gsub("%s", "")
     local data = TeamInfo.GetActiveDataForWrite()
@@ -954,11 +971,11 @@ function TeamInfo.CreateUI()
     local parent = BG and BG.MainFrame
     if not parent or TeamInfo.sideFrame then return end
 
-    -- 默认展开侧边栏（与左侧拍卖记录 showAuctionLogFrame or 1 保持一致）
+    -- 默认收起侧边栏（默认不展开，保存玩家当前的记忆状态）
     BiaoGe = BiaoGe or {}
     BiaoGe.options = BiaoGe.options or {}
     if BiaoGe.options.showTeamInfoFrame == nil then
-        BiaoGe.options.showTeamInfoFrame = 1
+        BiaoGe.options.showTeamInfoFrame = 0
     end
     if BiaoGe.options.teamInfoAuctionThreshold == nil then
         BiaoGe.options.teamInfoAuctionThreshold = 5000
@@ -1267,7 +1284,7 @@ function TeamInfo.UpdateUI()
     local f = TeamInfo.sideFrame
     if not f or not f:IsVisible() then return end
 
-    local state, data, currentFB = TeamInfo.GetCardState()
+    local state, data, currentFB, isHistoryMode = TeamInfo.GetCardState()
     local fbShort = BG.GetFBinfo and BG.GetFBinfo(currentFB, "shortName") or currentFB
 
     -- 动态与主界面及拍卖记录保持一致高度
@@ -1305,10 +1322,31 @@ function TeamInfo.UpdateUI()
     else
         -- 状态 3：单人 / 副本绑定存档态 (暗灰边框)
         f:SetBackdropBorderColor(0.5, 0.5, 0.5, 0.7)
-        f.statusTag:SetText(string.format("|cff888888[%s存档]|r", fbShort))
+        if isHistoryMode then
+            f.statusTag:SetText(string.format("|cff888888[%s历史存档]|r", fbShort))
+        else
+            f.statusTag:SetText(string.format("|cff888888[%s存档]|r", fbShort))
+        end
         if f.btnBind then f.btnBind:Hide() end
         if f.btnScan then f.btnScan:Hide() end
-        if f.btnClear then f.btnClear:Show() end
+        if f.btnClear then
+            if isHistoryMode then
+                f.btnClear:Hide()
+            else
+                f.btnClear:Show()
+            end
+        end
+    end
+
+    if f.yyEdit then
+        if isHistoryMode then
+            if f.yyEdit.SetEnabled then f.yyEdit:SetEnabled(false) end
+            if f.yyEdit.EnableMouse then f.yyEdit:EnableMouse(false) end
+            f.yyEdit:ClearFocus()
+        else
+            if f.yyEdit.SetEnabled then f.yyEdit:SetEnabled(true) end
+            if f.yyEdit.EnableMouse then f.yyEdit:EnableMouse(true) end
+        end
     end
 
     if data and data.leader and data.leader ~= "" then
@@ -1374,6 +1412,7 @@ function TeamInfo.UpdateUI()
             local btn = f.entries[i]
             if not btn then
                 btn = CreateFrame("Button", nil, f.content, "BackdropTemplate")
+                btn:RegisterForClicks("AnyUp")
                 btn:SetSize(292, itemHeight)
                 btn:SetFrameStrata(f:GetFrameStrata())
                 btn:SetFrameLevel(f.content:GetFrameLevel() + 2)
@@ -1404,6 +1443,24 @@ function TeamInfo.UpdateUI()
                 btn.bodyText = bodyText
 
                 btn:SetScript("OnClick", function(self, button)
+                    if button == "RightButton" and IsAltKeyDown() then
+                        local _, _, _, isHist = TeamInfo.GetCardState()
+                        if isHist then return end
+                        if self.entryIndex and self.dataRef and self.dataRef.recruits then
+                            table.remove(self.dataRef.recruits, self.entryIndex)
+                            if TeamInfo.stagingData and TeamInfo.stagingData.isBound and TeamInfo.stagingData.boundFB then
+                                local bfb = TeamInfo.stagingData.boundFB
+                                if BiaoGe and BiaoGe[bfb] and BiaoGe[bfb].teamInfo then
+                                    BiaoGe[bfb].teamInfo.recruits = BG.Copy and BG.Copy(self.dataRef.recruits) or self.dataRef.recruits
+                                end
+                            end
+                            if BG.PlaySound then BG.PlaySound(1) end
+                            GameTooltip:Hide()
+                            TeamInfo.UpdateUI()
+                        end
+                        return
+                    end
+
                     if self.rawText and self.rawText ~= "" then
                         local editBox = ChatEdit_ChooseBoxForSend and ChatEdit_ChooseBoxForSend() or DEFAULT_CHAT_FRAME.editBox
                         ChatEdit_ActivateChat(editBox)
@@ -1421,7 +1478,11 @@ function TeamInfo.UpdateUI()
                     GameTooltip:AddLine(self.headerText or "", 1, 1, 1)
                     GameTooltip:AddLine(self.rawText or "", 0.9, 0.9, 0.9, true)
                     GameTooltip:AddLine(" ")
-                    GameTooltip:AddLine(L["点击此条可将正文放入聊天输入框"], 0.6, 0.6, 0.6)
+                    GameTooltip:AddLine(AddTexture("LEFT") .. (L["点击将正文放入聊天输入框"] or "点击将正文放入聊天输入框"), 0.0, 0.82, 1.0, true)
+                    local _, _, _, isHist = TeamInfo.GetCardState()
+                    if not isHist then
+                        GameTooltip:AddLine(AddTexture("RIGHT") .. (L["ALT+右键：删除此条通告记录"] or "ALT+右键：删除此条通告记录"), 1.0, 0.35, 0.35, true)
+                    end
                     GameTooltip:Show()
                 end)
                 btn:SetScript("OnLeave", function(self)
@@ -1438,6 +1499,8 @@ function TeamInfo.UpdateUI()
             btn.bodyText:SetText(item.text or "")
             btn.headerText = header
             btn.rawText = item.text or ""
+            btn.entryIndex = i
+            btn.dataRef = data
             btn:Show()
 
             startY = startY + itemHeight + 3
@@ -1475,6 +1538,42 @@ function TeamInfo.ClearFBBinding(targetFB)
 end
 TeamInfo.ClearTeamInfo = TeamInfo.ClearFBBinding -- 保持向后兼容
 
+-- 保存历史表格或清空当前表格时，彻底清空当前副本的团队信息与暂存区数据
+function TeamInfo.ClearOnSaveHistory(targetFB)
+    InitDataPersistence()
+    targetFB = targetFB or GetCurrentFB()
+
+    -- 1. 清空当前副本绑定的团队信息持久化存档
+    if targetFB and BiaoGe and BiaoGe[targetFB] then
+        BiaoGe[targetFB].teamInfo = nil
+    end
+
+    -- 2. 清空并重置队伍暂存区（招募记录、YY号、解绑标记）
+    local staging = TeamInfo.stagingData
+    if staging then
+        staging.yy = ""
+        staging.recruits = {}
+        staging.isBound = false
+        staging.boundFB = nil
+        if not IsInGroup() and not IsInRaid() then
+            staging.leader = ""
+        else
+            staging.leader = GetRaidLeaderName() or ""
+        end
+    end
+
+    -- 3. 重置输入框
+    local f = TeamInfo.sideFrame
+    if f and f.yyEdit and not f.yyEdit:HasFocus() then
+        f.yyEdit:SetText("")
+    end
+
+    -- 4. 立即刷新 UI
+    if TeamInfo.UpdateUI then
+        TeamInfo.UpdateUI()
+    end
+end
+
 -- 清空全局独立暂存区
 function TeamInfo.ClearStaging()
     InitDataPersistence()
@@ -1499,7 +1598,8 @@ end
 
 -- 智能清空当前卡片 (由右上角【清空】按钮调用)
 function TeamInfo.ClearCurrentCard()
-    local state, data, currentFB = TeamInfo.GetCardState()
+    local state, data, currentFB, isHistoryMode = TeamInfo.GetCardState()
+    if isHistoryMode then return end
     if state == 1 then
         TeamInfo.ClearStaging()
         DEFAULT_CHAT_FRAME:AddMessage("|cff00BFFF[BGLite]|r " .. L["已清空当前队伍暂存区记录"])

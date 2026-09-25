@@ -54,13 +54,12 @@ local function InitHistoryDB()
             -- 1. 严格锁死每个副本 10 份上限
             EnforceHistoryLimit(FB)
 
-            -- 2. 合规性清洗：自动剥离存量历史记录中可能存在的角色名、名单及聊天日志
+            -- 2. 合规性清洗：自动剥离存量历史记录中可能存在的角色名、名单及聊天日志（保留合法的物品、收支与团队关键信息）
             for dt, record in pairs(BiaoGe.History[FB]) do
                 if type(record) == "table" then
                     record.raidRoster = nil
                     record.auctionLog = nil
                     record.leaderInfo = nil
-                    record.teamInfo = nil
                     record.tradeTbl = nil
                     for b = 1, 35 do
                         local bTbl = record["boss" .. b]
@@ -794,6 +793,31 @@ function BG.SaveBiaoGe(FB, isSilent)
     record.penalty = penalty
     record.netWage = wageNum + subsidy - penalty - mySpend
 
+    -- 核心：联合存储 TeamInfo（YY号、团长、招募通告等）
+    local teamData = nil
+    if BiaoGe[FB] and BiaoGe[FB].teamInfo and (
+        (BiaoGe[FB].teamInfo.yy and BiaoGe[FB].teamInfo.yy ~= "") or
+        (BiaoGe[FB].teamInfo.leader and BiaoGe[FB].teamInfo.leader ~= "") or
+        (BiaoGe[FB].teamInfo.recruits and #BiaoGe[FB].teamInfo.recruits > 0)
+    ) then
+        teamData = BiaoGe[FB].teamInfo
+    elseif ns.TeamInfo and ns.TeamInfo.stagingData and (
+        (ns.TeamInfo.stagingData.yy and ns.TeamInfo.stagingData.yy ~= "") or
+        (ns.TeamInfo.stagingData.leader and ns.TeamInfo.stagingData.leader ~= "") or
+        (ns.TeamInfo.stagingData.recruits and #ns.TeamInfo.stagingData.recruits > 0)
+    ) then
+        teamData = ns.TeamInfo.stagingData
+    end
+
+    if teamData then
+        record.teamInfo = BG.Copy and BG.Copy(teamData) or {
+            yy = teamData.yy or "",
+            leader = teamData.leader or "",
+            recruits = (BG.Copy and BG.Copy(teamData.recruits)) or {},
+            bindTime = teamData.bindTime or serverTime,
+        }
+    end
+
     BiaoGe.History[FB][DT] = record
 
     local titleSummary = string.format("%s %s人 工资:%s", fbShort, totalPeople, wageNum)
@@ -889,6 +913,17 @@ function BG.SetBiaoGeFormHistory(FB, num)
         end
     end
 
+    -- 核心：还原 TeamInfo
+    if type(histData.teamInfo) == "table" then
+        BiaoGe[FB].teamInfo = BG.Copy and BG.Copy(histData.teamInfo) or histData.teamInfo
+    else
+        BiaoGe[FB].teamInfo = nil
+    end
+
+    if ns.TeamInfo and ns.TeamInfo.UpdateUI then
+        ns.TeamInfo.UpdateUI()
+    end
+
     if BG.EscHistoryFrame then
         BG.EscHistoryFrame()
     end
@@ -963,9 +998,18 @@ local function CreateHistoryUI()
             end
 
             BG.UpdateHistoryButton()
+            if ns.TeamInfo and ns.TeamInfo.sideFrame then
+                ns.TeamInfo.sideFrame:Show()
+            end
+            if ns.TeamInfo and ns.TeamInfo.UpdateUI then
+                ns.TeamInfo.UpdateUI()
+            end
         end)
 
         BG.HistoryMainFrame:SetScript("OnHide", function(self)
+            if BG.History then
+                BG.History.chooseNum = nil
+            end
             if BG.History.List then
                 BG.History.List:Hide()
             end
@@ -1036,6 +1080,12 @@ local function CreateHistoryUI()
                 BG._isSavingHistoryClear = true
                 BG.ClearBiaoGe("biaoge", FB)
                 BG._isSavingHistoryClear = nil
+            end
+            -- 同步清空当前活跃视图下的右侧团队信息留存
+            if ns.TeamInfo and ns.TeamInfo.ClearOnSaveHistory then
+                ns.TeamInfo.ClearOnSaveHistory(FB)
+            elseif ns.TeamInfo and ns.TeamInfo.ClearFBBinding then
+                ns.TeamInfo.ClearFBBinding(FB)
             end
             if BG.PlaySound then
                 BG.PlaySound(2)
@@ -1246,12 +1296,16 @@ local function CreateHistoryUI()
     function BG.EscHistoryFrame()
         if BG.FrameHide then BG.FrameHide(0) end
         if BG.HistoryMainFrame then BG.HistoryMainFrame:Hide() end
+        if BG.History then BG.History.chooseNum = nil end
         if BG.FBMainFrame then BG.FBMainFrame:Show() end
         if BG.Title then BG.Title:Show() end
         if BG.VerText then BG.VerText:Show() end
         if BG.UpdateAuctionLogFrame then BG.UpdateAuctionLogFrame() end
         if BG.PlaySound then BG.PlaySound(1) end
         BG.UpdateHistoryButton()
+        if ns.TeamInfo and ns.TeamInfo.UpdateUI then
+            ns.TeamInfo.UpdateUI()
+        end
     end
     escBtn:SetScript("OnClick", BG.EscHistoryFrame)
 
@@ -1545,6 +1599,14 @@ function BG.CreatHistoryListButton(FB)
             end
             if BG["HistoryFrame" .. FB] then BG["HistoryFrame" .. FB]:Show() end
 
+            -- 展开右侧团队信息面板并加载该历史快照的团队信息
+            if ns.TeamInfo and ns.TeamInfo.sideFrame then
+                ns.TeamInfo.sideFrame:Show()
+            end
+            if ns.TeamInfo and ns.TeamInfo.UpdateUI then
+                ns.TeamInfo.UpdateUI()
+            end
+
             if BG.History.Title then
                 BG.History.Title:SetText((L["<历史表格>"] or "<历史表格>") .. " " .. list[i][2])
             end
@@ -1656,6 +1718,16 @@ local function HookClearBiaoGe()
                 BiaoGe[FB].lootHistory = nil
                 BiaoGe[FB].charName = nil
                 BiaoGe[FB].class = nil
+                if not BG._isApplyingHistory then
+                    if ns.TeamInfo and ns.TeamInfo.ClearOnSaveHistory then
+                        ns.TeamInfo.ClearOnSaveHistory(FB)
+                    else
+                        BiaoGe[FB].teamInfo = nil
+                        if ns.TeamInfo and ns.TeamInfo.UpdateUI then
+                            ns.TeamInfo.UpdateUI()
+                        end
+                    end
+                end
             end
             return res
         end

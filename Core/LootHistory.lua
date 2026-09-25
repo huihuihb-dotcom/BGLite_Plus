@@ -44,7 +44,26 @@ LH.rowFrames = {}
 
 local VISIBLE_ROWS = 21
 local ROW_HEIGHT = 23
-local MAX_STORED = 400
+local DEFAULT_MAX_STORED = 500
+
+-- 获取最大存储上限配置 (默认 500 条)
+function LH.GetMaxStored()
+    BiaoGe = BiaoGe or {}
+    BiaoGe.options = BiaoGe.options or {}
+    if not BiaoGe.options.lootHistoryMaxRecords or BiaoGe.options.lootHistoryMaxRecords <= 0 then
+        BiaoGe.options.lootHistoryMaxRecords = DEFAULT_MAX_STORED
+    end
+    return BiaoGe.options.lootHistoryMaxRecords
+end
+
+-- 修剪记录表，超过上限时自动移除最早的最前记录（末尾淘汰），严格保持不超过 500 条
+function LH.TrimDB(db)
+    if not db or type(db) ~= "table" then return end
+    local maxStored = LH.GetMaxStored()
+    while #db > maxStored do
+        table.remove(db)
+    end
+end
 
 -- 模式匹配串预热 (采用暴雪原生本地化常量)
 local LOOT_PATTERNS = {}
@@ -59,12 +78,13 @@ do
     if LOOT_ITEM_PUSHED then table.insert(LOOT_PATTERNS, { pat = LOOT_ITEM_PUSHED:gsub("%%s", "(.+)"), self = false, multi = false }) end
 end
 
--- 获取当前副本掉落历史记录表
+-- 获取当前副本掉落历史记录表 (自动修剪超额数据保持 500 条)
 function LH.GetHistoryDB(fb)
     fb = fb or BG.FB1
     if not (fb and BiaoGe) then return {} end
     BiaoGe[fb] = BiaoGe[fb] or {}
     BiaoGe[fb].lootHistory = BiaoGe[fb].lootHistory or {}
+    LH.TrimDB(BiaoGe[fb].lootHistory)
     return BiaoGe[fb].lootHistory
 end
 
@@ -318,13 +338,11 @@ local function OnLootCaptured(lootPlayer, itemLink, count)
         source = source,
     }
 
-    -- 倒序插入在最前
+    -- 倒序插入在最前 (最新记录在第 1 项)
     table.insert(db, 1, entry)
 
-    -- 超过上限移除旧数据
-    while #db > MAX_STORED do
-        table.remove(db)
-    end
+    -- 超过上限移除最早的旧数据，严格保持最多 500 条
+    LH.TrimDB(db)
 
     -- 如果界面处于打开态，即时刷新
     if LH.MainFrame and LH.MainFrame:IsShown() then
@@ -765,13 +783,14 @@ function LH.RefreshList()
     -- 更新统计提示
     if LH.MainFrame.summaryText then
         local total = #rawDB
+        local maxStored = LH.GetMaxStored()
         if total == 0 then
             LH.MainFrame.summaryText:SetText(BG.STC_dis("暂无掉落数据"))
         else
             local statusPart = unTabledCount > 0
                 and string.format("，其中 %s 件尚未记入表格", BG.STC_r1(tostring(unTabledCount)))
                 or string.format("，%s", BG.STC_g1("全部装备均已入账"))
-            LH.MainFrame.summaryText:SetText(string.format("共记录 %s 件掉落%s", BG.STC_y2(tostring(total)), statusPart))
+            LH.MainFrame.summaryText:SetText(string.format("共记录 %s/%s 件掉落%s", BG.STC_y2(tostring(total)), tostring(maxStored), statusPart))
         end
     end
 
@@ -906,4 +925,13 @@ end)
 function ns.InitLootHistoryModule()
     if not (BG and BG.MainFrame) then return end
     LH.CreateMainFrame(BG.MainFrame)
+
+    -- 对所有副本的掉落记录进行存量修剪，严格保持不超过 500 条
+    if BiaoGe then
+        for _, fb in ipairs(BG.FBtable or {}) do
+            if BiaoGe[fb] and BiaoGe[fb].lootHistory then
+                LH.TrimDB(BiaoGe[fb].lootHistory)
+            end
+        end
+    end
 end

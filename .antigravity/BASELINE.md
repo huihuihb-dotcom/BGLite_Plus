@@ -1398,3 +1398,86 @@
        - boss15: 杂项（装绑紫装/专业图纸/任务/碎片，共 32 件）
     3. **T8 套装兑换物与橙锤映射**: 注入了 `ExchangeItems` 映射字典（胸/头/腿/手/肩的 T8 Token 对应职业装备，以及瓦兰奈尔的碎片对应关系）；
     4. **模块落成与加载防御**: 新建 [Loot_ULDtitan.lua](file:///e:/World%20of%20Warcraft/_classic_titan_/Interface/AddOns/BGLite_Plus/Core/Loot_ULDtitan.lua)，并在 [BGLite_Plus.toc](file:///e:/World%20of%20Warcraft/_classic_titan_/Interface/AddOns/BGLite_Plus/BGLite_Plus.toc) 中注册，启动即刻注入并挂钩 `PLAYER_LOGIN` 与 `PLAYER_ENTERING_WORLD` 确保防御自愈。
+
+
+* **历史表格团队信息 (TeamInfo) 联合存储与抽屉面板联动恢复 (2026-09-26)**:
+  * **背景与排查确认**:
+    - 用户反馈重新打开表格历史记录后，保存的信息里似乎没有保存“团队信息”，点击历史记录时右侧面板未拉出团队信息。
+    - **深度排查结论**:
+      1. **确实未保存**: 此前在精简合规重构 Core/History.lua 时，BG.SaveBiaoGe 未将 teamInfo 写入 record 快照；且 InitHistoryDB 中仍保留了 record.teamInfo = nil 的合规清洗项，导致历史快照中未存入且清空了存量团队信息；
+      2. **抽屉未拉出且状态未感知**: BG.HistoryMainFrame 在打开以及用户点击历史列表项时，未显式调用呼出右侧抽屉面板；且 Core/TeamInfo.lua 的 TeamInfo.GetCardState() 缺失了历史查看模式检测分支，导致即使面板被手动展开，也无法展示该历史快照的团队信息。
+  * **修复与架构落地**:
+    1. **清除误删，恢复联合持久化**:
+       - 在 [History.lua](file:///e:/World%20of%20Warcraft/_classic_titan_/Interface/AddOns/BGLite_Plus/Core/History.lua) 的 InitHistoryDB() 中彻底移除 record.teamInfo = nil；
+       - 在 BG.SaveBiaoGe 中联合保存 record.teamInfo：深度拷贝当前副本 BiaoGe[FB].teamInfo（若尚未绑定但处于打本队伍中，智能回退暂存区 TeamInfo.stagingData 保底），保证无论是手动保存还是进本/清表自动归档，都能完整固化当时的 YY 频道、团长与招募喊话通告；
+    2. **应用历史同步还原团队信息**:
+       - 在 BG.SetBiaoGeFormHistory 应用历史表格时，同步将快照中的 teamInfo 还原至 BiaoGe[FB].teamInfo，并即时触发 ns.TeamInfo.UpdateUI()；
+    3. **点击历史条目自动拉出右侧抽屉面板**:
+       - 在 HistoryMainFrame 的 OnShow 脚本及点击历史账单列表项（list[i]）时，显式调用 ns.TeamInfo.sideFrame:Show()，同步置位 BiaoGe.options.showTeamInfoFrame = 1，并触发 ns.TeamInfo.UpdateUI() 展开面板；
+    4. **TeamInfo 历史状态机与只读保护闭环**:
+       - 在 [TeamInfo.lua](file:///e:/World%20of%20Warcraft/_classic_titan_/Interface/AddOns/BGLite_Plus/Core/TeamInfo.lua) 的 TeamInfo.GetCardState() 恢复历史模式检测：当检测到 BG.HistoryMainFrame:IsShown() 且选定了历史序号 chooseNum 时，优先读取该快照的 teamInfo，返回状态 3 与 isHistoryMode = true；
+       - 在 TeamInfo.UpdateUI() 中，历史模式下状态标签精准显示为 |cff888888[%s历史存档]|r，自动隐藏清空按钮（btnClear），并禁用 YY 键盘输入修改（保留鼠标右键复制）；
+       - 在 TeamInfo.SetYY 与 TeamInfo.ClearCurrentCard 中施加历史模式硬拦截保护，彻底杜绝历史查账对当前队伍数据的污染；
+       - 在点击【返回】（BG.EscHistoryFrame）退出历史模式时，自动调用 ns.TeamInfo.UpdateUI() 恢复常规队伍与表格状态。
+
+
+* **团队信息通告项「ALT+右键删除单条」与 Tooltip 规范润色 (2026-09-26)**:
+  * **用户诉求与设计**:
+    1. 在可编辑状态下（当前团队/活跃副本），支持通过 ALT + 右键 快捷删除某条不需要的通告；
+    2. 悬停 Tooltip 提示进行专业润色，采用暴雪原生鼠标图标与对比配色；
+    3. 历史状态（只读存档）下拉出面板时，坚决不显示删除提示，且禁止删除。
+  * **技术实现**:
+    1. **注册全按键监听 (RegisterForClicks("AnyUp"))**: 确保按钮可以捕获右键及组合键事件；
+    2. **删除与即时同步**:
+       - 在 OnClick 中判断 utton == "RightButton" and IsAltKeyDown()；
+       - 若 isHistoryMode 为 true 坚决拦截（不让删）；
+       - 若处于常规编辑状态，从 dataRef.recruits 中精准 	able.remove 该条记录，并自动同步至已绑定的副本数据，调用 TeamInfo.UpdateUI() 即时刷新重绘；
+    3. **Tooltip 优雅润色**:
+       - 原生左键图标：天蓝色 |cff00BFFF[左键]|r 点击将正文放入聊天输入框；
+       - 原生右键图标（仅非历史模式展示）：醒目红 |cffFF5555[ALT+右键]|r 删除此条通告记录；
+       - 历史查看态下自动隐去删除提示，保持历史存档的严谨只读性。
+
+
+* **团队信息默认显隐策略调整为「出厂默认不展开 + 维持玩家记忆」 (2026-09-26)**:
+  * **用户诉求**: 将团队信息侧边栏改为“默认不展开”，同时保留玩家手动点击展开/收起的持久化记忆机制；
+  * **实施落地**:
+    1. **默认缺省值重置为 0**: 将 BiaoGe.options.showTeamInfoFrame 缺省值由 1（自动展开）改为  （默认收起）；
+    2. **老数据平滑迁移 (BG.Once)**: 注入 BG.Once("teamInfoDefaultClosed_260926", 260926, ...)，在玩家升级后首次载入时，将老配置默认值平滑重置为   一次，重载即刻生效；
+    3. **玩家记忆机制 100% 保持**: 玩家点击顶栏 [团队信息] 展开时记录为 1，点击收起或点 [X] 时记录为  ，WTF 跨会话完整记忆；
+    4. **历史查账免污染**: 点击历史表格快照查账时，仅临时拉出 sideFrame:Show() 展示数据，退出历史模式（点返回）时，若玩家原本设置为关闭则自动恢复收起，绝不篡改玩家日常的显隐记忆偏好。
+
+
+* **精简团队信息生命周期逻辑：移除返回强行隐藏与 Once 强制清洗 (2026-09-26)**:
+  - 移除了退出历史模式（BG.EscHistoryFrame）中强行调用 sideFrame:Hide() 的多余判断，退出时仅执行 UpdateUI() 数据自适应刷新；
+  - 移除了 TeamInfo.lua 中 BG.Once 对已有用户配置的硬性重置，仅纯粹保留默认值 showTeamInfoFrame = 0，玩家已保存的状态自然保留，零侵入、零多余处理。
+
+* **修复 TeamInfo.lua 致命 Lua 报错致当前状态/历史状态右侧抽屉空白 Bug (2026-09-26)**:
+  - **报错成因**:
+    - [TeamInfo.lua](file:///e:/World%20of%20Warcraft/_classic_titan_/Interface/AddOns/BGLite_Plus/Core/TeamInfo.lua) 在此前加入历史只读防护逻辑时，调用了不存在的魔兽 API `f.yyEdit:EnableKeyboardInput(false/true)`；
+    - 魔兽原生 EditBox 控件并无该方法，导致在当前团队状态（走 1345 行 `EnableKeyboardInput(true)`）及历史状态（走 1343 行 `EnableKeyboardInput(false)`）下均抛出致命错误 `attempt to call a nil value`；
+    - 该报错使 `TeamInfo.UpdateUI()` 在设置 YY/团长及渲染通告列表前直接中断退出，导致已存账单及当前队伍的数据无法渲染，右侧面板视觉呈现为空白。
+  - **修复实施**:
+    1. **使用魔兽原生 API**: 将 `EnableKeyboardInput` 替换为 EditBox 原生合法的 `SetEnabled(bool)` 与 `EnableMouse(bool)`，历史只读态下清除焦点 `ClearFocus()`，确保 `UpdateUI` 无论在当前态还是历史态均平稳流畅执行；
+    2. **历史指针彻底重置**: 在 [History.lua](file:///e:/World%20of%20Warcraft/_classic_titan_/Interface/AddOns/BGLite_Plus/Core/History.lua) 的 `HistoryMainFrame` `OnHide` 以及 `BG.EscHistoryFrame` 中将 `BG.History.chooseNum` 重置为 `nil`，消除历史指针残留对单人/未清理账单状态的干扰。
+
+* **保存历史/清空当前表格时联动清空活跃视图下的团队信息 (2026-09-26)**:
+  - **问题成因**:
+    - 玩家在打完团本点击【保存表格】（或清空表格）时，左侧账单区被清空并归档入历史，快照内虽已成功记录了该场次的 `teamInfo`；
+    - 但当前活跃副本的持久化存档 `BiaoGe[FB].teamInfo` 及队伍暂存区 `stagingData` 未被同步清空重置；
+    - 导致左侧账单清空后，右侧依然残留上一场已经归档结账的团长、YY号与招募通告。
+  - **技术落地**:
+    1. **实现专属清理重置 API**: 在 [TeamInfo.lua](file:///e:/World%20of%20Warcraft/_classic_titan_/Interface/AddOns/BGLite_Plus/Core/TeamInfo.lua) 中新增 `TeamInfo.ClearOnSaveHistory(targetFB)`，将当前副本绑定存档 `BiaoGe[FB].teamInfo` 彻底设为 `nil`，解绑并重置暂存区（清空 YY、通告列表，若已退队连同团长一并清空），并将输入框重置为空；
+    2. **双重保障触发**:
+       - 在 [History.lua](file:///e:/World%20of%20Warcraft/_classic_titan_/Interface/AddOns/BGLite_Plus/Core/History.lua) 的保存按钮（`saveBtn`）点击保存成功并清空表格后，显式调用 `ns.TeamInfo.ClearOnSaveHistory(FB)`；
+       - 在通用表格清空 Hook（`HookClearBiaoGe`）中，在非应用历史模式下同步触发 `ClearOnSaveHistory(FB)`；
+    3. **完美实现业务预期**: 保存历史后，当前活跃表格与右侧面板同步恢复为崭新的空卡片；而点击历史记录查看历史账单时，右侧抽屉依然能从历史快照中完好读取并呈现当时保存的全部团队关键信息。
+
+* **掉落记录面板增加默认 500 条上限与先进先出淘汰策略 (2026-09-26)**:
+  - **设计与实现**:
+    1. **默认上限扩充至 500 条**: 将 [LootHistory.lua](file:///e:/World%20of%20Warcraft/_classic_titan_/Interface/AddOns/BGLite_Plus/Core/LootHistory.lua) 中的存储上限常量由原 400 提升至 500（`DEFAULT_MAX_STORED = 500`），并提供 `LH.GetMaxStored()` 兼容用户自定义配置读取；
+    2. **FIFO 先进先出淘汰机制**:
+       - 列表采用最新的记录倒序插入在第 1 项（`table.insert(db, 1, entry)`）；
+       - 当总记录数超出 500 条时，通过 `LH.TrimDB(db)` 循环执行 `table.remove(db)`，将最早掉落的最老记录直接删除淘汰，严格保持每个副本最多只有最新的 500 条流水记录；
+    3. **存量数据全自动修剪与实时容量提示**:
+       - 在模块初始化（`InitLootHistoryModule`）及获取数据库（`GetHistoryDB`）时，对存量旧数据自动执行 `TrimDB` 截断超额记录；
+       - 面板顶部统计文字优化为：`共记录 %s/%s 件掉落`（如 `共记录 500/500 件掉落`），让容量状态一目了然。
