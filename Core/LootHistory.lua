@@ -275,7 +275,11 @@ local function OnLootCaptured(lootPlayer, itemLink, count)
     -- 实时记录当前副本表格的打本真实开始与活跃时间 (仅在身处该团本内部时才更新！)
     if currentInstanceFB and BiaoGe and BiaoGe[currentInstanceFB] then
         local nowTs = (GetServerTime and GetServerTime()) or time()
-        BiaoGe[currentInstanceFB].raidTime = BiaoGe[currentInstanceFB].raidTime or nowTs
+        local curWeekStart = (ns.WorkerReport and ns.WorkerReport.GetCDWeekStart and ns.WorkerReport.GetCDWeekStart(nowTs)) or (nowTs - 7 * 86400)
+        local rt = tonumber(BiaoGe[currentInstanceFB].raidTime)
+        if not rt or rt < curWeekStart or (nowTs - rt > 16 * 3600) then
+            BiaoGe[currentInstanceFB].raidTime = nowTs
+        end
         BiaoGe[currentInstanceFB].lastRaidTime = nowTs
         local myName = UnitName("player")
         if myName and myName ~= "" and (not BiaoGe[currentInstanceFB].charName or BiaoGe[currentInstanceFB].charName == "") then

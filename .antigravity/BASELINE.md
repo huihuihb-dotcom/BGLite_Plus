@@ -1290,3 +1290,85 @@
           2. 物理移除 Core/TitanGoblin.lua 与 Core/DB_TitanExchange.lua，并从 BGLite_Plus.toc 中注销；
           3. 清理 Core/Init.lua（移除 Tab 105 注册、SafeHide 及 Tab 排序链中的残留项）、Core/LootHistory.lua；
           4. 碎片助手功能全面迁移并入独立的 BGLite_TitanCollector 插件中，升级为支持独立运行的全新泰坦物资工具。
+
+    30. **第二周打完 P5 双本（SWtitan）出本后团本报表无记录故障排查与跨周时间戳全链路自愈 (2026-09-25)**:
+        - **故障现象**: 用户在魔兽时光服进入第二周打完 P5 双本（祖阿曼 + 太阳井，`SWtitan`），分钱完毕出本后，打开【团本报表】面板，默认的“本周 CD”视图内空空如也，没有任何本次打本的流水或工资记录。
+        - **深层病根剖析**:
+          1. **出本瞬间时间戳被硬编码打入“上周” (致命截断)**:
+             - 在 `Core/WorkerReport.lua` 扫描在途活跃表格时，原逻辑对未获取到 `trueRaidTime` 的表格，在非副本内（出本后 `inInstance == false`）执行了 `trueRaidTime = curWeekStart - 1`（即上周三晚 23:59:59 之前）；
+             - 报表默认筛选器为 `curWeekFilter = "current"`（本周四 07:00 ~ 下周四 06:59），该全新活跃账单因为被强行打上上周时间戳，**在“本周”视图被 100% 过滤隐藏**。
+          2. **跨周时间戳死锁与污染**:
+             - `BiaoGe[fb].raidTime` 在第一周赋值后，历史代码普遍使用 `BiaoGe[fb].raidTime = BiaoGe[fb].raidTime or now`，进入第二周后该语句永不触发，导致表格一直停留在第一周的旧时间戳；
+             - `SanitizeActiveTables()` 甚至存在若间隔超过 4 小时将 `lastRaidTime` 强行回退覆盖为 `rt` 的错误逻辑；且清空表格时未清除 `raidTime`，直接污染下周。
+          3. **GetTrueRaidTime 扫描数据层级错误**:
+             - 原代码在 `BiaoGe[FB]["boss" .. b].auctionLog` 中查找拍卖记录，而 BGLite 实际保存在 `BiaoGe[FB].auctionLog`；在 `teamInfo.notices` 查找招募通告，而实际保存在 `teamInfo.recruits`，导致推导时间戳全面落空。
+          4. **归档排重 Signature 跨周冲突**:
+             - 签名未带 CD 周 ID，第一周若归档过同副本相同人数与工资，第二周在途表格会被直接跳过。
+        - **全链路自愈与修复实施**:
+          1. **重构 GetTrueRaidTime(FB) 与跨周证据仲裁**:
+             - 正确定位 `BiaoGe[FB].auctionLog`、`lootHistory`、`teamInfo.recruits`；
+             - 优先提取本周活动（`>= curWeekStart`）的时间戳，彻底消除上周残留时间戳的绑架问题。
+          2. **出本瞬间主动固化 (`zoneEventFrame`)**:
+             - 监听 `ZONE_CHANGED_NEW_AREA` 与 `PLAYER_ENTERING_WORLD`，当检测到玩家出本且在途表格有真实账目但未固化时，立即将其精准标记并固化为当前时间戳。
+          3. **动态在途扫描兜底与防旧周误杀**:
+             - 在 `WorkerReport.lua` 中，只要表格存在有效工资（`wage > 0`），即使出本且未检测到历史时间戳，也无条件自愈为当前时间（`time()`）并呈现于本周报表中；
+             - 签名升级为包含 `weekId`，杜绝跨周去重误杀。
+          4. **清空表格彻底重置生命周期**:
+             - 在 `HookClearBiaoGe` 中，清空表格时同步清空 `raidTime`、`lastRaidTime`、`lootHistory`、`charName`、`class`，彻底杜绝污染下周。
+          5. **Lua 代码语法与 Block 闭合严密校验**:
+             - 修复了 `WorkerReport.lua` 与 `History.lua` 中由于修改导致的 `end` 缺失/多余问题，通过 AST 词法栈全面验证通过。
+
+    31. **团本报表双层树状结构重构：按月分组卡片 + 按 CD 周竖向排列与独立周薪小结 (2026-09-26)**:
+        - **用户诉求与设计决策**: 用户期望将团本打工流水按照“每周作为一个周期全部竖向排列”，并在需要按月查看时具备清晰的月度汇总。经方案评估，用户确认实施**方案 A（双层树状结构：月度大卡片包含每周小结）**。
+        - **核心架构与功能落地**:
+          1. **数据分组引擎 (`GetGroupedRecords`)**:
+             - 严格基于魔兽世界国服 CD 周期（每周四 07:00 ~ 下周四 06:59）将记录归入所属 CD 周；
+             - 每周根据 `weekStart` 自动归属对应自然月，杜绝同一 CD 周被跨月生硬切断；
+             - 自动为每个【月份】和每个【CD周】独立计算出勤车次、工资收入、补贴、自购/罚款支出及实际净落袋。
+          2. **分层视觉卡片与对象池化**:
+             - **月度标题卡 (`GetOrCreateMonthHeader`)**: 深蓝暗夜质感横幅，显示月份（如 `2026年 09月`）、`[本月]` 标识、月度出勤车数与净落袋总额；
+             - **CD周标题卡 (`GetOrCreateWeekHeader`)**: 墨青深灰质感横幅，显示周起止范围（如 `09/25 ~ 10/01`）、`[本周 CD]` / `[上周 CD]` 标识、该周出勤车次、周工资小计与净落袋；
+             - 单车记录行紧随展开周在其下方排列，列字段严格对齐顶部固定表头。
+          3. **折叠展开状态机与一键操控**:
+             - 默认策略：当前月与本周 CD 默认展开，历史月与历史周默认收起；
+             - 在明细标题旁新增【全部展开 / 全部收起】快捷按钮，单键切换全局视口；
+             - 模块内维护 `collapsedMonths` 与 `collapsedWeeks` 状态，支持单项点击折叠与即时重绘。
+          4. **顶部周期选择器与宏观看板升级**:
+             - 默认主视图为【全部周期 (树状总览)】，打开即见完整月/周时间轴；
+             - 支持切换【本月 CD】、【本周 CD (当前)】、【上周 CD】与【近 30 天】微调焦距；
+             - 顶部 4 大看板卡片与角色贡献彩条自适应联动所选周期的整体盘面。
+
+
+    32. **历史账目时间戳误污染智能自愈纠偏与合体副本（NAXX 与双龙）独立拆分展示 (2026-09-26)**:
+        - **用户反馈与深度根因定位**:
+          1. **时间戳跨周误污染问题**: 用户反馈术士（暗夜卡莎）在 09/22 打的双龙（200G，人均8G）被错误标注为 `09/26 00:04` 并归入【本周 CD (09/24 ~ 10/01)】；根因是旧版 `zoneEventFrame` 与 `GetAllRecords` 在活跃表格缺少本周活动时无脑执行了 `BiaoGe[fb].raidTime = now`，导致上周未清空的账目被粗暴赋予当天时间并复活至本周 CD。
+          2. **多副本合体归档混淆问题**: 魔兽时光服将纳克萨玛斯（Boss 1~15）与萨塔里奥/玛里苟斯（双龙 Boss 16~17）合并为合体表 `NAXXtitan`，玩家在打纯双龙车或先打 NAXX 再打双龙时，系统单一识别为纳克萨玛斯，无法单独体现“双龙”出勤与账单。
+        - **全链路自愈与合体副本拆分落地**:
+          1. **GetTrueRaidTime 智能仲裁与自愈纠偏 (`History.lua`)**:
+             - 深度扫描表格下所有客观打本证据（`auctionLog`、`lootHistory`、`teamInfo.recruits`、各 Boss 掉落拾取时间 `v.time`）；
+             - 若本周没有任何客观活动（`#thisWeekCandidates == 0`）且客观历史证据全在旧周，但 `BiaoGe[FB].raidTime` 却大于等于本周开始时间，判定为系统误污染！坚决自愈纠偏恢复为客观打本完成时刻 `candidates[#candidates]`（09/22 21:39），从而精确归属【上周 CD (09/17 ~ 09/24)】；
+             - 彻底删除了 `zoneEventFrame` 中 `else BiaoGe[fb].raidTime = now` 的粗暴篡改逻辑。
+          2. **合体副本智能拆分引擎 (`WorkerReport.lua` -> `COMBO_RAIDS` & `ProcessComboRecord`)**:
+             - 建立合体副本子首领映射字典：
+               - `NAXXtitan` / `NAXX`: 纳克萨玛斯（Boss 1~15）、双龙（Boss 16~17，黑曜石+永恒之眼）；
+               - `SWtitan`: 祖阿曼（Boss 1~7）、太阳井（Boss 8~13）；
+               - `SSCtitan`: 毒蛇神殿（Boss 1~6）、风暴要塞（Boss 7~10）；
+               - `TOCtitan`: 奥杜尔（Boss 1~10）、十字军（Boss 11~15）。
+             - **单打子副本识别（如纯双龙车）**: 若仅有双龙首领有掉落/金额（NAXX 1~15 全空），记录名称自动精准命名为【双龙】，流水与人均分红完全继承，独立展示；
+             - **合体连打自动拆分**: 若 NAXX 与双龙均有掉落记账，自动拆分为【纳克萨玛斯】与【双龙】两条独立的账单明细，流水与分红按比例精确分摊，各自消费明细归属到位；
+             - 历史归档与在途活跃表格统一接入拆分引擎，排重签名升级支持子副本键（`subFB`），杜绝相互覆盖。
+          3. **语法与词法严密校验**: 通过 AST 词法栈对修改后的 Lua 文件进行全面验证，确认无任何语法异常。
+
+    33. **周与月份折叠/展开指示器重构为暴雪原生 Texture 与旋转控制 (2026-09-26)**:
+        - **用户反馈与病根定位**: 用户反馈在周缩放（收起/折叠）状态下的三角形不显示，展开后的向下三角形正常显示；根因是魔兽国服中文字体库（如方正准圆/黑体等精简字库）普遍缺少 Unicode `▶` (U+25B6，向右黑三角)，导致折叠时字符丢失渲染为空白；而 `▼` (U+25BC) 属于标准 GB2312 字符集，因此展开时正常。
+        - **暴雪原生 Texture 工业级重构**:
+          1. 废除 FontString 文本字符方案，将 `MonthHeader` 和 `WeekHeader` 的 `arrow` 升级为暴雪原生贴图控件 `Texture` (`Interface\ChatFrame\ChatFrameExpandArrow`)；
+          2. 引入 `UpdateArrowVisual(arrow, isCollapsed)` 统一调度：
+             - **收起状态（向右三角）**: `arrow:SetRotation(0)`，呈现原生标准向右小三角，大小恒定（周 11x11，月 12x12），天蓝色（`00BFFF`）着色；
+             - **展开状态（向下三角）**: `arrow:SetRotation(-math.pi / 2)`，顺时针精准旋转 90 度朝下，两状态材质与尺寸无缝对称；
+          3. 增加兼容方法 `arrow.SetText` 兜底，杜绝外部异常调用；
+          4. 彻底解决任何字体环境下折叠三角不显示、方块乱码或字体替换失真的问题。
+
+    34. **修复 UpdateArrowVisual 局部作用域遮蔽导致的 nil 调用报错 (2026-09-26)**:
+        - **报错根因**: 此前 `UpdateArrowVisual` 定义在 `WR.CreateUI(parent)` 闭包内部，而 `WR.UpdateUI()` 位于外部全局作用域，在执行折叠状态重绘时触发 `attempt to call a nil value`；
+        - **修复措施**: 将 `UpdateArrowVisual(arrow, isCollapsed)` 提升至 `WorkerReport.lua` 模块文件级顶层全局作用域，并绑定至 `WR.UpdateArrowVisual`，彻底消除作用域隔离，保障点击展开/收起及重绘时 100% 顺畅执行。

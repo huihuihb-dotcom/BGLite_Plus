@@ -532,21 +532,58 @@ ns.DeduceTableOwner = DeduceTableOwner
 
 -------------------------------------------------------------------------------
 -- 获取账单真实发生打本时间 (True Raid Time)
--- 优先采纳官方标准打本开始时间 raidTime；若缺失则扫描 Boss 掉落与交易，杜绝被5人本杂项时间篡改
+-- 优先采纳官方标准打本开始时间 raidTime；若缺失则扫描拍卖日志、Boss 掉落与交易，杜绝被5人本杂项时间篡改
 -------------------------------------------------------------------------------
 local function GetTrueRaidTime(FB)
     if not (FB and BiaoGe and BiaoGe[FB]) then return nil end
     local now = (GetServerTime and GetServerTime()) or time()
+    local curWeekStart = (WR and WR.GetCDWeekStart and WR.GetCDWeekStart(now))
+        or (ns.WorkerReport and ns.WorkerReport.GetCDWeekStart and ns.WorkerReport.GetCDWeekStart(now))
+        or (now - 7 * 86400)
 
-    -- 1. 优先获取当前副本表格显式记录的打本真实开始时间戳 (raidTime)
-    -- 只要时间戳有效且不超前于当前系统时间（允许300秒时钟微差），它就是最权威的团本开打时间！
-    local rt = tonumber(BiaoGe[FB].raidTime)
-    if rt and rt > 1000000000 and rt <= (now + 300) then
-        return rt
+    local candidates = {}
+    local thisWeekCandidates = {}
+
+    -- 1. 深度扫描该副本的拍卖日志 (BiaoGe[FB].auctionLog)
+    if BiaoGe[FB].auctionLog and type(BiaoGe[FB].auctionLog) == "table" then
+        for _, entry in ipairs(BiaoGe[FB].auctionLog) do
+            local ts = tonumber(entry.time) or tonumber(entry.timestamp)
+            if ts and ts > 1000000000 and ts <= (now + 300) then
+                table.insert(candidates, ts)
+                if ts >= curWeekStart then
+                    table.insert(thisWeekCandidates, ts)
+                end
+            end
+        end
     end
 
-    -- 2. 若 raidTime 缺失，深度扫描该副本各 Boss 击杀掉落装备时间 (loot1..N) 与 内部交易时间 (tradeTbl)
-    local candidates = {}
+    -- 2. 深度扫描掉落拾取日志 (BiaoGe[FB].lootHistory)
+    if BiaoGe[FB].lootHistory and type(BiaoGe[FB].lootHistory) == "table" then
+        for _, entry in ipairs(BiaoGe[FB].lootHistory) do
+            local ts = tonumber(entry.timestamp) or tonumber(entry.time)
+            if ts and ts > 1000000000 and ts <= (now + 300) then
+                table.insert(candidates, ts)
+                if ts >= curWeekStart then
+                    table.insert(thisWeekCandidates, ts)
+                end
+            end
+        end
+    end
+
+    -- 3. 扫描团队信息通告 (BiaoGe[FB].teamInfo.recruits)
+    if BiaoGe[FB].teamInfo and BiaoGe[FB].teamInfo.recruits and type(BiaoGe[FB].teamInfo.recruits) == "table" then
+        for _, entry in ipairs(BiaoGe[FB].teamInfo.recruits) do
+            local ts = tonumber(entry.timestamp) or tonumber(entry.time)
+            if ts and ts > 1000000000 and ts <= (now + 300) then
+                table.insert(candidates, ts)
+                if ts >= curWeekStart then
+                    table.insert(thisWeekCandidates, ts)
+                end
+            end
+        end
+    end
+
+    -- 4. 扫描 Boss 子表中的任意可能时间戳
     local maxb = (BG.GetMaxb and BG.GetMaxb(FB)) or 25
     for b = 1, maxb do
         local bTbl = BiaoGe[FB]["boss" .. b]
@@ -556,13 +593,8 @@ local function GetTrueRaidTime(FB)
                     local ts = tonumber(v.timestamp) or tonumber(v.time)
                     if ts and ts > 1000000000 and ts <= (now + 300) then
                         table.insert(candidates, ts)
-                    end
-                    if k == "auctionLog" then
-                        for _, aEntry in ipairs(v) do
-                            local aTs = tonumber(aEntry.time) or tonumber(aEntry.timestamp)
-                            if aTs and aTs > 1000000000 and aTs <= (now + 300) then
-                                table.insert(candidates, aTs)
-                            end
+                        if ts >= curWeekStart then
+                            table.insert(thisWeekCandidates, ts)
                         end
                     end
                 end
@@ -570,39 +602,64 @@ local function GetTrueRaidTime(FB)
         end
     end
 
-    -- 内部交易表时间戳
+    -- 5. 内部交易表时间戳
     if BiaoGe[FB].tradeTbl and type(BiaoGe[FB].tradeTbl) == "table" then
         for _, tr in ipairs(BiaoGe[FB].tradeTbl) do
             local ts = tonumber(tr.time) or tonumber(tr.timestamp)
             if ts and ts > 1000000000 and ts <= (now + 300) then
                 table.insert(candidates, ts)
+                if ts >= curWeekStart then
+                    table.insert(thisWeekCandidates, ts)
+                end
             end
         end
     end
 
-    -- 取最早的 Boss 掉落/开打时间作为开团时间戳（彻底杜绝被末尾外部事件篡改）
-    if #candidates > 0 then
+    -- 6. 核心智能仲裁：
+    -- A. 若本周内有确切打本证据（本周的拍卖/掉落/通告）：
+    if #thisWeekCandidates > 0 then
+        table.sort(thisWeekCandidates)
+        local bestTs = thisWeekCandidates[1] -- 取本周最早一次打本操作时间
+        -- 核心自愈：若 BiaoGe[FB].raidTime 仍停留在此前旧周，立即纠正固化为本周真实打本时间
+        if not BiaoGe[FB].raidTime or BiaoGe[FB].raidTime < curWeekStart then
+            BiaoGe[FB].raidTime = bestTs
+            BiaoGe[FB].lastRaidTime = bestTs
+        end
+        return bestTs
+    end
+
+    -- B. 核心自愈与防误篡改：若本周无任何客观打本证据，但扫描到了明确的客观历史打本证据
+    if #thisWeekCandidates == 0 and #candidates > 0 then
         table.sort(candidates)
-        return candidates[1]
-    end
-
-    -- 3. 检查团队通告/YY进本绑定时间 (TeamInfo 模块记录)
-    if BiaoGe[FB].teamInfo and BiaoGe[FB].teamInfo.notices and type(BiaoGe[FB].teamInfo.notices) == "table" and #BiaoGe[FB].teamInfo.notices > 0 then
-        for i = 1, #BiaoGe[FB].teamInfo.notices do
-            local n = BiaoGe[FB].teamInfo.notices[i]
-            if n and n.timestamp and tonumber(n.timestamp) and tonumber(n.timestamp) > 1000000000 and tonumber(n.timestamp) <= (now + 300) then
-                return tonumber(n.timestamp)
-            end
+        local bestOldTs = candidates[#candidates] -- 取历史打本最后记录的客观时刻
+        local rt = tonumber(BiaoGe[FB].raidTime)
+        -- 若 raidTime 却异常大于等于当前周开始时间（即被系统误赋予或重载误篡改），坚决纠正还原为历史真实打本时刻！
+        if rt and rt >= curWeekStart then
+            BiaoGe[FB].raidTime = bestOldTs
+            BiaoGe[FB].lastRaidTime = bestOldTs
         end
+        return bestOldTs
     end
 
-    -- 4. 兜底检查 lastRaidTime 或 raidRoster.time
+    -- C. 显式记录的 raidTime（仅当没有本周新证据冲突且无历史证据反证时采纳）
+    local rt = tonumber(BiaoGe[FB].raidTime)
+    if rt and rt > 1000000000 and rt <= (now + 300) then
+        return rt
+    end
+
+    -- D. 兜底检查 lastRaidTime 或 raidRoster.time
     if BiaoGe[FB].raidRoster and tonumber(BiaoGe[FB].raidRoster.time) and tonumber(BiaoGe[FB].raidRoster.time) > 1000000000 and tonumber(BiaoGe[FB].raidRoster.time) <= (now + 300) then
         return tonumber(BiaoGe[FB].raidRoster.time)
     end
     local lrt = tonumber(BiaoGe[FB].lastRaidTime)
     if lrt and lrt > 1000000000 and lrt <= (now + 300) then
         return lrt
+    end
+
+    -- E. 若所有证据都属于旧历史：取最后候选时间
+    if #candidates > 0 then
+        table.sort(candidates)
+        return candidates[#candidates]
     end
 
     return nil
@@ -1591,7 +1648,16 @@ local function HookClearBiaoGe()
                     end
                 end
             end
-            return orig_ClearBiaoGe(_type, FB)
+            local res = orig_ClearBiaoGe(_type, FB)
+            -- 核心重置：清空表格时必须同步清除旧打本时间戳与角色绑定，杜绝污染下一个 CD 周期
+            if _type == "biaoge" and FB and BiaoGe and BiaoGe[FB] then
+                BiaoGe[FB].raidTime = nil
+                BiaoGe[FB].lastRaidTime = nil
+                BiaoGe[FB].lootHistory = nil
+                BiaoGe[FB].charName = nil
+                BiaoGe[FB].class = nil
+            end
+            return res
         end
     end
 end
@@ -1912,14 +1978,21 @@ end
 local function SanitizeActiveTables()
     if not (BiaoGe and (BG.FBtable or BG.FBIDtable)) then return end
     local fbList = BG.FBtable or {}
+    local now = (GetServerTime and GetServerTime()) or time()
+    local curWeekStart = (WR and WR.GetCDWeekStart and WR.GetCDWeekStart(now))
+        or (ns.WorkerReport and ns.WorkerReport.GetCDWeekStart and ns.WorkerReport.GetCDWeekStart(now))
+        or (now - 7 * 86400)
+
     for _, fb in ipairs(fbList) do
         if BiaoGe[fb] then
             local rt = tonumber(BiaoGe[fb].raidTime)
             local lrt = tonumber(BiaoGe[fb].lastRaidTime)
-            -- 若 lastRaidTime 比 raidTime 晚出 4 小时以上，说明被之后的 5 人本或日常拾取污染，自动纠正
-            if rt and lrt and (lrt - rt > 4 * 3600) then
-                BiaoGe[fb].lastRaidTime = rt
+
+            -- 跨周与跨车次智能自愈：若 lastRaidTime 属于当前 CD 周 (>= curWeekStart) 且比旧 raidTime 晚很多，说明是新 CD 车次，更新 raidTime
+            if lrt and lrt >= curWeekStart and (not rt or rt < curWeekStart or (lrt - rt > 16 * 3600)) then
+                BiaoGe[fb].raidTime = lrt
             end
+
             -- 清洗掉落拾取日志中的外部5人本条目
             if BiaoGe[fb].lootHistory and type(BiaoGe[fb].lootHistory) == "table" then
                 local clean = {}
@@ -1953,7 +2026,14 @@ raidEventFrame:SetScript("OnEvent", function(self, event, ...)
     local fb = BG.FB2 or BG.FB1
     if fb and BiaoGe and BiaoGe[fb] then
         local now = (GetServerTime and GetServerTime()) or time()
-        BiaoGe[fb].raidTime = BiaoGe[fb].raidTime or now
+        local curWeekStart = (WR and WR.GetCDWeekStart and WR.GetCDWeekStart(now))
+            or (ns.WorkerReport and ns.WorkerReport.GetCDWeekStart and ns.WorkerReport.GetCDWeekStart(now))
+            or (now - 7 * 86400)
+        local rt = tonumber(BiaoGe[fb].raidTime)
+        -- 若没有 raidTime，或者已有 raidTime 属于上一个 CD 周，或者相距超过 16 小时：刷新为当前本次打本时间！
+        if not rt or rt < curWeekStart or (now - rt > 16 * 3600) then
+            BiaoGe[fb].raidTime = now
+        end
         BiaoGe[fb].lastRaidTime = now
         local myName = UnitName("player")
         if myName and myName ~= "" then

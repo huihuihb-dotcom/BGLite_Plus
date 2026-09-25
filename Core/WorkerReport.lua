@@ -28,13 +28,15 @@ end
 local FB_NAME_MAP = {
     ["SWtitan"] = "P5双本",
     ["TOCtitan"] = "P4双本",
-    ["NAXXtitan"] = "NAXX",
+    ["NAXXtitan"] = "纳克萨玛斯",
     ["SSCtitan"] = "毒蛇风暴",
     ["MCtitan"] = "熔火之心",
     ["ULDtitan"] = "奥杜尔",
     ["Worldtitan"] = "世界Boss",
     ["OStitan"] = "黑曜石",
     ["EOEtitan"] = "永恒之眼",
+    ["SL"] = "双龙",
+    ["ZA"] = "祖阿曼",
     ["SW"] = "太阳之井",
     ["BT"] = "黑暗神殿",
     ["HS"] = "海加尔山",
@@ -85,8 +87,40 @@ BG.WorkerReport = WR
 
 WR.MainFrame = nil
 WR.rows = {}
-WR.curWeekFilter = "current" -- "current", "last", "month", "all"
+WR.curWeekFilter = "all" -- "all", "this_month", "current", "last", "month"
 WR.curCharFilter = "all"
+WR.collapsedMonths = {}
+WR.collapsedWeeks = {}
+WR.allExpanded = false
+
+local function UpdateArrowVisual(arrow, isCollapsed)
+    if not arrow then return end
+    if isCollapsed then
+        -- 收起/折叠状态：向右三角形
+        arrow:SetRotation(0)
+    else
+        -- 展开状态：向下三角形 (顺时针旋转90度)
+        arrow:SetRotation(-math.pi / 2)
+    end
+    arrow:SetVertexColor(0, 0.75, 1, 1) -- 天蓝色 00BFFF
+end
+WR.UpdateArrowVisual = UpdateArrowVisual
+
+function WR.IsMonthCollapsed(monthKey, isCurrentMonth)
+    if WR.collapsedMonths[monthKey] ~= nil then
+        return WR.collapsedMonths[monthKey]
+    end
+    -- 默认策略：当前月份默认展开，历史月份默认折叠收起
+    return not isCurrentMonth
+end
+
+function WR.IsWeekCollapsed(weekKey, isCurrentWeek)
+    if WR.collapsedWeeks[weekKey] ~= nil then
+        return WR.collapsedWeeks[weekKey]
+    end
+    -- 默认策略：当前 CD 周默认展开，历史周默认折叠收起
+    return not isCurrentWeek
+end
 
 local MAX_RECORDS = 500
 
@@ -515,6 +549,182 @@ local function GetActiveZhiChuBoss(FB)
 end
 
 -------------------------------------------------------------------------------
+-- 3.5 合体副本智能拆分引擎 (针对时光服/WLK 多合一大表格：如 NAXX+双龙, 祖阿曼+太阳井)
+-------------------------------------------------------------------------------
+local COMBO_RAIDS = {
+    ["NAXXtitan"] = {
+        defaultName = "纳克萨玛斯",
+        subRaids = {
+            { key = "NAXX", name = "纳克萨玛斯", bossStart = 1, bossEnd = 15 },
+            { key = "SL",   name = "双龙",       bossStart = 16, bossEnd = 17 },
+        },
+    },
+    ["NAXX"] = {
+        defaultName = "纳克萨玛斯",
+        subRaids = {
+            { key = "NAXX", name = "纳克萨玛斯", bossStart = 1, bossEnd = 15 },
+            { key = "SL",   name = "双龙",       bossStart = 16, bossEnd = 17 },
+        },
+    },
+    ["SWtitan"] = {
+        defaultName = "P5双本",
+        subRaids = {
+            { key = "ZA", name = "祖阿曼", bossStart = 1, bossEnd = 7 },
+            { key = "SW", name = "太阳井", bossStart = 8, bossEnd = 13 },
+        },
+    },
+    ["SSCtitan"] = {
+        defaultName = "毒蛇风暴",
+        subRaids = {
+            { key = "SSC", name = "毒蛇神殿", bossStart = 1, bossEnd = 6 },
+            { key = "TK",  name = "风暴要塞", bossStart = 7, bossEnd = 10 },
+        },
+    },
+    ["TOCtitan"] = {
+        defaultName = "P4双本",
+        subRaids = {
+            { key = "ULD", name = "奥杜尔", bossStart = 1, bossEnd = 10 },
+            { key = "TOC", name = "十字军", bossStart = 11, bossEnd = 15 },
+        },
+    },
+}
+
+local function ProcessComboRecord(rawEntry, recordTbl, FB)
+    local combo = COMBO_RAIDS[FB]
+    if not combo or not recordTbl then
+        return { rawEntry }
+    end
+
+    local cName = rawEntry.charName
+    local activeSubs = {}
+    local totalRecordedGross = 0
+
+    for _, sub in ipairs(combo.subRaids) do
+        local subGross = 0
+        local hasLoot = false
+        local itemCount = 0
+        local subSpend = 0
+        local subPenalty = 0
+        local subMySpends = {}
+        local timestamps = {}
+
+        for b = sub.bossStart, sub.bossEnd do
+            local bTbl = recordTbl["boss" .. b]
+            if type(bTbl) == "table" then
+                local maxRow = (BG.GetMaxi and BG.GetMaxi(FB, b)) or 22
+                for i = 1, maxRow do
+                    local zb = bTbl["zhuangbei" .. i]
+                    local je = tonumber(bTbl["jine" .. i]) or 0
+                    local buyer = bTbl["maijia" .. i]
+
+                    if zb and zb ~= "" then
+                        hasLoot = true
+                        itemCount = itemCount + 1
+                    end
+                    if je > 0 then
+                        subGross = subGross + je
+                        hasLoot = true
+                    end
+
+                    if buyer and je > 0 and cName then
+                        local cleanBuyer = buyer:gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", ""):gsub("%s+", "")
+                        if cleanBuyer == cName then
+                            if zb and zb:find(L["罚款"] or "罚款") then
+                                subPenalty = subPenalty + je
+                            else
+                                subSpend = subSpend + je
+                                table.insert(subMySpends, { item = zb or "", money = je, boss = b })
+                            end
+                        end
+                    end
+                end
+
+                for k, v in pairs(bTbl) do
+                    if type(v) == "table" then
+                        local ts = tonumber(v.timestamp) or tonumber(v.time)
+                        if ts and ts > 1000000000 then
+                            table.insert(timestamps, ts)
+                        end
+                    end
+                end
+            end
+        end
+
+        totalRecordedGross = totalRecordedGross + subGross
+        if hasLoot or subGross > 0 then
+            table.insert(activeSubs, {
+                sub = sub,
+                gross = subGross,
+                itemCount = itemCount,
+                spend = subSpend,
+                penalty = subPenalty,
+                mySpends = subMySpends,
+                timestamps = timestamps,
+            })
+        end
+    end
+
+    -- 情况 1：只有一个子副本有活动（如暗夜卡莎纯打双龙 16~17，NAXX 1~15 全空）
+    if #activeSubs == 1 then
+        local stat = activeSubs[1]
+        local copy = {}
+        for k, v in pairs(rawEntry) do copy[k] = v end
+        copy.fbName = stat.sub.name
+        copy.subFB = stat.sub.key
+        if #stat.timestamps > 0 then
+            table.sort(stat.timestamps)
+            copy.timestamp = stat.timestamps[#stat.timestamps]
+        end
+        return { copy }
+    end
+
+    -- 情况 2：连打合体（多个子副本均有记账/掉落，如先打 NAXX 又打 双龙）
+    if #activeSubs > 1 then
+        local result = {}
+        local origWage = rawEntry.wage or 0
+        local origGross = rawEntry.grossMoney or 0
+        local calcBaseGross = (totalRecordedGross > 0 and totalRecordedGross) or (origGross > 0 and origGross) or 1
+        local allocatedWageSum = 0
+
+        for idx, stat in ipairs(activeSubs) do
+            local copy = {}
+            for k, v in pairs(rawEntry) do copy[k] = v end
+            copy.id = string.format("%s_%s", tostring(rawEntry.id), stat.sub.key)
+            copy.fbName = stat.sub.name
+            copy.subFB = stat.sub.key
+            copy.grossMoney = stat.gross
+
+            local subWage = 0
+            if idx == #activeSubs then
+                subWage = math.max(0, origWage - allocatedWageSum)
+            else
+                subWage = math.floor(origWage * (stat.gross / calcBaseGross))
+                allocatedWageSum = allocatedWageSum + subWage
+            end
+            copy.wage = subWage
+
+            copy.mySpend = stat.spend
+            copy.penalty = stat.penalty
+            copy.mySpends = stat.mySpends
+            if idx > 1 then
+                copy.subsidy = 0
+            end
+            copy.netWage = copy.wage + (copy.subsidy or 0) - copy.penalty - copy.mySpend
+
+            if #stat.timestamps > 0 then
+                table.sort(stat.timestamps)
+                copy.timestamp = stat.timestamps[#stat.timestamps]
+            end
+
+            table.insert(result, copy)
+        end
+        return result
+    end
+
+    return { rawEntry }
+end
+
+-------------------------------------------------------------------------------
 -- 4. 核心：动态聚合引擎 (Dynamic Aggregation Engine)
 -- 彻底杜绝持久化旧快照导致的“日期僵死在历史保存时间”问题
 -------------------------------------------------------------------------------
@@ -693,10 +903,13 @@ function WR.GetAllRecords()
                             source = "history",
                             note = noteText,
                         }
-                        table.insert(allRecords, entry)
-
-                        local sig = string.format("%s_%d_%d", tostring(FB), wage, totalPeople)
-                        registeredSignatures[sig] = true
+                        local splitEntries = ProcessComboRecord(entry, record, FB)
+                        for _, se in ipairs(splitEntries) do
+                            table.insert(allRecords, se)
+                            local weekId = WR.GetCDWeekId(se.timestamp)
+                            local sig = string.format("%s_%s_%d_%d", tostring(se.subFB or FB), tostring(weekId), se.wage, se.totalPeople)
+                            registeredSignatures[sig] = true
+                        end
                     end
                 end
             end
@@ -710,30 +923,65 @@ function WR.GetAllRecords()
     local curInstanceFB = (curFBID and BG and BG.FBIDtable and BG.FBIDtable[curFBID])
 
     for _, FB in ipairs(fbList) do
-        -- 方案 A：若玩家当前正身处该团本内部，说明该副本正处于打本/开荒进行中，暂不计入已完结结算报表
-        -- 一旦打完出本、传出副本、退团或换号，离开副本后立即自动作为已完结在途账单入账
+        local maxb = GetFBMaxb(FB)
+        local wage, totalPeople, grossMoney = GetActiveOverviewData(FB)
         local isCurrentlyInThisRaid = (inInstance and (instanceType == "raid" or instanceType == "party") and (curInstanceFB == FB))
 
-        if not isCurrentlyInThisRaid then
-            local maxb = GetFBMaxb(FB)
-            local wage, totalPeople, grossMoney = GetActiveOverviewData(FB)
+        -- 若在副本内且尚未分钱 (wage == 0)，说明该副本处于开荒/打本中途，暂不计入报表；
+        -- 一旦有了有效工资 (wage > 0)，无论是在副本内刚分完钱，还是已经打完出本，均立即作为活跃打工账单展示！
+        if wage > 0 then
+            local trueRaidTime = (ns.GetTrueRaidTime and ns.GetTrueRaidTime(FB)) or (BiaoGe and BiaoGe[FB] and BiaoGe[FB].raidTime)
 
-            if wage > 0 then
-                local sig = string.format("%s_%d_%d", tostring(FB), wage, totalPeople)
-                -- 仅当历史存档中没有完全相同的记录时，才作为实时在途账单展示
-                if not registeredSignatures[sig] then
-                    local trueRaidTime = (ns.GetTrueRaidTime and ns.GetTrueRaidTime(FB)) or (BiaoGe and BiaoGe[FB] and BiaoGe[FB].raidTime)
-                    -- 如果在途表格未检测到有效时间戳：
-                    if not trueRaidTime or trueRaidTime <= 0 then
-                        if inInstance and (instanceType == "raid" or instanceType == "party") then
-                            trueRaidTime = time()
-                    elseif BiaoGe and BiaoGe[FB] and BiaoGe[FB].lastActiveTime then
-                        trueRaidTime = BiaoGe[FB].lastActiveTime
-                    else
-                        -- 若没有任何打本时间痕迹且不在本内，严格判定为历史陈旧在途残留，归入上周 CD 之前，杜绝篡改为今天
-                        trueRaidTime = curWeekStart - 1
+            -- 跨周与新打本自愈：检查表格内是否有本周的拍卖/掉落活动
+            local hasThisWeekActivity = false
+            if BiaoGe and BiaoGe[FB] and BiaoGe[FB].auctionLog and type(BiaoGe[FB].auctionLog) == "table" then
+                for _, aEntry in ipairs(BiaoGe[FB].auctionLog) do
+                    local aTs = tonumber(aEntry.time) or tonumber(aEntry.timestamp)
+                    if aTs and aTs >= curWeekStart then
+                        hasThisWeekActivity = true
+                        if not trueRaidTime or trueRaidTime < curWeekStart then
+                            trueRaidTime = aTs
+                        end
+                        break
                     end
                 end
+            end
+            if not hasThisWeekActivity and BiaoGe and BiaoGe[FB] and BiaoGe[FB].lootHistory and type(BiaoGe[FB].lootHistory) == "table" then
+                for _, lEntry in ipairs(BiaoGe[FB].lootHistory) do
+                    local lTs = tonumber(lEntry.timestamp) or tonumber(lEntry.time)
+                    if lTs and lTs >= curWeekStart then
+                        hasThisWeekActivity = true
+                        if not trueRaidTime or trueRaidTime < curWeekStart then
+                            trueRaidTime = lTs
+                        end
+                        break
+                    end
+                end
+            end
+
+            -- 如果在途表格未检测到有效时间戳：
+            if not trueRaidTime or trueRaidTime <= 0 then
+                if inInstance and (instanceType == "raid" or instanceType == "party") then
+                    trueRaidTime = time()
+                elseif hasThisWeekActivity then
+                    trueRaidTime = time()
+                end
+            end
+
+            -- 仅当确有本周确凿打本活动或在对应副本中时，才允许固化本周时间戳，杜绝污染历史旧表格
+            if BiaoGe and BiaoGe[FB] and trueRaidTime and trueRaidTime >= curWeekStart then
+                if hasThisWeekActivity or (inInstance and (instanceType == "raid" or instanceType == "party") and (curInstanceFB == FB)) then
+                    if not BiaoGe[FB].raidTime or BiaoGe[FB].raidTime < curWeekStart then
+                        BiaoGe[FB].raidTime = trueRaidTime
+                        BiaoGe[FB].lastRaidTime = trueRaidTime
+                    end
+                end
+            end
+
+            local weekId = WR.GetCDWeekId(trueRaidTime)
+            local sig = string.format("%s_%s_%d_%d", tostring(FB), tostring(weekId), wage, totalPeople)
+            -- 仅当该 CD 周内历史存档中没有完全相同的记录时，才作为实时在途账单展示
+            if not registeredSignatures[sig] then
 
                 local fbDisplayName = GetFBDisplayName(FB)
 
@@ -834,7 +1082,9 @@ function WR.GetAllRecords()
                 local netWage = wage + curSubsidy - curPenalty - curSpend
 
                 local noteText = "当前活跃账单(未归档)"
-                if trueRaidTime < curWeekStart then
+                if isCurrentlyInThisRaid then
+                    noteText = "当前团本(进行中)"
+                elseif trueRaidTime < curWeekStart then
                     noteText = string.format("未清空旧账单 (%s)", date("%m/%d", trueRaidTime))
                 elseif curSubsidy > 0 and curSpend > 0 then
                     noteText = string.format("活跃账单: 补贴+%dG 消费-%dG", curSubsidy, curSpend)
@@ -863,9 +1113,11 @@ function WR.GetAllRecords()
                     source = "active",
                     note = noteText,
                 }
-                table.insert(allRecords, entry)
+                local splitEntries = ProcessComboRecord(entry, BiaoGe and BiaoGe[FB], FB)
+                for _, se in ipairs(splitEntries) do
+                    table.insert(allRecords, se)
+                end
             end
-        end
         end
     end
 
@@ -886,12 +1138,18 @@ function WR.GetFilteredRecords()
     local lastWeekEnd = curWeekStart - 1
     local monthStart = time() - 30 * 86400
 
+    local curMonthKey = date("%Y-%m", curWeekStart)
+
     for i, r in ipairs(allRecords) do
         local matchTime = true
         if WR.curWeekFilter == "current" then
             matchTime = (r.timestamp >= curWeekStart and r.timestamp <= curWeekEnd)
         elseif WR.curWeekFilter == "last" then
             matchTime = (r.timestamp >= lastWeekStart and r.timestamp <= lastWeekEnd)
+        elseif WR.curWeekFilter == "this_month" then
+            local rWeekStart = WR.GetCDWeekStart(r.timestamp)
+            local rMonthKey = date("%Y-%m", rWeekStart)
+            matchTime = (rMonthKey == curMonthKey)
         elseif WR.curWeekFilter == "month" then
             matchTime = (r.timestamp >= monthStart)
         end
@@ -985,6 +1243,98 @@ function WR.GetSummaryStats(records)
     }
 end
 
+-- 按照【月份 -> CD周 -> 单车记录】构建双层树状结构
+function WR.GetGroupedRecords(records)
+    local curWeekStart = WR.GetCDWeekStart(time())
+    local lastWeekStart = curWeekStart - 7 * 86400
+    local curMonthKey = date("%Y-%m", curWeekStart)
+
+    local monthMap = {}
+    local monthList = {}
+
+    for _, r in ipairs(records or {}) do
+        local ts = r.timestamp or time()
+        local weekStart = WR.GetCDWeekStart(ts)
+        local weekEnd = weekStart + 7 * 86400 - 1
+        local monthKey = date("%Y-%m", weekStart)
+        local monthTitle = date("%Y年 %m月", weekStart)
+        local weekKey = tostring(weekStart)
+        local weekRangeStr = string.format("%s ~ %s", date("%m/%d", weekStart), date("%m/%d", weekEnd))
+
+        if not monthMap[monthKey] then
+            local mData = {
+                monthKey = monthKey,
+                monthTitle = monthTitle,
+                monthTimestamp = weekStart,
+                isCurrentMonth = (monthKey == curMonthKey),
+                totalWage = 0,
+                totalNet = 0,
+                totalSubsidy = 0,
+                totalSpend = 0,
+                runCount = 0,
+                weekMap = {},
+                weeks = {},
+            }
+            monthMap[monthKey] = mData
+            table.insert(monthList, mData)
+        end
+
+        local mData = monthMap[monthKey]
+        if not mData.weekMap[weekKey] then
+            local wData = {
+                weekKey = weekKey,
+                weekStart = weekStart,
+                weekEnd = weekEnd,
+                weekRangeStr = weekRangeStr,
+                isCurrentWeek = (weekStart == curWeekStart),
+                isLastWeek = (weekStart == lastWeekStart),
+                totalWage = 0,
+                totalNet = 0,
+                totalSubsidy = 0,
+                totalSpend = 0,
+                runCount = 0,
+                records = {},
+            }
+            mData.weekMap[weekKey] = wData
+            table.insert(mData.weeks, wData)
+        end
+
+        local wData = mData.weekMap[weekKey]
+        table.insert(wData.records, r)
+
+        local wage = r.wage or 0
+        local net = r.netWage or 0
+        local sub = r.subsidy or 0
+        local spend = (r.mySpend or 0) + (r.penalty or 0)
+
+        wData.totalWage = wData.totalWage + wage
+        wData.totalNet = wData.totalNet + net
+        wData.totalSubsidy = wData.totalSubsidy + sub
+        wData.totalSpend = wData.totalSpend + spend
+        wData.runCount = wData.runCount + 1
+
+        mData.totalWage = mData.totalWage + wage
+        mData.totalNet = mData.totalNet + net
+        mData.totalSubsidy = mData.totalSubsidy + sub
+        mData.totalSpend = mData.totalSpend + spend
+        mData.runCount = mData.runCount + 1
+    end
+
+    -- 按照时间倒序排序月份（最新的月份在最前）
+    table.sort(monthList, function(a, b)
+        return (a.monthTimestamp or 0) > (b.monthTimestamp or 0)
+    end)
+
+    -- 按照时间倒序排序每个月下的周（最新的周在最前）
+    for _, m in ipairs(monthList) do
+        table.sort(m.weeks, function(a, b)
+            return (a.weekStart or 0) > (b.weekStart or 0)
+        end)
+    end
+
+    return monthList
+end
+
 -------------------------------------------------------------------------------
 -- 5. 主面板 UI 构建
 -------------------------------------------------------------------------------
@@ -1041,17 +1391,20 @@ function WR.CreateUI(parent)
     ---------------------------------------------------------------------------
     -- 1. 周期切换下拉按钮
     local cycleBtn = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
-    cycleBtn:SetSize(140, 24)
+    cycleBtn:SetSize(155, 24)
     cycleBtn:SetPoint("TOPLEFT", title, "BOTTOMLEFT", 0, -10)
-    cycleBtn:SetText(L["本周 CD"] or "本周 CD")
+    cycleBtn:SetText(L["全部周期 (树状总览)"] or "全部周期 (树状总览)")
     WR.cycleBtn = cycleBtn
 
     local cycleDropDown = CreateFrame("Frame", "BG_WR_CycleDropDown", f, "UIDropDownMenuTemplate")
+    local curWeekStart = WR.GetCDWeekStart(time())
+    local curMonthStr = date("%Y年%m月", curWeekStart)
     local cycleList = {
+        { text = L["全部周期 (树状总览)"] or "全部周期 (树状总览)", key = "all" },
+        { text = string.format(L["本月 CD (%s)"] or "本月 CD (%s)", curMonthStr), key = "this_month" },
         { text = L["本周 CD (当前)"] or "本周 CD (当前)", key = "current" },
         { text = L["上周 CD"] or "上周 CD", key = "last" },
         { text = L["近 30 天"] or "近 30 天", key = "month" },
-        { text = L["全部历史"] or "全部历史", key = "all" },
     }
     cycleBtn:SetScript("OnClick", function()
         local menu = {}
@@ -1244,6 +1597,24 @@ function WR.CreateUI(parent)
     listTitle:SetPoint("TOPLEFT", barLegend, "BOTTOMLEFT", 0, -8)
     listTitle:SetText(L["打工与收支明细"] or "打工与收支明细")
 
+    local toggleAllBtn = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
+    toggleAllBtn:SetSize(80, 22)
+    toggleAllBtn:SetPoint("LEFT", listTitle, "RIGHT", 15, 0)
+    toggleAllBtn:SetText(L["全部展开"] or "全部展开")
+    toggleAllBtn:SetScript("OnClick", function()
+        WR.allExpanded = not WR.allExpanded
+        for _, m in ipairs(WR.lastGroupedData or {}) do
+            WR.collapsedMonths[m.monthKey] = not WR.allExpanded
+            for _, w in ipairs(m.weeks or {}) do
+                WR.collapsedWeeks[w.weekKey] = not WR.allExpanded
+            end
+        end
+        toggleAllBtn:SetText(WR.allExpanded and (L["全部收起"] or "全部收起") or (L["全部展开"] or "全部展开"))
+        PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON or 856)
+        WR.UpdateUI()
+    end)
+    WR.toggleAllBtn = toggleAllBtn
+
     local scrollFrame = CreateFrame("ScrollFrame", "BG_WR_ScrollFrame", f, "UIPanelScrollFrameTemplate")
     scrollFrame:SetPoint("TOPLEFT", listTitle, "BOTTOMLEFT", 0, -22)
     scrollFrame:SetPoint("BOTTOMLEFT", f, "BOTTOMLEFT", 30, 20)
@@ -1408,9 +1779,173 @@ function WR.CreateUI(parent)
     end
     WR.GetOrCreateRow = GetOrCreateRow
 
-    -- 默认预创 50 行以减少首屏加载微卡顿
+    -- 动态创建月份与周度标题分组栏
+    WR.monthHeaders = {}
+    local function GetOrCreateMonthHeader(i)
+        if WR.monthHeaders[i] then
+            return WR.monthHeaders[i]
+        end
+
+        local h = CreateFrame("Button", nil, content, "BackdropTemplate")
+        h:SetSize(totalCardWidth - 20, 26)
+        h:SetBackdrop({
+            bgFile = "Interface\\ChatFrame\\ChatFrameBackground",
+            edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+            tile = true, tileSize = 16, edgeSize = 10,
+            insets = { left = 2, right = 2, top = 2, bottom = 2 }
+        })
+        h:SetBackdropColor(0.08, 0.11, 0.20, 0.92)
+        h:SetBackdropBorderColor(0.30, 0.50, 0.85, 0.75)
+
+        local arrow = h:CreateTexture(nil, "OVERLAY")
+        arrow:SetSize(12, 12)
+        arrow:SetTexture("Interface\\ChatFrame\\ChatFrameExpandArrow")
+        arrow:SetVertexColor(0, 0.75, 1, 1)
+        arrow:SetPoint("LEFT", h, "LEFT", 8, 0)
+        arrow.SetText = function(self, text)
+            if text == "▼" or text == "down" then
+                self:SetRotation(-math.pi / 2)
+            else
+                self:SetRotation(0)
+            end
+        end
+        h.arrow = arrow
+
+        local title = h:CreateFontString(nil, "OVERLAY")
+        title:SetFont(BIAOGE_TEXT_FONT, 13, "OUTLINE")
+        title:SetTextColor(RGB("FFD700"))
+        title:SetPoint("LEFT", arrow, "RIGHT", 6, 0)
+        h.title = title
+
+        local tag = h:CreateFontString(nil, "OVERLAY")
+        tag:SetFont(BIAOGE_TEXT_FONT, 11, "OUTLINE")
+        tag:SetTextColor(RGB("00FF7F"))
+        tag:SetPoint("LEFT", title, "RIGHT", 8, 0)
+        h.tag = tag
+
+        local actionHint = h:CreateFontString(nil, "OVERLAY")
+        actionHint:SetFont(BIAOGE_TEXT_FONT, 10, "OUTLINE")
+        actionHint:SetTextColor(RGB("777777"))
+        actionHint:SetPoint("RIGHT", h, "RIGHT", -10, 0)
+        h.actionHint = actionHint
+
+        local summary = h:CreateFontString(nil, "OVERLAY")
+        summary:SetFont(BIAOGE_TEXT_FONT, 11, "OUTLINE")
+        summary:SetTextColor(RGB("FFFFFF"))
+        summary:SetPoint("LEFT", tag, "RIGHT", 10, 0)
+        summary:SetPoint("RIGHT", actionHint, "LEFT", -8, 0)
+        summary:SetJustifyH("LEFT")
+        summary:SetWordWrap(false)
+        h.summary = summary
+
+        h:SetScript("OnEnter", function(self)
+            self:SetBackdropColor(0.12, 0.16, 0.28, 0.95)
+            self.actionHint:SetTextColor(RGB("00BFFF"))
+        end)
+        h:SetScript("OnLeave", function(self)
+            self:SetBackdropColor(0.08, 0.11, 0.20, 0.92)
+            self.actionHint:SetTextColor(RGB("777777"))
+        end)
+        h:SetScript("OnClick", function(self)
+            if self.monthKey then
+                WR.collapsedMonths[self.monthKey] = not WR.IsMonthCollapsed(self.monthKey, self.isCurrentMonth)
+                PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON or 856)
+                WR.UpdateUI()
+            end
+        end)
+
+        WR.monthHeaders[i] = h
+        return h
+    end
+    WR.GetOrCreateMonthHeader = GetOrCreateMonthHeader
+
+    WR.weekHeaders = {}
+    local function GetOrCreateWeekHeader(i)
+        if WR.weekHeaders[i] then
+            return WR.weekHeaders[i]
+        end
+
+        local h = CreateFrame("Button", nil, content, "BackdropTemplate")
+        h:SetSize(totalCardWidth - 20, 24)
+        h:SetBackdrop({
+            bgFile = "Interface\\ChatFrame\\ChatFrameBackground",
+            edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+            tile = true, tileSize = 16, edgeSize = 8,
+            insets = { left = 2, right = 2, top = 2, bottom = 2 }
+        })
+        h:SetBackdropColor(0.09, 0.12, 0.16, 0.85)
+        h:SetBackdropBorderColor(0.25, 0.40, 0.55, 0.6)
+
+        local arrow = h:CreateTexture(nil, "OVERLAY")
+        arrow:SetSize(11, 11)
+        arrow:SetTexture("Interface\\ChatFrame\\ChatFrameExpandArrow")
+        arrow:SetVertexColor(0, 0.75, 1, 1)
+        arrow:SetPoint("LEFT", h, "LEFT", 16, 0)
+        arrow.SetText = function(self, text)
+            if text == "▼" or text == "down" then
+                self:SetRotation(-math.pi / 2)
+            else
+                self:SetRotation(0)
+            end
+        end
+        h.arrow = arrow
+
+        local title = h:CreateFontString(nil, "OVERLAY")
+        title:SetFont(BIAOGE_TEXT_FONT, 12, "OUTLINE")
+        title:SetTextColor(RGB("FFFFFF"))
+        title:SetPoint("LEFT", arrow, "RIGHT", 6, 0)
+        h.title = title
+
+        local tag = h:CreateFontString(nil, "OVERLAY")
+        tag:SetFont(BIAOGE_TEXT_FONT, 11, "OUTLINE")
+        tag:SetPoint("LEFT", title, "RIGHT", 6, 0)
+        h.tag = tag
+
+        local actionHint = h:CreateFontString(nil, "OVERLAY")
+        actionHint:SetFont(BIAOGE_TEXT_FONT, 10, "OUTLINE")
+        actionHint:SetTextColor(RGB("666666"))
+        actionHint:SetPoint("RIGHT", h, "RIGHT", -10, 0)
+        h.actionHint = actionHint
+
+        local summary = h:CreateFontString(nil, "OVERLAY")
+        summary:SetFont(BIAOGE_TEXT_FONT, 11, "OUTLINE")
+        summary:SetTextColor(RGB("CCCCCC"))
+        summary:SetPoint("LEFT", tag, "RIGHT", 10, 0)
+        summary:SetPoint("RIGHT", actionHint, "LEFT", -8, 0)
+        summary:SetJustifyH("LEFT")
+        summary:SetWordWrap(false)
+        h.summary = summary
+
+        h:SetScript("OnEnter", function(self)
+            self:SetBackdropColor(0.14, 0.18, 0.24, 0.95)
+            self.actionHint:SetTextColor(RGB("00BFFF"))
+        end)
+        h:SetScript("OnLeave", function(self)
+            self:SetBackdropColor(0.09, 0.12, 0.16, 0.85)
+            self.actionHint:SetTextColor(RGB("666666"))
+        end)
+        h:SetScript("OnClick", function(self)
+            if self.weekKey then
+                WR.collapsedWeeks[self.weekKey] = not WR.IsWeekCollapsed(self.weekKey, self.isCurrentWeek)
+                PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON or 856)
+                WR.UpdateUI()
+            end
+        end)
+
+        WR.weekHeaders[i] = h
+        return h
+    end
+    WR.GetOrCreateWeekHeader = GetOrCreateWeekHeader
+
+    -- 默认预创行以减少首屏加载微卡顿
     for i = 1, 50 do
         GetOrCreateRow(i)
+    end
+    for i = 1, 10 do
+        GetOrCreateMonthHeader(i)
+    end
+    for i = 1, 25 do
+        GetOrCreateWeekHeader(i)
     end
 
     f:SetScript("OnShow", function()
@@ -1430,8 +1965,19 @@ function WR.UpdateUI()
     -- 更新四大卡片
     -- 卡片1：总收入
     WR.card1.val:SetText(FormatMoney(stats.totalWage))
-    local weekRangeStr = (WR.curWeekFilter == "current") and WR.GetCDWeekDesc(0) or ((WR.curWeekFilter == "last") and WR.GetCDWeekDesc(-1) or "")
-    WR.card1.sub:SetText(string.format(L["共出勤 %d 车 %s"] or "共出勤 %d 车 %s", stats.runCount, weekRangeStr ~= "" and ("(" .. weekRangeStr .. ")") or ""))
+    local periodDesc = ""
+    if WR.curWeekFilter == "all" then
+        periodDesc = L["(全周期树状总览)"] or "(全周期树状总览)"
+    elseif WR.curWeekFilter == "this_month" then
+        periodDesc = string.format("(%s)", date("%Y年%m月", WR.GetCDWeekStart(time())))
+    elseif WR.curWeekFilter == "current" then
+        periodDesc = string.format("(%s)", WR.GetCDWeekDesc(0))
+    elseif WR.curWeekFilter == "last" then
+        periodDesc = string.format("(%s)", WR.GetCDWeekDesc(-1))
+    elseif WR.curWeekFilter == "month" then
+        periodDesc = L["(近30天)"] or "(近30天)"
+    end
+    WR.card1.sub:SetText(string.format(L["共出勤 %d 车 %s"] or "共出勤 %d 车 %s", stats.runCount, periodDesc))
 
     -- 卡片2：劳模
     if stats.topChar then
@@ -1522,105 +2068,200 @@ function WR.UpdateUI()
         WR.barLegend:SetText(L["当前周期内暂无打工收益记录"] or "当前周期内暂无打工收益记录")
     end
 
-    -- 更新滚动流水
-    local rowHeight = 25
-    local totalRows = #records
-    WR.content:SetHeight(math.max(1, totalRows * rowHeight))
+    -- 组织双层树状结构（月份 -> CD 周 -> 单车明细）
+    local groupedMonths = WR.GetGroupedRecords(records)
+    WR.lastGroupedData = groupedMonths
 
-    for i = 1, #records do
-        local r = (WR.GetOrCreateRow and WR.GetOrCreateRow(i)) or WR.rowFrames[i]
-        local data = records[i]
-        if r and data then
-            r.recordData = data
-            r.recordIndex = data._rawIndex
-            r.timeText:SetText(date("%m/%d %H:%M", data.timestamp))
-            r.charText:SetText(SetClassCFF(data.charName, data.class))
-            r.fbText:SetText(data.fbName or data.fb or "")
-            if data.grossMoney and data.grossMoney > 0 then
-                r.grossText:SetText(string.format("%d人 | %s", data.totalPeople or 0, FormatMoney(data.grossMoney)))
-            elseif data.totalPeople and data.totalPeople > 0 then
-                r.grossText:SetText(string.format("%d人", data.totalPeople))
-            else
-                r.grossText:SetText("-")
-            end
-            r.wageText:SetText(string.format("+%d G", data.wage or 0))
+    if WR.toggleAllBtn then
+        WR.toggleAllBtn:SetText(WR.allExpanded and (L["全部收起"] or "全部收起") or (L["全部展开"] or "全部展开"))
+    end
 
-            if data.subsidy and data.subsidy > 0 then
-                r.subsidyText:SetText(string.format("+%d", data.subsidy))
-            else
-                r.subsidyText:SetText("-")
-            end
+    local currentY = 0
+    local monthIdx = 0
+    local weekIdx = 0
+    local rowIdx = 0
 
-            local spend = (data.mySpend or 0) + (data.penalty or 0)
-            if spend > 0 then
-                r.spendText:SetTextColor(RGB("FF6B6B"))
-                r.spendText:SetText(string.format("-%d", spend))
-            else
-                r.spendText:SetTextColor(RGB("666666"))
-                r.spendText:SetText("-")
-            end
+    for _, m in ipairs(groupedMonths) do
+        monthIdx = monthIdx + 1
+        local mFrame = WR.GetOrCreateMonthHeader(monthIdx)
+        mFrame.monthKey = m.monthKey
+        mFrame.isCurrentMonth = m.isCurrentMonth
+        UpdateArrowVisual(mFrame.arrow, isMCollapsed)
+        mFrame.title:SetText(m.monthTitle)
+        mFrame.tag:SetText(m.isCurrentMonth and "[本月]" or "")
 
-            if data.netWage then
-                if data.netWage >= 0 then
-                    r.netText:SetTextColor(RGB("00FF7F"))
-                    r.netText:SetText(string.format("+%d", data.netWage))
+        local mParts = {}
+        table.insert(mParts, string.format("出勤 %d 车", m.runCount))
+        table.insert(mParts, string.format("|cff00FF00工资 +%s|r", FormatMoney(m.totalWage)))
+        if m.totalSubsidy > 0 then
+            table.insert(mParts, string.format("|cffFFCC00补贴 +%s|r", FormatMoney(m.totalSubsidy)))
+        end
+        if m.totalSpend > 0 then
+            table.insert(mParts, string.format("|cffFF6B6B支出 -%s|r", FormatMoney(m.totalSpend)))
+        end
+        table.insert(mParts, string.format("|cff00FF7F净落袋 %s%s|r", (m.totalNet >= 0 and "+" or ""), FormatMoney(m.totalNet)))
+        mFrame.summary:SetText(table.concat(mParts, "  ·  "))
+        mFrame.actionHint:SetText(isMCollapsed and "[点击展开]" or "[点击折叠]")
+
+        mFrame:ClearAllPoints()
+        mFrame:SetPoint("TOPLEFT", WR.content, "TOPLEFT", 0, -currentY)
+        mFrame:Show()
+        currentY = currentY + 28
+
+        if not isMCollapsed then
+            for _, w in ipairs(m.weeks) do
+                weekIdx = weekIdx + 1
+                local wFrame = WR.GetOrCreateWeekHeader(weekIdx)
+                wFrame.weekKey = w.weekKey
+                wFrame.isCurrentWeek = w.isCurrentWeek
+                local isWCollapsed = WR.IsWeekCollapsed(w.weekKey, w.isCurrentWeek)
+
+                UpdateArrowVisual(wFrame.arrow, isWCollapsed)
+                wFrame.title:SetText(w.weekRangeStr)
+                if w.isCurrentWeek then
+                    wFrame.tag:SetText("(本周 CD)")
+                    wFrame.tag:SetTextColor(RGB("00BFFF"))
+                elseif w.isLastWeek then
+                    wFrame.tag:SetText("(上周 CD)")
+                    wFrame.tag:SetTextColor(RGB("AAAAAA"))
                 else
-                    r.netText:SetTextColor(RGB("FF4500"))
-                    r.netText:SetText(string.format("%d", data.netWage))
+                    wFrame.tag:SetText("")
                 end
-            else
-                r.netText:SetText("-")
-            end
 
-            -- 操作列：手工录入显示删除按钮与修改按钮；历史账单受保护仅显示校准时间按钮
-            if data.source == "manual" then
-                r.delBtn:Show()
-                r.editBtn:ClearAllPoints()
-                r.editBtn:SetPoint("LEFT", r, "LEFT", 765, 0)
-            else
-                r.delBtn:Hide()
-                r.editBtn:ClearAllPoints()
-                r.editBtn:SetPoint("LEFT", r, "LEFT", 775, 0)
-            end
-            r.editBtn:Show()
-
-            r:SetScript("OnEnter", function(self)
-                if not self.recordData then return end
-                GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-                local d = self.recordData
-                GameTooltip:AddLine(string.format("%s (%s)", d.fbName or d.fb, date("%Y-%m-%d %H:%M:%S", d.timestamp)), 0, 0.75, 1)
-                GameTooltip:AddLine(string.format(L["打工角色: %s"] or "打工角色: %s", SetClassCFF(d.charName, d.class)), 1, 1, 1)
-                GameTooltip:AddLine(string.format(L["工资收入: +%d G"] or "工资收入: +%d G", d.wage or 0), 0, 1, 0)
-                if d.subsidy and d.subsidy > 0 then
-                    GameTooltip:AddLine(string.format(L["获得补贴: +%d G"] or "获得补贴: +%d G", d.subsidy), 1, 0.8, 0)
+                local wParts = {}
+                table.insert(wParts, string.format("出勤 %d 车", w.runCount))
+                table.insert(wParts, string.format("|cff00FF00工资 +%s|r", FormatMoney(w.totalWage)))
+                if w.totalSubsidy > 0 then
+                    table.insert(wParts, string.format("|cffFFCC00补贴 +%s|r", FormatMoney(w.totalSubsidy)))
                 end
-                local rSpend = (d.mySpend or 0) + (d.penalty or 0)
-                if rSpend > 0 then
-                    if (d.mySpend or 0) > 0 and (d.penalty or 0) > 0 then
-                        GameTooltip:AddLine(string.format(L["本场支出: -%d G (装备%d, 罚款%d)"] or "本场支出: -%d G (装备%d, 罚款%d)", rSpend, d.mySpend, d.penalty), 1, 0.4, 0.4)
-                    elseif (d.mySpend or 0) > 0 then
-                        GameTooltip:AddLine(string.format(L["装备消费: -%d G"] or "装备消费: -%d G", d.mySpend), 1, 0.3, 0.3)
-                    elseif (d.penalty or 0) > 0 then
-                        GameTooltip:AddLine(string.format(L["罚款扣减: -%d G"] or "罚款扣减: -%d G", d.penalty), 1, 0.5, 0.2)
+                if w.totalSpend > 0 then
+                    table.insert(wParts, string.format("|cffFF6B6B支出 -%s|r", FormatMoney(w.totalSpend)))
+                end
+                table.insert(wParts, string.format("|cff00FF7F净落袋 %s%s|r", (w.totalNet >= 0 and "+" or ""), FormatMoney(w.totalNet)))
+                wFrame.summary:SetText(table.concat(wParts, "  ·  "))
+                wFrame.actionHint:SetText(isWCollapsed and "[展开]" or "[折叠]")
+
+                wFrame:ClearAllPoints()
+                wFrame:SetPoint("TOPLEFT", WR.content, "TOPLEFT", 0, -currentY)
+                wFrame:Show()
+                currentY = currentY + 26
+
+                if not isWCollapsed then
+                    for _, data in ipairs(w.records) do
+                        rowIdx = rowIdx + 1
+                        local r = (WR.GetOrCreateRow and WR.GetOrCreateRow(rowIdx)) or WR.rowFrames[rowIdx]
+                        if r and data then
+                            r.recordData = data
+                            r.recordIndex = data._rawIndex
+                            r.timeText:SetText(date("%m/%d %H:%M", data.timestamp))
+                            r.charText:SetText(SetClassCFF(data.charName, data.class))
+                            r.fbText:SetText(data.fbName or data.fb or "")
+                            if data.grossMoney and data.grossMoney > 0 then
+                                r.grossText:SetText(string.format("%d人 | %s", data.totalPeople or 0, FormatMoney(data.grossMoney)))
+                            elseif data.totalPeople and data.totalPeople > 0 then
+                                r.grossText:SetText(string.format("%d人", data.totalPeople))
+                            else
+                                r.grossText:SetText("-")
+                            end
+                            r.wageText:SetText(string.format("+%d G", data.wage or 0))
+
+                            if data.subsidy and data.subsidy > 0 then
+                                r.subsidyText:SetText(string.format("+%d", data.subsidy))
+                            else
+                                r.subsidyText:SetText("-")
+                            end
+
+                            local spend = (data.mySpend or 0) + (data.penalty or 0)
+                            if spend > 0 then
+                                r.spendText:SetTextColor(RGB("FF6B6B"))
+                                r.spendText:SetText(string.format("-%d", spend))
+                            else
+                                r.spendText:SetTextColor(RGB("666666"))
+                                r.spendText:SetText("-")
+                            end
+
+                            if data.netWage then
+                                if data.netWage >= 0 then
+                                    r.netText:SetTextColor(RGB("00FF7F"))
+                                    r.netText:SetText(string.format("+%d", data.netWage))
+                                else
+                                    r.netText:SetTextColor(RGB("FF4500"))
+                                    r.netText:SetText(string.format("%d", data.netWage))
+                                end
+                            else
+                                r.netText:SetText("-")
+                            end
+
+                            if data.source == "manual" then
+                                r.delBtn:Show()
+                                r.editBtn:ClearAllPoints()
+                                r.editBtn:SetPoint("LEFT", r, "LEFT", 765, 0)
+                            else
+                                r.delBtn:Hide()
+                                r.editBtn:ClearAllPoints()
+                                r.editBtn:SetPoint("LEFT", r, "LEFT", 775, 0)
+                            end
+                            r.editBtn:Show()
+
+                            r:SetScript("OnEnter", function(self)
+                                if not self.recordData then return end
+                                GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+                                local d = self.recordData
+                                GameTooltip:AddLine(string.format("%s (%s)", d.fbName or d.fb, date("%Y-%m-%d %H:%M:%S", d.timestamp)), 0, 0.75, 1)
+                                GameTooltip:AddLine(string.format(L["打工角色: %s"] or "打工角色: %s", SetClassCFF(d.charName, d.class)), 1, 1, 1)
+                                GameTooltip:AddLine(string.format(L["工资收入: +%d G"] or "工资收入: +%d G", d.wage or 0), 0, 1, 0)
+                                if d.subsidy and d.subsidy > 0 then
+                                    GameTooltip:AddLine(string.format(L["获得补贴: +%d G"] or "获得补贴: +%d G", d.subsidy), 1, 0.8, 0)
+                                end
+                                local rSpend = (d.mySpend or 0) + (d.penalty or 0)
+                                if rSpend > 0 then
+                                    if (d.mySpend or 0) > 0 and (d.penalty or 0) > 0 then
+                                        GameTooltip:AddLine(string.format(L["本场支出: -%d G (装备%d, 罚款%d)"] or "本场支出: -%d G (装备%d, 罚款%d)", rSpend, d.mySpend, d.penalty), 1, 0.4, 0.4)
+                                    elseif (d.mySpend or 0) > 0 then
+                                        GameTooltip:AddLine(string.format(L["装备消费: -%d G"] or "装备消费: -%d G", d.mySpend), 1, 0.3, 0.3)
+                                    elseif (d.penalty or 0) > 0 then
+                                        GameTooltip:AddLine(string.format(L["罚款扣减: -%d G"] or "罚款扣减: -%d G", d.penalty), 1, 0.5, 0.2)
+                                    end
+                                end
+                                GameTooltip:AddLine(string.format(L["净落袋: %d G"] or "净落袋: %d G", d.netWage or d.wage or 0), 0, 1, 0.5)
+                                if d.grossMoney and d.grossMoney > 0 then
+                                    GameTooltip:AddLine(string.format(L["全团流水: %s (%d人)"] or "全团流水: %s (%d人)", FormatMoney(d.grossMoney), d.totalPeople or 0), 0.8, 0.8, 0.8)
+                                end
+                                if d.note and d.note ~= "" then
+                                    GameTooltip:AddLine(string.format(L["来源/备注: %s"] or "来源/备注: %s", d.note), 0.7, 0.7, 0.7)
+                                end
+                                GameTooltip:AddLine(L["提示: 点击时间或右侧按钮可修改收支、补贴与打本时间"] or "提示: 点击时间或右侧按钮可修改收支、补贴与打本时间", 0, 0.75, 1)
+                                GameTooltip:Show()
+                            end)
+                            r:SetScript("OnLeave", function() GameTooltip:Hide() end)
+
+                            if rowIdx % 2 == 0 then
+                                r:SetBackdropColor(0.10, 0.10, 0.14, 0.45)
+                            else
+                                r:SetBackdropColor(0.06, 0.06, 0.09, 0.30)
+                            end
+
+                            r:ClearAllPoints()
+                            r:SetPoint("TOPLEFT", WR.content, "TOPLEFT", 0, -currentY)
+                            r:Show()
+                            currentY = currentY + 25
+                        end
                     end
                 end
-                GameTooltip:AddLine(string.format(L["净落袋: %d G"] or "净落袋: %d G", d.netWage or d.wage or 0), 0, 1, 0.5)
-                if d.grossMoney and d.grossMoney > 0 then
-                    GameTooltip:AddLine(string.format(L["全团流水: %s (%d人)"] or "全团流水: %s (%d人)", FormatMoney(d.grossMoney), d.totalPeople or 0), 0.8, 0.8, 0.8)
-                end
-                if d.note and d.note ~= "" then
-                    GameTooltip:AddLine(string.format(L["来源/备注: %s"] or "来源/备注: %s", d.note), 0.7, 0.7, 0.7)
-                end
-                GameTooltip:AddLine(L["提示: 点击时间或右侧按钮可修改收支、补贴与打本时间"] or "提示: 点击时间或右侧按钮可修改收支、补贴与打本时间", 0, 0.75, 1)
-                GameTooltip:Show()
-            end)
-            r:SetScript("OnLeave", function() GameTooltip:Hide() end)
-
-            r:Show()
+            end
         end
     end
 
-    for i = #records + 1, #WR.rowFrames do
+    -- 隐藏所有多余的 Month Headers
+    for i = monthIdx + 1, #(WR.monthHeaders or {}) do
+        WR.monthHeaders[i]:Hide()
+    end
+    -- 隐藏所有多余的 Week Headers
+    for i = weekIdx + 1, #(WR.weekHeaders or {}) do
+        WR.weekHeaders[i]:Hide()
+    end
+    -- 隐藏所有多余的 Record Rows
+    for i = rowIdx + 1, #(WR.rowFrames or {}) do
         local r = WR.rowFrames[i]
         if r then
             r.recordData = nil
@@ -1629,6 +2270,8 @@ function WR.UpdateUI()
             r:Hide()
         end
     end
+
+    WR.content:SetHeight(math.max(1, currentY))
 end
 
 -------------------------------------------------------------------------------
@@ -2543,12 +3186,32 @@ SlashCmdList["BGLITE_THURSDAY"] = function(msg)
 end
 
 -------------------------------------------------------------------------------
--- 12. 出入副本区域切换监听：出本瞬间若报表打开，立即自动刷新入账
+-- 12. 出入副本区域切换监听：出本瞬间加固时间戳并自动刷新入账
 -------------------------------------------------------------------------------
 local zoneEventFrame = CreateFrame("Frame")
 zoneEventFrame:RegisterEvent("ZONE_CHANGED_NEW_AREA")
 zoneEventFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
 zoneEventFrame:SetScript("OnEvent", function(self, event)
+    local inInstance, instanceType = IsInInstance()
+    -- 出本瞬间（或非副本区域）：自动检查活跃表格并加固本周打本时间戳
+    if not inInstance or (instanceType ~= "raid" and instanceType ~= "party") then
+        local now = (GetServerTime and GetServerTime()) or time()
+        local curWeekStart = WR.GetCDWeekStart(now)
+        local fbList = BG.FBtable or {}
+        for _, fb in ipairs(fbList) do
+            if BiaoGe and BiaoGe[fb] then
+                local wage, totalPeople, grossMoney = GetActiveOverviewData(fb)
+                if wage > 0 or grossMoney > 0 then
+                    local trueTs = (ns.GetTrueRaidTime and ns.GetTrueRaidTime(fb))
+                    if trueTs and trueTs >= curWeekStart then
+                        BiaoGe[fb].raidTime = trueTs
+                        BiaoGe[fb].lastRaidTime = trueTs
+                    end
+                end
+            end
+        end
+    end
+
     if WR.MainFrame and WR.MainFrame:IsShown() then
         C_Timer.After(0.5, function()
             if WR.MainFrame and WR.MainFrame:IsShown() then
