@@ -1,4 +1,4 @@
-# BGLite_Plus 项目基准文档 (BASELINE.md)
+﻿# BGLite_Plus 项目基准文档 (BASELINE.md)
 
 ## 1. 项目简介
 - **项目名称**: BGLite_Plus (BiaoGe Plus - 魔兽世界怀旧服/时光服/正式服金团表格及辅助工具插件)
@@ -1482,3 +1482,36 @@
        - 模块初始化（`InitLootHistoryModule`）直接对 `pairs(BiaoGe)` 进行全表深度扫描，对所有已记录副本的 `lootHistory` 存量数据安全截断，全过程耗时 < 0.05 毫秒，零卡帧、零报错；
        - `GetHistoryDB` 每次获取数据时进行保底拦截，双重保障存量数据健康；
        - 面板顶部统计文字优化为：`共记录 %s/%s 件掉落`（如 `共记录 500/500 件掉落`），让容量状态一目了然。
+
+
+* **团本报表合体副本拆分引擎范围收敛 (仅拆分 NAXX 与 双龙) (2026-09-26)**:
+  * **背景与用户反馈**:
+    - 用户反馈此前在实现“NAXX 与 双龙拆分”时，合体拆分引擎把 P5 双本（`SWtitan`: 祖阿曼 1~7 与 太阳井 8~13）也一并自动拆成了两条独立记录，不符合实战跟团结算预期；
+    - 用户明确要求：**仅拆分 NAXX 和双龙，祖阿曼与太阳井等其他所有合体副本必须保持完整整体记录，不得拆开**。
+  * **修复与优化实施**:
+    - 在 [WorkerReport.lua](file:///e:/World%20of%20Warcraft/_classic_titan_/Interface/AddOns/BGLite_Plus/Core/WorkerReport.lua) 中重构精简 `COMBO_RAIDS` 配置字典，彻底移除 `SWtitan`、`SSCtitan` 与 `TOCtitan`；
+    - 严格锁死仅针对 `NAXXtitan` 与 `NAXX` 进行子副本（NAXX 1~15 / 双龙 16~17）拆分；
+    - `SWtitan`（祖阿曼+太阳井）等其他合体副本完整保留单一整体流水卡片，总收入、工资与个人消费保持合流合并，杜绝割裂。
+
+
+* **暴雪官方 ObjectAPI Item:ContinueOnItemLoad 崩溃防御兜底 (2026-09-26)**:
+  * **故障定位**:
+    - 用户反馈报错: `Blizzard_ObjectAPI/Classic/Item.lua:320: table index is nil` (调用栈: `Item.lua:GetOrCreateCallbacks` -> `AddCallback` -> `ContinueOnItemLoad` -> `ItemTooltip.lua:34: AddItem`);
+    - **病根**: 当通过 `BG.OnItemLoad(itemID)` 异步加载某些在客户端本地数据库尚未就绪、无效或特殊的新物品（如时光服自定义物品）时，暴雪原生的 `ItemMixin:GetItemKey()` 返回 `nil`，导致暴雪底层执行 `self.callbacks[nil]` 抛出致命 Lua 错误；
+    - 此外，此前奥杜尔补丁中写入的 `ExchangeItems` 包含了非套装兑换物的碎片 ID，在遍历时加剧了此问题。
+  * **架构防御与彻底根治 (零侵入上游 BGLite)**:
+    1. 在 [Lib.lua](file:///e:/World%20of%20Warcraft/_classic_titan_/Interface/AddOns/BGLite_Plus/Core/Lib.lua) 顶层建立全局 `BG.OnItemLoad` 安全防御包装（Safe Wrapper），在调用 `:ContinueOnItemLoad` 前严密校验对象的 `GetItemKey()` / `GetItemID()`，一旦发现为 `nil` 立即安全静默退出，彻底杜绝穿透至暴雪官方代码引发红字；
+    2. 在 [Loot_ULDtitan.lua](file:///e:/World%20of%20Warcraft/_classic_titan_/Interface/AddOns/BGLite_Plus/Core/Loot_ULDtitan.lua) 中严格对齐 `SWtitan` 的成熟规范，将奥杜尔 `BG.Loot[FB].ExchangeItems` 置为空表 `{}`（怀旧服客户端原生 Tooltip 已自带 T8 Token 兑换说明），消除无效物品异步扫描。
+
+
+* **团本报表折叠分组汇总栏「出勤车数到净落袋」垂直上下对齐优化 (2026-09-26)**:
+  * **背景与排查**:
+    - 用户反馈团本报表界面中，月份行与周度行的折叠汇总文本（从“出勤 x 车”到“净落袋”）在垂直方向参差不齐，视觉效果错位。
+    - **病根定位**:
+      - `WorkerReport.lua` 中 MonthHeader 与 WeekHeader 的 `summary` 控件左锚点此前硬编码绑定在分类标签 `tag` 的右侧（`summary:SetPoint("LEFT", tag, "RIGHT", 10, 0)`）；
+      - 由于月度标题（`2026年 09月`）、当前周（`09/24 ~ 10/01 (本周 CD)`）、上周（`09/17 ~ 09/24 (上周 CD)`）以及普通历史周（无标签 `tag` 为空）的左侧标题与标签总宽度各不相同（无标签周比本周短了近 65 像素）；
+      - 导致各行的 `summary` 起始 X 坐标完全错开，无标签周严重向左凹陷，整列文字呈现锯齿状。
+  * **技术改造与效果**:
+    - 在 [WorkerReport.lua](file:///e:/World%20of%20Warcraft/_classic_titan_/Interface/AddOns/BGLite_Plus/Core/WorkerReport.lua) 的 `GetOrCreateMonthHeader` 与 `GetOrCreateWeekHeader` 中，将 `summary` 的左锚点从相对 `tag` 改为统一锚定至父容器 `h` 的绝对安全 X 坐标 `summary:SetPoint("LEFT", h, "LEFT", 205, 0)`；
+    - 避开了左侧标题与 CD 状态标签的最大占用范围（~176px），右侧保留自适应弹性约束（`RIGHT, actionHint, LEFT, -8`）；
+    - 所有月份栏与周度栏中的“出勤 x 车  ·  工资 +xxxG  ·  支出 -xxxG  ·  净落袋 +xxxG”自此全部统一从 `x = 205` 笔直对齐，视觉呈现极其规整工整。

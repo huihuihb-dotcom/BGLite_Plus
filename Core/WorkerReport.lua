@@ -549,7 +549,7 @@ local function GetActiveZhiChuBoss(FB)
 end
 
 -------------------------------------------------------------------------------
--- 3.5 合体副本智能拆分引擎 (针对时光服/WLK 多合一大表格：如 NAXX+双龙, 祖阿曼+太阳井)
+-- 3.5 合体副本智能拆分引擎 (严格遵循用户需求：仅拆分 NAXX 与 双龙，其他副本绝不拆分)
 -------------------------------------------------------------------------------
 local COMBO_RAIDS = {
     ["NAXXtitan"] = {
@@ -564,27 +564,6 @@ local COMBO_RAIDS = {
         subRaids = {
             { key = "NAXX", name = "纳克萨玛斯", bossStart = 1, bossEnd = 15 },
             { key = "SL",   name = "双龙",       bossStart = 16, bossEnd = 17 },
-        },
-    },
-    ["SWtitan"] = {
-        defaultName = "P5双本",
-        subRaids = {
-            { key = "ZA", name = "祖阿曼", bossStart = 1, bossEnd = 7 },
-            { key = "SW", name = "太阳井", bossStart = 8, bossEnd = 13 },
-        },
-    },
-    ["SSCtitan"] = {
-        defaultName = "毒蛇风暴",
-        subRaids = {
-            { key = "SSC", name = "毒蛇神殿", bossStart = 1, bossEnd = 6 },
-            { key = "TK",  name = "风暴要塞", bossStart = 7, bossEnd = 10 },
-        },
-    },
-    ["TOCtitan"] = {
-        defaultName = "P4双本",
-        subRaids = {
-            { key = "ULD", name = "奥杜尔", bossStart = 1, bossEnd = 10 },
-            { key = "TOC", name = "十字军", bossStart = 11, bossEnd = 15 },
         },
     },
 }
@@ -1832,7 +1811,7 @@ function WR.CreateUI(parent)
         local summary = h:CreateFontString(nil, "OVERLAY")
         summary:SetFont(BIAOGE_TEXT_FONT, 11, "OUTLINE")
         summary:SetTextColor(RGB("FFFFFF"))
-        summary:SetPoint("LEFT", tag, "RIGHT", 10, 0)
+        summary:SetPoint("LEFT", h, "LEFT", 205, 0)
         summary:SetPoint("RIGHT", actionHint, "LEFT", -8, 0)
         summary:SetJustifyH("LEFT")
         summary:SetWordWrap(false)
@@ -1910,7 +1889,7 @@ function WR.CreateUI(parent)
         local summary = h:CreateFontString(nil, "OVERLAY")
         summary:SetFont(BIAOGE_TEXT_FONT, 11, "OUTLINE")
         summary:SetTextColor(RGB("CCCCCC"))
-        summary:SetPoint("LEFT", tag, "RIGHT", 10, 0)
+        summary:SetPoint("LEFT", h, "LEFT", 205, 0)
         summary:SetPoint("RIGHT", actionHint, "LEFT", -8, 0)
         summary:SetJustifyH("LEFT")
         summary:SetWordWrap(false)

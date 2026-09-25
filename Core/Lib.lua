@@ -9,6 +9,38 @@ if not string.trim then
     end
 end
 
+-- 全局基础环境加固：暴雪官方 ObjectAPI Item:ContinueOnItemLoad 崩溃防御兜底
+-- 彻底根治因无效 itemID 或未就绪链接导致 Blizzard_ObjectAPI/Classic/Item.lua:320 "table index is nil"
+do
+    local dummyItem = {
+        ContinueOnItemLoad = function() end,
+        IsItemDataCached = function() return false end,
+    }
+    if BG and BG.OnItemLoad then
+        local raw_OnItemLoad = BG.OnItemLoad
+        BG.OnItemLoad = function(item)
+            if not item or item == "" or item == 0 then
+                return dummyItem
+            end
+            local obj = raw_OnItemLoad(item)
+            if not obj then
+                return dummyItem
+            end
+            local raw_Continue = obj.ContinueOnItemLoad
+            if raw_Continue then
+                obj.ContinueOnItemLoad = function(self, callback)
+                    local key = (self.GetItemKey and self:GetItemKey()) or (self.GetItemID and self:GetItemID())
+                    if not key then
+                        return
+                    end
+                    return raw_Continue(self, callback)
+                end
+            end
+            return obj
+        end
+    end
+end
+
 -- 引用 LibBG 下拉菜单库与本地化
 ns.LibBG = LibStub:GetLibrary("BiaoGe-LibUIDropDownMenu-4.0", true) or LibStub:GetLibrary("LibUIDropDownMenu-4.0", true) or (BG and BG.LibBG)
 local L = ns.L or setmetatable({}, {
