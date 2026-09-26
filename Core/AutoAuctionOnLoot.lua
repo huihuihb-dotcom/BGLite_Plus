@@ -88,7 +88,7 @@ local function CanInitiateAuction(isManualTest)
     return false
 end
 
--- 3. 表格槽位级“只拍一次”终生锁定池 (支持跨 /reload 持久化与生命周期自愈)
+-- 3. 表格槽位级“只拍一次”锁定池 (支持时间戳过期自愈与开怪自动释放，杜绝跨周跨CD残留脏锁)
 local function GetAuctionedSlotsDB()
     BiaoGe = BiaoGe or {}
     BiaoGe.autoAuctionedSlots = BiaoGe.autoAuctionedSlots or {}
@@ -99,13 +99,28 @@ AutoAuctionOnLoot.GetAuctionedSlotsDB = GetAuctionedSlotsDB
 local function IsSlotAuctioned(slotKey)
     if not slotKey or slotKey == "" then return false end
     local db = GetAuctionedSlotsDB()
-    return db[slotKey] == true
+    local record = db[slotKey]
+    if not record then return false end
+
+    -- 若为旧版本布尔值 true 或超过 2 小时 (7200秒) 的历史时间戳，视为历史过期脏数据自动释放
+    local nowServer = GetServerTime()
+    if record == true then
+        db[slotKey] = nil
+        return false
+    elseif type(record) == "number" then
+        if nowServer - record > 7200 or nowServer < record then
+            db[slotKey] = nil
+            return false
+        end
+        return true
+    end
+    return false
 end
 
 local function MarkSlotAuctioned(slotKey)
     if not slotKey or slotKey == "" then return end
     local db = GetAuctionedSlotsDB()
-    db[slotKey] = true
+    db[slotKey] = GetServerTime()
 end
 
 local function ClearSlotAuctioned(slotKey)
@@ -114,11 +129,50 @@ local function ClearSlotAuctioned(slotKey)
     db[slotKey] = nil
 end
 
+local function ClearBossAuctionedSlots(FB, bossNum)
+    if not bossNum then return end
+    local db = GetAuctionedSlotsDB()
+    local prefix = tostring(FB or "") .. "_" .. tostring(bossNum) .. "_"
+    for k in pairs(db) do
+        if k:find("^" .. prefix) or k:find("_" .. tostring(bossNum) .. "_") then
+            db[k] = nil
+        end
+    end
+end
+AutoAuctionOnLoot.ClearBossAuctionedSlots = ClearBossAuctionedSlots
+
 local function ResetAllAuctionedSlots()
     local db = GetAuctionedSlotsDB()
     wipe(db)
 end
 AutoAuctionOnLoot.ResetAllAuctionedSlots = ResetAllAuctionedSlots
+
+-- 开怪自愈监听：当 Boss 战斗打响时，自动清除该 Boss 历史残留的槽位锁定，确保本次击杀产出的所有装备槽位干净可用
+local encounterWatcher = CreateFrame("Frame")
+encounterWatcher:RegisterEvent("ENCOUNTER_START")
+encounterWatcher:RegisterEvent("PLAYER_ENTERING_WORLD")
+encounterWatcher:SetScript("OnEvent", function(self, event, ...)
+    if event == "ENCOUNTER_START" then
+        local bossID = ...
+        local FB = (BG and BG.FB2) or (BG and BG.FB1)
+        local bNum = nil
+        if BG and BG.GetBossIndexByBossID and bossID then
+            bNum = BG.GetBossIndexByBossID(bossID)
+        end
+        if FB and bNum then
+            ClearBossAuctionedSlots(FB, bNum)
+        end
+    elseif event == "PLAYER_ENTERING_WORLD" then
+        -- 进出副本时检查并清理超过 2 小时的陈旧槽位记录
+        local db = GetAuctionedSlotsDB()
+        local nowServer = GetServerTime()
+        for k, v in pairs(db) do
+            if v == true or (type(v) == "number" and (nowServer - v > 7200 or nowServer < v)) then
+                db[k] = nil
+            end
+        end
+    end
+end)
 
 -- 3.1 非 Boss 掉落交互状态追踪（杜绝队友交易归还、邮寄、商店回购等引发误拍）
 local isTradeOpen = false
@@ -421,19 +475,42 @@ local function GetOrCreateCountDownFrame()
     f.bossName = ""
 
     function f:StartCountdown(itemsToAuction, bossName)
-        self.items = itemsToAuction
-        self.bossName = bossName or "Boss"
-        self.totalTime = tonumber(BiaoGe.options.autoAuctionConfirmTime) or 5
-        if self.totalTime < 2 then self.totalTime = 2 end
-        self.timeRemaining = self.totalTime
+        if not itemsToAuction or #itemsToAuction == 0 then return end
+        self.bossName = bossName or self.bossName or "Boss"
 
-        self.bar:SetMinMaxValues(0, self.totalTime)
-        self.bar:SetValue(self.totalTime)
-        self.bar:SetStatusBarColor(0.2, 0.8, 0.2, 0.9)
+        if self:IsShown() and self.items and #self.items > 0 then
+            -- 动态追加模式：将新来的装备并入已有待拍列表，绝不覆盖丢弃！
+            for _, newItem in ipairs(itemsToAuction) do
+                local exists = false
+                for _, oldItem in ipairs(self.items) do
+                    if (newItem.slotKey and newItem.slotKey ~= "" and newItem.slotKey == oldItem.slotKey)
+                       or (newItem.id == oldItem.id and newItem.link == oldItem.link) then
+                        exists = true
+                        break
+                    end
+                end
+                if not exists then
+                    tinsert(self.items, newItem)
+                end
+            end
+            -- 给团长额外平滑延长时间（至少保留 3.5 秒供确认新追加装备）
+            if self.timeRemaining < 3.5 then
+                self.timeRemaining = 3.5
+            end
+        else
+            self.items = itemsToAuction
+            self.totalTime = tonumber(BiaoGe.options.autoAuctionConfirmTime) or 5
+            if self.totalTime < 2 then self.totalTime = 2 end
+            self.timeRemaining = self.totalTime
+
+            self.bar:SetMinMaxValues(0, self.totalTime)
+            self.bar:SetValue(self.totalTime)
+            self.bar:SetStatusBarColor(0.2, 0.8, 0.2, 0.9)
+        end
 
         local totalItemCount = 0
         local unpresetCount = 0
-        for _, it in ipairs(itemsToAuction) do
+        for _, it in ipairs(self.items) do
             local c = it.count or 1
             totalItemCount = totalItemCount + c
             if not it.presetMoney then unpresetCount = unpresetCount + c end
@@ -472,6 +549,25 @@ local function GetOrCreateCountDownFrame()
     function f:StopAndExecute()
         self:SetScript("OnUpdate", nil)
         self:Hide()
+
+        -- 扫尾合并：检查 pendingLootQueue 中是否有刚刚入队的物品，避免团长点击瞬间漏单
+        if #pendingLootQueue > 0 then
+            for _, item in ipairs(pendingLootQueue) do
+                local exists = false
+                for _, oldItem in ipairs(self.items) do
+                    if (item.slotKey and item.slotKey ~= "" and item.slotKey == oldItem.slotKey)
+                       or (item.id == oldItem.id and item.link == oldItem.link) then
+                        exists = true
+                        break
+                    end
+                end
+                if not exists then
+                    tinsert(self.items, item)
+                end
+            end
+            wipe(pendingLootQueue)
+        end
+
         if not self.items or #self.items == 0 then return end
 
         local fallbackPrice = tonumber(BiaoGe.options.autoAuctionFallbackPrice) or 100
@@ -912,11 +1008,11 @@ function AutoAuctionOnLoot.QueueItemForAuction(link, explicitBossName, isManualT
         DEFAULT_CHAT_FRAME:AddMessage(format("|cff00BFFF[BGLite 自动拍卖]|r 捕获掉落装备：%s%s（归属【%s】），已加入待拍批次...", link, countStr, bossName))
     end
 
-    -- 1.5 秒防抖窗口合并同 Boss 掉落
+    -- 1.8 秒防抖窗口合并同 Boss 掉落 (充分吸收并发拾取的多件装备)
     if debounceTimer then
         debounceTimer:Cancel()
     end
-    debounceTimer = C_Timer.NewTimer(1.5, ProcessPendingAuctions)
+    debounceTimer = C_Timer.NewTimer(1.8, ProcessPendingAuctions)
 end
 
 -- 7. 触发源 A：CHAT_MSG_LOOT (仅当装备被 BGLite 确认【记录进拍卖表格】后延时捕获)
@@ -946,9 +1042,10 @@ lootMsgFrame:SetScript("OnEvent", function(self, event, msg, ...)
     if not itemID then return end
 
     -- 延时多段对账：等待 BGLite 的 Loot.lua 完成对金团表格 (BiaoGe[FB]) 的自动录入
-    -- 阶段1：0.15秒（BGLite 延迟0.10秒写入）
-    -- 阶段2：0.40秒（兜底网络延迟或掉帧）
-    -- 阶段3：0.80秒（最终超时对账）
+    -- 阶段1：0.20秒（BGLite 延迟0.10秒异步写入，留足双倍安全裕量）
+    -- 阶段2：0.45秒（兜底主线程掉帧或计算卡顿）
+    -- 阶段3：0.85秒（扩展对账）
+    -- 阶段4：1.50秒（最终超时对账）
     local function TryQueueAfterTableCheck(attempt)
         attempt = attempt or 1
         -- 异步回调中再次检测交易状态（防止在延时窗口内突然打开交易或产生交易事件）
@@ -960,14 +1057,17 @@ lootMsgFrame:SetScript("OnEvent", function(self, event, msg, ...)
         if inTable and slotKey then
             local finalCount = (slotCount and slotCount > 1) and slotCount or msgCount
             AutoAuctionOnLoot.QueueItemForAuction(link, bossName, false, slotKey, true, finalCount)
-        elseif attempt < 3 then
-            C_Timer.After(attempt == 1 and 0.25 or 0.40, function()
+        elseif attempt < 4 then
+            local nextDelay = 0.25
+            if attempt == 2 then nextDelay = 0.40
+            elseif attempt == 3 then nextDelay = 0.65 end
+            C_Timer.After(nextDelay, function()
                 TryQueueAfterTableCheck(attempt + 1)
             end)
         end
     end
 
-    C_Timer.After(0.15, function()
+    C_Timer.After(0.20, function()
         TryQueueAfterTableCheck(1)
     end)
 end)
@@ -985,10 +1085,20 @@ if BG and BG.AddLootItem then
         if numb and BG and BG.Boss and FB and BG.Boss[FB] and BG.Boss[FB]["boss" .. numb] then
             bName = BG.Boss[FB]["boss" .. numb].name2 or BG.Boss[FB]["boss" .. numb].name
         end
-        -- 外部或手动调用 AddLootItem 录入表格时，延时 0.2 秒待表格写入完成后触发
-        C_Timer.After(0.2, function()
+        local itemID = SafeGetItemID(link) or (GetItemInfoInstant and GetItemInfoInstant(link))
+
+        -- 外部或手动调用 AddLootItem 录入表格时，延时 0.25 秒待表格写入完成后触发
+        C_Timer.After(0.25, function()
             if IsNonLootInteractionActive() then return end
-            AutoAuctionOnLoot.QueueItemForAuction(link, bName, false, nil, true, count)
+            -- 先尝试精准获取槽位 Key，杜绝同名装备被全局防抖误杀
+            local resolvedKey = nil
+            if itemID then
+                local inT, _, _, _, _, sKey = FindItemInBiaoGeTable(itemID, link, FB, true)
+                if inT and sKey then
+                    resolvedKey = sKey
+                end
+            end
+            AutoAuctionOnLoot.QueueItemForAuction(link, bName, false, resolvedKey, true, count)
         end)
     end)
 end
