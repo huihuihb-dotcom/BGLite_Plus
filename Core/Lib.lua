@@ -29,11 +29,14 @@ do
             local raw_Continue = obj.ContinueOnItemLoad
             if raw_Continue then
                 obj.ContinueOnItemLoad = function(self, callback)
-                    local key = (self.GetItemKey and self:GetItemKey()) or (self.GetItemID and self:GetItemID())
-                    if not key then
+                    -- 暴雪底层的 ItemCallbacks[itemKey] 严格以 GetItemKey 为索引
+                    -- 若 itemKey 为 nil，绝不可调用 raw_Continue，否则暴雪会抛出 table index is nil
+                    local key = (self.GetItemKey and self:GetItemKey())
+                    if not key or key == "" then
                         return
                     end
-                    return raw_Continue(self, callback)
+                    -- 使用 pcall 沙箱保护暴雪底层可能抛出的任何未知异常
+                    pcall(raw_Continue, self, callback)
                 end
             end
             return obj

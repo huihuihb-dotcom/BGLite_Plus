@@ -652,8 +652,11 @@ local function FindItemInBiaoGeTable(itemID, link, FB, checkAvailableOnly)
     local addedFB = {}
     local function AddFB(fbName)
         if fbName and type(fbName) == "string" and fbName ~= "" and BiaoGe[fbName] and not addedFB[fbName] then
-            tinsert(fbsToCheck, fbName)
-            addedFB[fbName] = true
+            -- 核心防御 1：严格校验该副本必须在当前客户端已加载的有效副本表中（BG.Maxb 必须有效），坚决杜绝旧版本残留脏副本（如时光服下的 "RS"）
+            if BG and BG.Maxb and BG.Maxb[fbName] and type(BG.Maxb[fbName]) == "number" and BG.Maxb[fbName] > 0 then
+                tinsert(fbsToCheck, fbName)
+                addedFB[fbName] = true
+            end
         end
     end
 
@@ -669,49 +672,60 @@ local function FindItemInBiaoGeTable(itemID, link, FB, checkAvailableOnly)
     end
 
     for _, fbName in ipairs(fbsToCheck) do
-        local maxb = (BG and BG.Maxb and BG.Maxb[fbName]) or 30
-        for b = 1, maxb do
-            if BiaoGe[fbName]["boss" .. b] then
-                local maxi = (BG and BG.GetMaxi and BG.GetMaxi(fbName, b)) or 30
-                for i = 1, maxi do
-                    local txt = BiaoGe[fbName]["boss" .. b]["zhuangbei" .. i]
-                    local slotKey = tostring(fbName) .. "_" .. tostring(b) .. "_" .. tostring(i)
+        local maxb = BG and BG.Maxb and BG.Maxb[fbName]
+        if maxb and type(maxb) == "number" and maxb > 0 then
+            for b = 1, maxb do
+                if BiaoGe[fbName] and BiaoGe[fbName]["boss" .. b] then
+                    -- 核心防御 2：使用 pcall 沙箱调用 BG.GetMaxi，彻底杜绝底层算术或边界异常中断执行
+                    local maxi = 0
+                    if BG and BG.GetMaxi then
+                        local ok, res = pcall(BG.GetMaxi, fbName, b)
+                        if ok and type(res) == "number" then
+                            maxi = res
+                        end
+                    end
+                    if maxi <= 0 then maxi = 20 end
 
-                    if txt and txt ~= "" then
-                        local id = SafeGetItemID(txt)
-                        if (id and id == targetID) or (link and (txt == link or txt:find(link, 1, true))) then
-                            local jine = BiaoGe[fbName]["boss" .. b]["jine" .. i]
-                            local maijia = BiaoGe[fbName]["boss" .. b]["maijia" .. i]
-                            local hasMoney = (jine and tonumber(jine) and tonumber(jine) > 0)
-                            local hasBuyer = (maijia and maijia ~= "")
-                            local isAuctioned = IsSlotAuctioned(slotKey)
-                            local isPending = IsSlotInPendingQueue(slotKey)
+                    for i = 1, maxi do
+                        local txt = BiaoGe[fbName]["boss" .. b]["zhuangbei" .. i]
+                        local slotKey = tostring(fbName) .. "_" .. tostring(b) .. "_" .. tostring(i)
 
-                            -- 解析槽位文本中可能包含的数量后缀（例如 [北伐奖章]x2）
-                            local slotCount = 1
-                            local countMatch = txt:match("x(%d+)$") or txt:match("x(%d+)%s*$")
-                            if countMatch then
-                                slotCount = tonumber(countMatch) or 1
-                            end
+                        if txt and txt ~= "" then
+                            local id = SafeGetItemID(txt)
+                            if (id and id == targetID) or (link and (txt == link or txt:find(link, 1, true))) then
+                                local jine = BiaoGe[fbName]["boss" .. b]["jine" .. i]
+                                local maijia = BiaoGe[fbName]["boss" .. b]["maijia" .. i]
+                                local hasMoney = (jine and tonumber(jine) and tonumber(jine) > 0)
+                                local hasBuyer = (maijia and maijia ~= "")
+                                local isAuctioned = IsSlotAuctioned(slotKey)
+                                local isPending = IsSlotInPendingQueue(slotKey)
 
-                            local bName = nil
-                            if BG and BG.Boss and BG.Boss[fbName] and BG.Boss[fbName]["boss" .. b] then
-                                bName = BG.Boss[fbName]["boss" .. b].name2 or BG.Boss[fbName]["boss" .. b].name
-                            end
+                                -- 解析槽位文本中可能包含的数量后缀（例如 [北伐奖章]x2）
+                                local slotCount = 1
+                                local countMatch = txt:match("x(%d+)$") or txt:match("x(%d+)%s*$")
+                                if countMatch then
+                                    slotCount = tonumber(countMatch) or 1
+                                end
 
-                            if checkAvailableOnly then
-                                -- 严格过滤：若该槽位已记账有金额、已有买家、此前已自动开拍过、或当前正处于待拍批次中，一律视为已占用槽位跳过
-                                if not hasMoney and not hasBuyer and not isAuctioned and not isPending then
+                                local bName = nil
+                                if BG and BG.Boss and BG.Boss[fbName] and BG.Boss[fbName]["boss" .. b] then
+                                    bName = BG.Boss[fbName]["boss" .. b].name2 or BG.Boss[fbName]["boss" .. b].name
+                                end
+
+                                if checkAvailableOnly then
+                                    -- 严格过滤：若该槽位已记账有金额、已有买家、此前已自动开拍过、或当前正处于待拍批次中，一律视为已占用槽位跳过
+                                    if not hasMoney and not hasBuyer and not isAuctioned and not isPending then
+                                        return true, b, i, bName, fbName, slotKey, slotCount
+                                    end
+                                else
                                     return true, b, i, bName, fbName, slotKey, slotCount
                                 end
-                            else
-                                return true, b, i, bName, fbName, slotKey, slotCount
                             end
-                        end
-                    else
-                        -- 槽位已被团长在表格中删空，自愈释放该槽位锁定
-                        if IsSlotAuctioned(slotKey) then
-                            ClearSlotAuctioned(slotKey)
+                        else
+                            -- 槽位已被团长在表格中删空，自愈释放该槽位锁定
+                            if IsSlotAuctioned(slotKey) then
+                                ClearSlotAuctioned(slotKey)
+                            end
                         end
                     end
                 end
@@ -938,7 +952,15 @@ function AutoAuctionOnLoot.QueueItemForAuction(link, explicitBossName, isManualT
     if not bossName or bossName == "" or bossName == "Boss掉落" then
         if BG and BG.Frame and BG.Frame[FB] and BG.Maxb and BG.Maxb[FB] then
             for b = 1, BG.Maxb[FB] - 1 do
-                local maxI = (BG.GetMaxi and BG.GetMaxi(FB, b)) or 30
+                local maxI = 0
+                if BG.GetMaxi then
+                    local ok, res = pcall(BG.GetMaxi, FB, b)
+                    if ok and type(res) == "number" then
+                        maxI = res
+                    end
+                end
+                if maxI <= 0 then maxI = 20 end
+
                 for i = 1, maxI do
                     local cell = BG.Frame[FB]["boss" .. b] and BG.Frame[FB]["boss" .. b]["zhuangbei" .. i]
                     if cell then
@@ -1053,8 +1075,8 @@ lootMsgFrame:SetScript("OnEvent", function(self, event, msg, ...)
 
         local FB = (BG and BG.FB2) or (BG and BG.FB1) or "TOCtitan"
         -- 严格模式查找：只匹配尚未开拍且未记账结账的有效槽位（排查已被待拍队列占用的槽位）
-        local inTable, b, i, bossName, foundFB, slotKey, slotCount = FindItemInBiaoGeTable(itemID, link, FB, true)
-        if inTable and slotKey then
+        local ok, inTable, b, i, bossName, foundFB, slotKey, slotCount = pcall(FindItemInBiaoGeTable, itemID, link, FB, true)
+        if ok and inTable and slotKey then
             local finalCount = (slotCount and slotCount > 1) and slotCount or msgCount
             AutoAuctionOnLoot.QueueItemForAuction(link, bossName, false, slotKey, true, finalCount)
         elseif attempt < 4 then
@@ -1093,8 +1115,8 @@ if BG and BG.AddLootItem then
             -- 先尝试精准获取槽位 Key，杜绝同名装备被全局防抖误杀
             local resolvedKey = nil
             if itemID then
-                local inT, _, _, _, _, sKey = FindItemInBiaoGeTable(itemID, link, FB, true)
-                if inT and sKey then
+                local ok, inT, _, _, _, _, sKey = pcall(FindItemInBiaoGeTable, itemID, link, FB, true)
+                if ok and inT and sKey then
                     resolvedKey = sKey
                 end
             end

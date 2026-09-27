@@ -62,6 +62,38 @@
        - 点击【立即全拍】或倒计时结束时，扫尾检查待拍缓冲池一并合并发起，彻底消除竞态漏单。
     5. **同名装备掉落防抖加固**:
        - 触发源 B 外部 hook 录入时，先精准解析对应表格槽位，独立槽位独立放行，杜绝同名装备被全局 45s 防抖误杀。
+- **跨版本废弃副本脏数据崩溃、TOC双子漏拍与暴雪底层API空键报错排查归档 (2026-09-27)**:
+  - **用户反馈现象**:
+    1. TOC 双子自动拍卖漏拍装备：先摸尸体捡的前两件（凶狼之杖、无情杀手腰带）没有被自动拍，后续装备正常拍；
+    2. 掉落拾取时伴随报错：`1x BGLite/Core/DB/DB.lua:692: attempt to perform arithmetic on field '?' (a nil value)`，报错现场 Locals 显示 `FB="RS", b=1`；
+    3. 预设价格面板打开时伴随图片报错：`1x Blizzard_ObjectAPI/Classic/Item.lua:320: table index is nil`。
+  - **核心根因剖析**:
+    1. **跨版本脏数据算术崩溃与双子漏拍因果链**:
+       - `FindItemInBiaoGeTable` 在查找槽位时全量扫描了 `pairs(BiaoGe)` 历史存档。若玩家电脑残留有旧版本（WLK）的红玉圣殿（`RS`）表格数据，`"RS"` 会被推入待查列表；
+       - 在高频连续拾取前两件装备时，首轮 0.20s 异步查表穿透至 `"RS"`。而时光服环境下 `BG.Maxb["RS"]` 是 `nil`，调用 `BG.GetMaxi("RS", 1)` 执行 `b == Maxb[FB] + 1` 触发了 `nil + 1` 算术运行时错误；
+       - 该未捕获报错直接硬生生掐死了当前装备的对账执行线程，导致原本设计的 4 级重试阶梯直接夭折，前两件装备未能入队导致漏拍；
+       - 后续装备拾取时时间已过 1 秒以上，BGLite 已在 `TOCtitan` 落盘完成，直接在首个合法副本命中并 `return`，因而避开报错正常开拍。
+    2. **暴雪原生 API `Item.lua:320 table index is nil` 与界面 `Item:1` 红问号根因**:
+       - **界面出现 `Item:1` 来源**: 玩家在金团表格单元格中偶尔填入或残留了单个数字（如 `1`、`2` 等计数或记号），旧 `SafeGetItemID` 盲目通过 `tonumber(str)` 将其识别成了合法的装备 ID `1`，进而作为动态装备收录进了预设价格列表，在界面上显示为 `Item:1` 与红色问号；
+       - **暴雪底层报错机制**: 随后该非法 ID `1` 被传入暴雪原生异步加载链路 `Item:CreateFromItemID(1)`，因为 `1` 在魔兽中是非法/不存在装备，`self:GetItemKey()` 返回了 `nil`；
+       - 旧 `Lib.lua` 的保护代码写成了 `local key = (self.GetItemKey and self:GetItemKey()) or (self.GetItemID and self:GetItemID())`，当 `GetItemKey()` 为 `nil` 时被数字 ID `1` 误放行进入了暴雪底层的 `raw_Continue`，暴雪内部在 `Blizzard_ObjectAPI/Classic/Item.lua:320` 读取 `ItemCallbacks[nil]` 抛出 `table index is nil`。
+  - **已实施修复与多层防线加固**:
+    1. **副本白名单与废弃脏数据彻底剔除**:
+       - 在 `AutoAuctionOnLoot.lua` 的 `AddFB` 中建立严格白名单：必须 `BG.Maxb[fbName] and type(BG.Maxb[fbName]) == "number" and BG.Maxb[fbName] > 0` 才允许加入待查列表，彻底切断时光服下扫描 `"RS"` 等历史旧本的通路；
+       - 循环遍历副本时校验 `maxb > 0`，移除 `or 30` 盲目兜底；
+       - 所有 `BG.GetMaxi` 调用均包裹 `pcall` 沙箱，即使底层发生任何异常，自动安全回退默认值，绝不中断外层执行栈。
+    2. **对账与事件调用链路全面沙箱化**:
+       - `TryQueueAfterTableCheck` 及 `AddLootItem` 中的 `FindItemInBiaoGeTable` 调用全面覆盖 `pcall` 保护，确保即便发生任何对账异常，4 级重试阶梯也能 100% 持续运转直至最终对账成功，彻底根除高频拾取下的丢单现象。
+    3. **暴雪原生异步加载安全闭环与源头阈值过滤**:
+       - **源头剔除 `Item:1`**: 在 `AuctionPreset.lua` 的 `SafeGetItemID` 和 `CollectFBItems` 中引入严格的装备 ID 阈值校验（`itemID > 25`），彻底杜绝表格填写的单数字被当作装备提取，根除界面 `Item:1` 红问号；
+       - **底层拦截防线**: `Lib.lua` 中将 `key` 严格限制为 `self:GetItemKey()`，若为空直接跳过，绝不再拿数字 ID 冒充放行，并对 `raw_Continue` 实施 `pcall` 沙箱保护；
+       - `AuctionPreset.lua` 中在调用 `OnItemLoad` 前加入 `itemID > 0` 校验并包裹 `pcall`，多重阻断暴雪原生库抛错。
+    4. **代码纯净性优化与雷霆互查清理**:
+       - 经与官方掉落与预设库比对，时光服与官方正式掉落均原生采用标准物品 ID（47114 / 47107），两端 ID 一致，无须别名互查，已坚决删除临时引入的 `BG.GetLeiTingItem` 冗余代码，保持核心逻辑极简纯粹。
+    5. **TOC 双阵营专属掉落合并与全量底价预设支持**:
+       - **背景与痛点**: 十字军试炼（TOCtitan / TOC）的 Boss 11~16（兽王、大王、阵营冠军、双子、小强、贡品箱）在魔兽官方底层严格区分了联盟与部落两套完全对称但 ID 互异的掉落池。若团长使用联盟角色登录并配置预设价格，默认只能为联盟 ID 设置底价；当团长换上部落角色开团时，由于对立阵营 ID 缺少底价（`priceNum <= 0`），触发了出厂底价安全保护而不会自动开拍；
+       - **实施方案**: 在 `AuctionPreset.lua` 的 `CollectFBItems` 中，定义完整的双阵营 Boss 11~16 原生掉落映射表 `TOC_FACTION_LOOT_TABLES`。在遍历副本掉落时，自动将联盟与部落双阵营的掉落物全量合并收录并去重；
+       - **业务收益**: 团长无论登录联盟号还是部落号，在预设底价面板中均能完整查看、搜索并一次性【批量底价】为双阵营所有装备配置好起拍价。换阵营换号开团打本时，掉落装备均能即时匹配到有效底价，彻底消除跨阵营漏拍隐患。
 
 ## 4. 团队工具 (RaidTool) 核心机制与近期优化
 * **进组自动密语与团队发言：仅团长/管理生效安全机制 (2026-09-02)**：

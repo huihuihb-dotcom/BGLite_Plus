@@ -19,15 +19,22 @@ local function SafeGetItemID(text)
 
     -- 1. 标准 item:XXXX 链接匹配
     local id = str:match("item:(%d+)")
-    if id then return tonumber(id) end
+    if id then
+        local num = tonumber(id)
+        if num and num > 25 then return num end
+    end
 
-    -- 2. 纯数字 ID
-    if tonumber(str) then return tonumber(str) end
+    -- 2. 纯数字 ID (必须大于 25，防止把表格中填写的 1、2、5 等数量/计数误判为物品 ID)
+    local num = tonumber(str)
+    if num and num > 25 then return num end
 
     -- 3. 上游 BGLite GetItemID fallback
     if BG and BG.GetItemID then
         local bgId = BG.GetItemID(str)
-        if bgId then return tonumber(bgId) end
+        if bgId then
+            local num = tonumber(bgId)
+            if num and num > 25 then return num end
+        end
     end
 
     -- 4. 彻底剥离颜色代码、方括号、前缀属性括号 (如 (板甲-腰部)(213) )、去除首尾空格后的纯名称解析
@@ -304,22 +311,49 @@ function ns.InitAuctionPresetModule()
             C_Item.RequestLoadItemDataByID(itemID)
         end
 
-        if BG.OnItemLoad then
-            BG.OnItemLoad(itemID):ContinueOnItemLoad(function()
-                local n, l, q, lvl, _, _, _, _, _, tex = GetItemInfo(itemID)
-                if n and n ~= "" then
-                    itemInfoCache[itemID] = {
-                        name = n,
-                        link = l,
-                        quality = q or 1,
-                        level = lvl or 0,
-                        texture = tex,
-                    }
-                    if onLoaded then onLoaded(itemInfoCache[itemID]) end
+        if BG.OnItemLoad and itemID and itemID > 0 then
+            pcall(function()
+                local itemObj = BG.OnItemLoad(itemID)
+                if itemObj and itemObj.ContinueOnItemLoad then
+                    itemObj:ContinueOnItemLoad(function()
+                        local n, l, q, lvl, _, _, _, _, _, tex = GetItemInfo(itemID)
+                        if n and n ~= "" then
+                            itemInfoCache[itemID] = {
+                                name = n,
+                                link = l,
+                                quality = q or 1,
+                                level = lvl or 0,
+                                texture = tex,
+                            }
+                            if onLoaded then onLoaded(itemInfoCache[itemID]) end
+                        end
+                    end)
                 end
             end)
         end
     end
+
+    -- 十字军试炼 (TOCtitan / TOC) 联盟与部落 Boss 11~16 原生掉落池
+    -- 暴雪底层因阵营区分了不同的装备ID。在预设底价面板中将双阵营掉落合并，
+    -- 便于团长一次性为联盟与部落全量配置起拍底价，换号开团也不会因对立阵营未配底价而漏拍。
+    local TOC_FACTION_LOOT_TABLES = {
+        Alliance = {
+            [11] = { 276778, 276777, 276776, 46970, 46976, 46992, 46972, 46974, 46988, 46960, 46990, 46962, 46961, 46985, 46959, 46979, 46958, 46963 },
+            [12] = { 276775, 276774, 276773, 47042, 47051, 47000, 47055, 47056, 46999, 47057, 47052, 46997, 47223, 47041, 47053, 46996, 46994, 47043 },
+            [13] = { 276772, 276771, 276770, 47089, 47081, 47092, 47094, 47071, 47073, 47083, 47090, 47082, 47093, 47072, 47070, 47080, 47069, 47079 },
+            [14] = { 276769, 276768, 276767, 47126, 47141, 47107, 47140, 47106, 47142, 47108, 47121, 47116, 47105, 47139, 47115, 47138, 47104, 47114 },
+            [15] = { 47559, 47558, 47557, 47225, 47183, 47203, 47235, 47187, 47194, 47151, 47186, 47204, 47152, 47184, 47234, 47195, 47150, 47054, 47149, 47182, 47148, 47193, 47233, 47242 },
+            [16] = { 47506, 47526, 47517, 47519, 47521, 47524, 47515, 47547, 47545, 47549, 47552, 47553, 49096, 47242, 34057, 47556, 274994, 19943, 19708, 19706 },
+        },
+        Horde = {
+            [11] = { 276778, 276777, 276776, 47257, 47256, 47264, 47258, 47259, 47262, 47251, 47265, 47254, 47253, 47263, 47252, 47261, 47255, 47260 },
+            [12] = { 276775, 276774, 276773, 47275, 47274, 47270, 47277, 47280, 47268, 47279, 47273, 47269, 47278, 47271, 47276, 47266, 47267, 47272 },
+            [13] = { 276772, 276771, 276770, 47291, 47286, 47293, 47292, 47284, 47281, 47289, 47295, 47288, 47294, 47283, 47282, 47290, 47285, 47287 },
+            [14] = { 276769, 276768, 276767, 47301, 47306, 47299, 47308, 47296, 47310, 47298, 47304, 47305, 47297, 47307, 47303, 47309, 47300, 47302 },
+            [15] = { 47559, 47558, 47557, 47328, 47320, 47324, 47326, 47317, 47321, 47313, 47318, 47325, 47311, 47319, 47330, 47323, 47312, 47327, 47315, 47316, 47314, 47322, 47329, 47242 },
+            [16] = { 47513, 47528, 47518, 47520, 47523, 47525, 47516, 47548, 47546, 47550, 47551, 47554, 49098, 47242, 34057, 47556, 274994, 19943, 19708, 19706 },
+        },
+    }
 
     -- 1. 采集当前副本真正掉落的装备 (严格仅采集 Boss 原生掉落，坚决排除 NPC 兑换后的进阶成品装备)
     local function CollectFBItems(FB)
@@ -376,6 +410,26 @@ function ns.InitAuctionPresetModule()
             end
         end
 
+        -- 针对十字军试炼 (TOCtitan / TOC)，合并补充联盟与部落双方 Boss 11~16 的专属掉落
+        -- 无论当前角色是联盟还是部落，将对立阵营的装备一并收录进预设价格面板，
+        -- 方便团长一次性为双阵营全量配置底价；换号开团也不会因对立阵营缺少底价而导致漏拍。
+        if (FB == "TOCtitan" or FB == "TOC") and TOC_FACTION_LOOT_TABLES then
+            for _, factionLoot in pairs(TOC_FACTION_LOOT_TABLES) do
+                for bNum, list in pairs(factionLoot) do
+                    if type(list) == "table" then
+                        for _, itemID in ipairs(list) do
+                            itemID = tonumber(itemID)
+                            if itemID and not seen[itemID] then
+                                seen[itemID] = true
+                                tinsert(items, { itemID = itemID, bossNum = bNum, hard = "N" })
+                                PreloadItemInfo(itemID)
+                            end
+                        end
+                    end
+                end
+            end
+        end
+
         -- 如果通过 BG.Loot 没找到足够的装备，尝试从金团表格 BG.Frame 里抓取并提取已有名称
         if BG.Frame and BG.Frame[FB] and BG.Maxb and BG.Maxb[FB] then
             for b = 1, BG.Maxb[FB] do
@@ -386,7 +440,7 @@ function ns.InitAuctionPresetModule()
                         if cell then
                             local text = cell:GetText()
                             local itemID = SafeGetItemID(text)
-                            if itemID and not seen[itemID] then
+                            if itemID and itemID > 25 and not seen[itemID] then
                                 seen[itemID] = true
                                 local cachedName = text and text:match("%[(.-)%]") or nil
                                 if cachedName and cachedName ~= "" then
