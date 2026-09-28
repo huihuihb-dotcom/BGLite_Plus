@@ -4,6 +4,15 @@
 - **项目名称**: BGLite_Plus (BiaoGe Plus - 魔兽世界怀旧服/时光服/正式服金团表格及辅助工具插件)
 - **支持版本**: 经典旧世 (Vanilla / SoD)、燃烧的远征 (TBC)、巫妖王之怒 (WLK)、泰坦时光服 (Titan)、大地的裂变 (CTM)、熊猫人之谜 (MOP)、正式服 (Retail)
 
+> [!CAUTION]
+> ### 🚨 核心功能安全红线与强制人工测试规范 (铁律)
+> **凡是修改了以下 4 类底层关键位置的代码，AI 必须在回复的最上方以最显眼的警示框主动提醒用户进行游戏内真实开团人工闭环测试，绝不允许未经实测直接打包上线！**
+> 1. **全局底层 API 拦截与包装**：如 `Core/Lib.lua` 中对 `BG.OnItemLoad`、`ContinueOnItemLoad`、`Item:CreateFrom...` 的拦截与包装；
+> 2. **拍卖核心发起与出价链路**：如 `StartAuction`、`SendStartAuctionMsg`、`AuctionWAEvent.lua` 消息解码、出价倒计时；
+> 3. **掉落拾取与对账系统**：如 `AutoAuctionOnLoot.lua`、`CHAT_MSG_LOOT` 监听、表格槽位匹配；
+> 4. **交易与财务结算系统**：如自动交金、交易历史、欠款计算。
+> **测试标准**：必须在游戏里组建一个 2 人以上团队，真实点开一件装备，完成**【弹出拍卖小框 -> 点击开始拍卖 -> 团队警告通报发出 -> 全团弹出拍卖出价条】**全流程闭环！
+
 ## 2. 核心架构与模块
 - `BGLite_Plus.toc`: 插件入口及加载文件列表。
 - `README.md`: 完整的用户与开发者说明文档。
@@ -94,6 +103,30 @@
        - **背景与痛点**: 十字军试炼（TOCtitan / TOC）的 Boss 11~16（兽王、大王、阵营冠军、双子、小强、贡品箱）在魔兽官方底层严格区分了联盟与部落两套完全对称但 ID 互异的掉落池。若团长使用联盟角色登录并配置预设价格，默认只能为联盟 ID 设置底价；当团长换上部落角色开团时，由于对立阵营 ID 缺少底价（`priceNum <= 0`），触发了出厂底价安全保护而不会自动开拍；
        - **实施方案**: 在 `AuctionPreset.lua` 的 `CollectFBItems` 中，定义完整的双阵营 Boss 11~16 原生掉落映射表 `TOC_FACTION_LOOT_TABLES`。在遍历副本掉落时，自动将联盟与部落双阵营的掉落物全量合并收录并去重；
        - **业务收益**: 团长无论登录联盟号还是部落号，在预设底价面板中均能完整查看、搜索并一次性【批量底价】为双阵营所有装备配置好起拍价。换阵营换号开团打本时，掉落装备均能即时匹配到有效底价，彻底消除跨阵营漏拍隐患。
+
+- **全团拍卖静默无响应与无通报致命 Bug 排查与根除归档 (2026-09-28)**:
+  - **用户反馈现象**:
+    - 在游戏里组建团队后，无论手动点击表格或背包里的任何装备发起拍卖，点击【开始拍卖】后没有任何拍卖信息与弹窗；
+    - 团队警告频道没有任何通报；
+    - 同团队的其他账号也收不到任何拍卖信息；
+    - 整个过程没有任何 Lua 报错；
+    - 实测仅禁用 BGLite_Plus 后，拍卖恢复正常。
+  - **核心根因定位**:
+    1. **暴雪异步加载链路误杀截断**:
+       - BGLite 拍卖系统采用事件驱动架构：团长点击【开始拍卖】后，通过 `C_ChatInfo.SendAddonMessage` 发送 `StartAuction` 广播；全团（包括团长自己和小号）在收到 `CHAT_MSG_ADDON` 事件后，统一交由 `BG.OnItemLoad(link or itemID):ContinueOnItemLoad(function() ... end)` 异步加载装备并弹出拍卖倒计时条（`wa.CreateAuction`）及团长团队警告通报（`SendChatMessage`）；
+       - 此前在 `Lib.lua` 中为了防御暴雪底层 `table index is nil` 报错，重写了 `obj.ContinueOnItemLoad` 并硬编码加入拦截逻辑：`local key = (self.GetItemKey and self:GetItemKey()); if not key or key == "" then return end`；
+       - 但在魔兽经典怀旧服客户端原生 `ItemMixin` 中，常规装备对象根本**不存在公开的 `GetItemKey` 方法**，导致所有合法装备的 `key` 永远为 `nil`，从而在入口处被无条件直接 `return` 静默扼杀；
+       - 导致 `callback` 永远无法执行，拍卖框不弹、团队通报不发、团员收不到，且因为是普通 `return` 而无任何报错。
+  - **已实施修复与技术决策 (2026-09-28)**:
+    1. **源头严格输入过滤**:
+       - 在 `Lib.lua` 的 `BG.OnItemLoad` 中严格校验输入参数：
+         - 数字 ID：必须 `itemID > 25`；
+         - 纯数字字符串：转数字校验 `> 25`；
+         - 文本字符串：必须通过 `item:(%d+)` 提取出有效 `itemID > 25`；
+         - 彻底阻断普通备注文本（如 `"包包"`、`"杂项"`）和占位符数字（`"1"`、`"2"`）进入暴雪 ObjectAPI，从根本上杜绝 `table index is nil`。
+    2. **缓存优先直接放行与沙箱保底**:
+       - 若数据已存在于本地客户端缓存（`self.IsItemDataCached and self:IsItemDataCached()`），直接调用 `pcall(callback)` 毫秒级放行，彻底消除时延与异步等待；
+       - 若数据尚未缓存，调用暴雪原生 `pcall(raw_Continue, self, callback)`；若暴雪底层发生任何未知异常，自动触发 `pcall(callback)` 安全保底，确保拍卖与 UI 链路绝不被掐死。
 
 ## 4. 团队工具 (RaidTool) 核心机制与近期优化
 * **进组自动密语与团队发言：仅团长/管理生效安全机制 (2026-09-02)**：

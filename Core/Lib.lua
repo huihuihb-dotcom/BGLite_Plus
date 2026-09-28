@@ -15,6 +15,8 @@ do
     local dummyItem = {
         ContinueOnItemLoad = function() end,
         IsItemDataCached = function() return false end,
+        GetItemID = function() return 0 end,
+        GetItemLink = function() return "" end,
     }
     if BG and BG.OnItemLoad then
         local raw_OnItemLoad = BG.OnItemLoad
@@ -22,21 +24,52 @@ do
             if not item or item == "" or item == 0 then
                 return dummyItem
             end
-            local obj = raw_OnItemLoad(item)
+
+            -- 严格校验输入合法性：有效数字 ID 或包含 item: 的超链接（过滤纯文字与单数字占位符）
+            local validItem = nil
+            if type(item) == "number" then
+                if item > 25 then
+                    validItem = item
+                end
+            elseif type(item) == "string" then
+                local num = tonumber(item)
+                if num then
+                    if num > 25 then
+                        validItem = num
+                    end
+                else
+                    local itemID = tonumber(item:match("item:(%d+)"))
+                    if itemID and itemID > 25 then
+                        validItem = item
+                    end
+                end
+            end
+
+            if not validItem then
+                return dummyItem
+            end
+
+            local obj = raw_OnItemLoad(validItem)
             if not obj then
                 return dummyItem
             end
+
             local raw_Continue = obj.ContinueOnItemLoad
             if raw_Continue then
                 obj.ContinueOnItemLoad = function(self, callback)
-                    -- 暴雪底层的 ItemCallbacks[itemKey] 严格以 GetItemKey 为索引
-                    -- 若 itemKey 为 nil，绝不可调用 raw_Continue，否则暴雪会抛出 table index is nil
-                    local key = (self.GetItemKey and self:GetItemKey())
-                    if not key or key == "" then
+                    if not callback then return end
+
+                    -- 已缓存数据毫秒级直接放行
+                    if self.IsItemDataCached and self:IsItemDataCached() then
+                        pcall(callback)
                         return
                     end
-                    -- 使用 pcall 沙箱保护暴雪底层可能抛出的任何未知异常
-                    pcall(raw_Continue, self, callback)
+
+                    -- 未缓存数据通过 pcall 沙箱调用暴雪原生 ContinueOnItemLoad
+                    local ok = pcall(raw_Continue, self, callback)
+                    if not ok then
+                        pcall(callback)
+                    end
                 end
             end
             return obj

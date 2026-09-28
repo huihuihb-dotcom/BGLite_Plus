@@ -1564,7 +1564,7 @@ function ns.InitAuctionPresetModule()
                     if money and money > 0 then
                         f.Edit2:SetText(tostring(money))
                         f.Edit2:SetCursorPosition(0)
-                        if f.bt and f.bt.money then
+                        if f.bt then
                             f.bt.money = money
                         end
                         if tips and tips ~= "" and f.EditTips then
