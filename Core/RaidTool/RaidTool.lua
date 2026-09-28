@@ -1309,28 +1309,106 @@ function RaidTool.CreateUI(parent)
     local rightTitle = rightPanel:CreateFontString(nil, "OVERLAY")
     rightTitle:SetFont(BIAOGE_TEXT_FONT, 18, "OUTLINE")
     rightTitle:SetPoint("TOPLEFT", 16, -12)
-    rightTitle:SetText(BG.STC_g1(L["团队阵容管理"]))
+    rightTitle:SetText(BG.STC_g1(L["团队阵容与技能监控"]))
 
     local topTip = rightPanel:CreateFontString(nil, "OVERLAY")
     topTip:SetFont(BIAOGE_TEXT_FONT, 13, "OUTLINE")
     topTip:SetPoint("LEFT", rightTitle, "RIGHT", 14, 0)
-    topTip:SetText(BG.STC_dis(L["(支持拖拽队员调换队伍，成员变动实时自动同步)"]))
+    topTip:SetText(BG.STC_dis(L["(支持拖拽调换队伍，与技能监控实时联动，成员变动自动同步)"]))
 
     -- 顶部按钮 (加大至 110x26, 字体 14px)
     local btnSyncRoster = BG.CreateButton(rightPanel)
-    btnSyncRoster:SetSize(110, 26)
+    btnSyncRoster:SetSize(95, 26)
     btnSyncRoster:SetPoint("TOPLEFT", 16, -38)
     btnSyncRoster:SetText(L["同步当前团队"])
 
     local btnSaveProfile = BG.CreateButton(rightPanel)
-    btnSaveProfile:SetSize(110, 26)
-    btnSaveProfile:SetPoint("LEFT", btnSyncRoster, "RIGHT", 8, 0)
-    btnSaveProfile:SetText(L["保存为预设"])
+    btnSaveProfile:SetSize(85, 26)
+    btnSaveProfile:SetPoint("LEFT", btnSyncRoster, "RIGHT", 6, 0)
+    btnSaveProfile:SetText(L["保存预设"])
 
     local btnApplyRoster = BG.CreateButton(rightPanel)
-    btnApplyRoster:SetSize(110, 26)
-    btnApplyRoster:SetPoint("LEFT", btnSaveProfile, "RIGHT", 8, 0)
-    btnApplyRoster:SetText(BG.STC_g1(L["应用此阵容"]))
+    btnApplyRoster:SetSize(90, 26)
+    btnApplyRoster:SetPoint("LEFT", btnSaveProfile, "RIGHT", 6, 0)
+    btnApplyRoster:SetText(BG.STC_g1(L["应用阵容"]))
+
+    local btnCDConfig = BG.CreateButton(rightPanel)
+    btnCDConfig:SetSize(96, 26)
+    btnCDConfig:SetPoint("LEFT", btnApplyRoster, "RIGHT", 6, 0)
+    btnCDConfig:SetText("|TInterface\\AddOns\\BGLite_Plus\\Media\\shield:15:15:0:0|t " .. BG.STC_b1("技能配置"))
+    btnCDConfig:SetScript("OnClick", function()
+        if ns.RaidCD and ns.RaidCD.ToggleConfigModal then
+            ns.RaidCD.ToggleConfigModal()
+            BG.PlaySound(1)
+        end
+    end)
+    btnCDConfig:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_TOP")
+        GameTooltip:AddLine("团队关键技能监控配置", 1, 1, 1)
+        GameTooltip:AddLine("勾选或关闭需要监控的职业与技能（圣骑士默认仅监控神圣牺牲，其余可选）。", 0.8, 0.8, 0.8, true)
+        GameTooltip:Show()
+    end)
+    btnCDConfig:SetScript("OnLeave", GameTooltip_Hide)
+
+    local cbShowHUD = CreateFrame("CheckButton", nil, rightPanel, "UICheckButtonTemplate")
+    cbShowHUD:SetSize(20, 20)
+    cbShowHUD:SetPoint("LEFT", btnCDConfig, "RIGHT", 6, 0)
+    cbShowHUD.text = cbShowHUD:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
+    cbShowHUD.text:SetPoint("LEFT", cbShowHUD, "RIGHT", 3, 0)
+    cbShowHUD.text:SetFont(BIAOGE_TEXT_FONT, 13, "OUTLINE")
+    cbShowHUD.text:SetText("开启 技能监控")
+    cbShowHUD:SetHitRectInsets(-2, -cbShowHUD.text:GetStringWidth() - 4, -2, -2)
+    cbShowHUD:SetScript("OnClick", function(self)
+        local checked = self:GetChecked()
+        if BiaoGe and BiaoGe.RaidCD then
+            BiaoGe.RaidCD.showHUD = checked
+        end
+        if ns.RaidCD then
+            ns.RaidCD.UpdateHUD()
+        end
+        BG.PlaySound(1)
+    end)
+    cbShowHUD:SetScript("OnShow", function(self)
+        self:SetChecked(BiaoGe and BiaoGe.RaidCD and BiaoGe.RaidCD.showHUD)
+    end)
+    cbShowHUD:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_TOP")
+        GameTooltip:AddLine("开启 技能监控", 1, 1, 1)
+        GameTooltip:AddLine("勾选后在屏幕中央悬浮显示当前团队中受监控成员的关键减伤技能实时冷却倒计时，可自由拖拽位置。", 0.8, 0.8, 0.8, true)
+        GameTooltip:Show()
+    end)
+    cbShowHUD:SetScript("OnLeave", GameTooltip_Hide)
+    if ns.RaidCD then ns.RaidCD.cbShowHUD = cbShowHUD end
+
+    local cbLockHUD = CreateFrame("CheckButton", nil, rightPanel, "UICheckButtonTemplate")
+    cbLockHUD:SetSize(20, 20)
+    cbLockHUD:SetPoint("LEFT", cbShowHUD.text, "RIGHT", 8, 0)
+    cbLockHUD.text = cbLockHUD:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
+    cbLockHUD.text:SetPoint("LEFT", cbLockHUD, "RIGHT", 3, 0)
+    cbLockHUD.text:SetFont(BIAOGE_TEXT_FONT, 13, "OUTLINE")
+    cbLockHUD.text:SetText("锁定位置")
+    cbLockHUD:SetHitRectInsets(-2, -cbLockHUD.text:GetStringWidth() - 4, -2, -2)
+    cbLockHUD:SetScript("OnClick", function(self)
+        local checked = self:GetChecked()
+        if BiaoGe and BiaoGe.RaidCD then
+            BiaoGe.RaidCD.hudLocked = checked
+        end
+        if ns.RaidCD then
+            ns.RaidCD.UpdateHUD()
+        end
+        BG.PlaySound(1)
+    end)
+    cbLockHUD:SetScript("OnShow", function(self)
+        self:SetChecked(BiaoGe and BiaoGe.RaidCD and BiaoGe.RaidCD.hudLocked)
+    end)
+    cbLockHUD:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_TOP")
+        GameTooltip:AddLine("锁定屏幕悬浮条位置", 1, 1, 1)
+        GameTooltip:AddLine("• 勾选(锁定)：背景与边框完全透明，仅保留名字与图标，不可拖拽；\n• 取消勾选(解锁)：显示边框与标题栏，按住标题栏可自由移动位置。", 0.8, 0.8, 0.8, true)
+        GameTooltip:Show()
+    end)
+    cbLockHUD:SetScript("OnLeave", GameTooltip_Hide)
+    if ns.RaidCD then ns.RaidCD.cbLockHUD = cbLockHUD end
 
     -- 8 个小队网格 (加大单格尺寸至 142x145, 队员槽位高度 23px, 文字 14px)
     local slotButtons = {}
@@ -1338,6 +1416,8 @@ function RaidTool.CreateUI(parent)
     local currentRosterClasses = {}
     RaidTool.currentRosterList = currentRosterList
     RaidTool.currentRosterClasses = currentRosterClasses
+    ns.RaidTool.currentRosterList = currentRosterList
+    ns.RaidTool.currentRosterClasses = currentRosterClasses
 
     local gridY = -70
     local groupWidth = 142
@@ -1364,10 +1444,19 @@ function RaidTool.CreateUI(parent)
             btn.text:SetTextColor(r, g, b)
             btn:SetBackdropColor(r * 0.25, g * 0.25, b * 0.25, 0.85)
             btn:SetBackdropBorderColor(r * 0.75, g * 0.75, b * 0.75, 0.9)
+
+            if btn.cbMonitor then
+                btn.cbMonitor:Show()
+                local isMon = ns.RaidCD and ns.RaidCD.IsPlayerMonitored(name, class)
+                btn.cbMonitor:SetChecked(isMon and true or false)
+            end
         else
             btn.text:SetText(BG.STC_dis(format(L["空位 %d"], ((slotIndex - 1) % MEMBERS_PER_GROUP) + 1)))
             btn:SetBackdropColor(0.08, 0.08, 0.08, 0.4)
             btn:SetBackdropBorderColor(0.2, 0.2, 0.2, 0.5)
+            if btn.cbMonitor then
+                btn.cbMonitor:Hide()
+            end
         end
     end
 
@@ -1458,9 +1547,35 @@ function RaidTool.CreateUI(parent)
             })
             slotBtn.index = idx
 
+            local cbMonitor = CreateFrame("CheckButton", nil, slotBtn, "UICheckButtonTemplate")
+            cbMonitor:SetSize(16, 16)
+            cbMonitor:SetPoint("RIGHT", slotBtn, "RIGHT", -2, 0)
+            slotBtn.cbMonitor = cbMonitor
+
+            cbMonitor:SetScript("OnClick", function(self)
+                local name = currentRosterList[slotBtn.index]
+                if name and name ~= "" then
+                    if ns.RaidCD then
+                        ns.RaidCD.SetPlayerMonitored(name, self:GetChecked())
+                    end
+                end
+                BG.PlaySound(1)
+            end)
+
+            cbMonitor:SetScript("OnEnter", function(self)
+                GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+                local name = currentRosterList[slotBtn.index]
+                GameTooltip:AddLine("技能监控: " .. (name or ""), 1, 1, 1)
+                GameTooltip:AddLine("勾选后将此队员纳入团队关键技能/减伤监控池；取消勾选则不监控该队员。", 0.8, 0.8, 0.8, true)
+                GameTooltip:Show()
+            end)
+            cbMonitor:SetScript("OnLeave", GameTooltip_Hide)
+
             slotBtn.text = slotBtn:CreateFontString(nil, "OVERLAY")
             slotBtn.text:SetFont(BIAOGE_TEXT_FONT, 14, "OUTLINE")
             slotBtn.text:SetPoint("LEFT", 6, 0)
+            slotBtn.text:SetPoint("RIGHT", cbMonitor, "LEFT", -2, 0)
+            slotBtn.text:SetJustifyH("LEFT")
             slotBtn.text:SetWordWrap(false)
 
             slotBtn:RegisterForDrag("LeftButton")
@@ -1519,6 +1634,13 @@ function RaidTool.CreateUI(parent)
 
             slotButtons[idx] = slotBtn
             UpdateSlotVisual(idx)
+        end
+    end
+
+    RaidTool.UpdateSlotVisual = UpdateSlotVisual
+    RaidTool.UpdateAllSlotVisuals = function()
+        for i = 1, 40 do
+            UpdateSlotVisual(i)
         end
     end
 
@@ -1632,7 +1754,7 @@ function RaidTool.CreateUI(parent)
         RaidTool.SyncCurrentRaidRoster(true)
     end)
 
-    -- 预设管理面板 (宽度 578, 高度 85，专注平铺展示方块 Tab)
+    -- 预设管理面板 (宽度 578, 高度 85，双Tab模式：预设阵容快捷标签 / 团队技能监控)
     local profilePanel = CreateFrame("Frame", nil, rightPanel, "BackdropTemplate")
     profilePanel:SetSize(578, 85)
     profilePanel:SetPoint("TOPLEFT", 16, gridY - 2 * (groupHeight + 8) - 2)
@@ -1645,20 +1767,61 @@ function RaidTool.CreateUI(parent)
     profilePanel:SetBackdropColor(0.05, 0.05, 0.05, 0.85)
     profilePanel:SetBackdropBorderColor(0.3, 0.3, 0.3, 0.8)
 
-    local pTitle = profilePanel:CreateFontString(nil, "OVERLAY")
-    pTitle:SetFont(BIAOGE_TEXT_FONT, 15, "OUTLINE")
-    pTitle:SetPoint("TOPLEFT", 14, -8)
-    pTitle:SetText(BG.STC_g1(L["预设阵容快捷标签"]))
+    local btnTabPresets = BG.CreateButton(profilePanel)
+    btnTabPresets:SetSize(84, 20)
+    btnTabPresets:SetPoint("TOPLEFT", 10, -6)
+    btnTabPresets:SetText(BG.STC_g1("预设阵容"))
+
+    local btnTabRaidCD = BG.CreateButton(profilePanel)
+    btnTabRaidCD:SetSize(105, 20)
+    btnTabRaidCD:SetPoint("LEFT", btnTabPresets, "RIGHT", 6, 0)
+    btnTabRaidCD:SetText("|TInterface\\AddOns\\BGLite_Plus\\Media\\shield:13:13:0:0|t 技能监控")
 
     local pSubTip = profilePanel:CreateFontString(nil, "OVERLAY")
-    pSubTip:SetFont(BIAOGE_TEXT_FONT, 13, "OUTLINE")
-    pSubTip:SetPoint("LEFT", pTitle, "RIGHT", 12, 0)
-    pSubTip:SetText(BG.STC_dis(L["(点击载入预设 | Alt+点击覆盖保存 | 右键删除)"]))
+    pSubTip:SetFont(BIAOGE_TEXT_FONT, 12, "OUTLINE")
+    pSubTip:SetPoint("LEFT", btnTabRaidCD, "RIGHT", 8, 0)
+    pSubTip:SetText(BG.STC_dis(L["(点击载入 | Alt+点击覆盖保存 | 右键删除)"]))
 
-    -- Tab 按钮平铺容器
+    -- Tab 按钮平铺容器 (预设阵容)
     local tabContainer = CreateFrame("Frame", nil, profilePanel)
     tabContainer:SetPoint("TOPLEFT", 14, -28)
     tabContainer:SetPoint("BOTTOMRIGHT", -14, 8)
+
+    -- CD 监控平铺容器 (团队技能监控)
+    local cdContainer = CreateFrame("Frame", nil, profilePanel)
+    cdContainer:SetPoint("TOPLEFT", 14, -28)
+    cdContainer:SetPoint("BOTTOMRIGHT", -14, 8)
+    cdContainer:Hide()
+    if ns.RaidCD and ns.RaidCD.CreatePanelSection then
+        ns.RaidCD.CreatePanelSection(cdContainer)
+    end
+
+    btnTabPresets:SetScript("OnClick", function()
+        btnTabPresets:SetText(BG.STC_g1("预设阵容"))
+        btnTabRaidCD:SetText("|TInterface\\AddOns\\BGLite_Plus\\Media\\shield:13:13:0:0|t 技能监控")
+        tabContainer:Show()
+        pSubTip:Show()
+        cdContainer:Hide()
+        BG.PlaySound(1)
+    end)
+
+    btnTabRaidCD:SetScript("OnClick", function()
+        btnTabPresets:SetText("预设阵容")
+        btnTabRaidCD:SetText("|TInterface\\AddOns\\BGLite_Plus\\Media\\shield:13:13:0:0|t " .. BG.STC_g1("技能监控"))
+        tabContainer:Hide()
+        pSubTip:Hide()
+        cdContainer:Show()
+        if ns.RaidCD and ns.RaidCD.UpdatePanelUI then
+            ns.RaidCD.UpdatePanelUI()
+        end
+        BG.PlaySound(1)
+    end)
+    ns.RaidTool.btnTabRaidCD = btnTabRaidCD
+    ns.RaidTool.SwitchToRaidCDTab = function()
+        if btnTabRaidCD and btnTabRaidCD:GetScript("OnClick") then
+            btnTabRaidCD:GetScript("OnClick")(btnTabRaidCD)
+        end
+    end
 
     local tabButtons = {}
     local RefreshProfileTabs = nil
@@ -1907,13 +2070,19 @@ function RaidTool.CreateUI(parent)
     rosterAutoUpdateFrame:RegisterEvent("GROUP_ROSTER_UPDATE")
     pcall(function() rosterAutoUpdateFrame:RegisterEvent("RAID_ROSTER_UPDATE") end)
     rosterAutoUpdateFrame:SetScript("OnEvent", function(self, event)
-        if mainFrame:IsShown() and not RosterState.isProcessing then
+        if not RosterState.isProcessing then
             RaidTool.SyncCurrentRaidRoster(false)
-            if BiaoGe.RaidGroups then
-                BiaoGe.RaidGroups.selectedProfile = nil
+            if mainFrame:IsShown() then
+                if BiaoGe.RaidGroups then
+                    BiaoGe.RaidGroups.selectedProfile = nil
+                end
+                if RefreshProfileTabs then
+                    RefreshProfileTabs()
+                end
             end
-            if RefreshProfileTabs then
-                RefreshProfileTabs()
+            if ns.RaidCD then
+                if ns.RaidCD.UpdateHUD then ns.RaidCD.UpdateHUD() end
+                if ns.RaidCD.RefreshPlayerModalUI then ns.RaidCD.RefreshPlayerModalUI() end
             end
         end
     end)

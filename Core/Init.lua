@@ -178,6 +178,9 @@ local function InitPlusUI()
     if ns.InitRaidToolDB then
         ns.InitRaidToolDB()
     end
+    if ns.InitRaidCDDB then
+        ns.InitRaidCDDB()
+    end
     if ns.InitRoleOverviewOptions then
         ns.InitRoleOverviewOptions()
     end
@@ -432,12 +435,20 @@ local function InitPlusUI()
             if ns.RaidComp and ns.RaidComp.UpdateUI then
                 pcall(ns.RaidComp.UpdateUI)
             end
+            if ns.RaidCD and ns.RaidCD.UpdatePanelUI then
+                pcall(ns.RaidCD.UpdatePanelUI)
+            end
         end)
     end
 
     -- 4.6 团队阵容天赋分析与 Buff 缺口初始化
     if ns.InitRaidCompModule then
         securecall(ns.InitRaidCompModule)
+    end
+
+    -- 4.6.1 团队关键技能监控初始化
+    if ns.InitRaidCDModule then
+        securecall(ns.InitRaidCDModule)
     end
 
     -- 4.7 打工人收益看板模块初始化 (WorkerReport)
