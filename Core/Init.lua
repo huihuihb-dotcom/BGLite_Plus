@@ -481,6 +481,11 @@ local function InitPlusUI()
         securecall(ns.InitRaidCDModule)
     end
 
+    -- 4.6.2 战术站位图数据库初始化
+    if ns.RaidMap and ns.RaidMap.InitDB then
+        securecall(ns.RaidMap.InitDB)
+    end
+
     -- 4.7 打工人收益看板模块初始化 (WorkerReport)
     if ns.WorkerReport and ns.WorkerReport.CreateUI then
         securecall(ns.WorkerReport.CreateUI, BG.MainFrame)

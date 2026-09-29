@@ -23,65 +23,88 @@ RaidComp.PROMO_TEXT = ">>> 来自 [BGLite PLUS] 团队阵容助手 - 作者: 波
 local SPEC_INFO = {
     -- 战士
     ["WARRIOR"] = {
-        [1] = { name = "武器", role = "melee" },
-        [2] = { name = "狂暴", role = "melee" },
-        [3] = { name = "防护", role = "tank" },
+        [1] = { name = "武器", role = "melee", icon = "Interface\\Icons\\ability_warrior_savageblow" },
+        [2] = { name = "狂暴", role = "melee", icon = "Interface\\Icons\\ability_warrior_innerrage" },
+        [3] = { name = "防护", role = "tank", icon = "Interface\\Icons\\inv_shield_06" },
     },
     -- 圣骑士
     ["PALADIN"] = {
-        [1] = { name = "神圣", role = "healer" },
-        [2] = { name = "防护", role = "tank" },
-        [3] = { name = "惩戒", role = "melee" },
+        [1] = { name = "神圣", role = "healer", icon = "Interface\\Icons\\spell_holy_holybolt" },
+        [2] = { name = "防护", role = "tank", icon = "Interface\\Icons\\spell_holy_auraofprotection" },
+        [3] = { name = "惩戒", role = "melee", icon = "Interface\\Icons\\spell_holy_auraoflight" },
     },
     -- 猎人
     ["HUNTER"] = {
-        [1] = { name = "兽王", role = "ranged" },
-        [2] = { name = "射击", role = "ranged" },
-        [3] = { name = "生存", role = "ranged" },
+        [1] = { name = "兽王", role = "ranged", icon = "Interface\\Icons\\ability_hunter_beasttaming" },
+        [2] = { name = "射击", role = "ranged", icon = "Interface\\Icons\\ability_marksmanship" },
+        [3] = { name = "生存", role = "ranged", icon = "Interface\\Icons\\ability_hunter_swiftstrike" },
     },
     -- 潜行者
     ["ROGUE"] = {
-        [1] = { name = "刺杀", role = "melee" },
-        [2] = { name = "战斗", role = "melee" },
-        [3] = { name = "敏锐", role = "melee" },
+        [1] = { name = "刺杀", role = "melee", icon = "Interface\\Icons\\ability_rogue_eviscerate" },
+        [2] = { name = "战斗", role = "melee", icon = "Interface\\Icons\\ability_backstab" },
+        [3] = { name = "敏锐", role = "melee", icon = "Interface\\Icons\\ability_stealth" },
     },
     -- 牧师
     ["PRIEST"] = {
-        [1] = { name = "戒律", role = "healer" },
-        [2] = { name = "神圣", role = "healer" },
-        [3] = { name = "暗影", role = "ranged" },
+        [1] = { name = "戒律", role = "healer", icon = "Interface\\Icons\\spell_holy_powerwordshield" },
+        [2] = { name = "神圣", role = "healer", icon = "Interface\\Icons\\spell_holy_guardianspirit" },
+        [3] = { name = "暗影", role = "ranged", icon = "Interface\\Icons\\spell_shadow_shadowform" },
     },
     -- 死亡骑士
     ["DEATHKNIGHT"] = {
-        [1] = { name = "鲜血", role = "tank" },     -- WLK/时光服 血DK通常作为主流主坦/副坦
-        [2] = { name = "冰霜", role = "melee" },
-        [3] = { name = "邪恶", role = "melee" },
+        [1] = { name = "鲜血", role = "tank", icon = "Interface\\Icons\\spell_deathknight_bloodpresence" },     -- WLK/时光服 血DK通常作为主流主坦/副坦
+        [2] = { name = "冰霜", role = "melee", icon = "Interface\\Icons\\spell_deathknight_frostpresence" },
+        [3] = { name = "邪恶", role = "melee", icon = "Interface\\Icons\\spell_deathknight_unholypresence" },
     },
     -- 萨满
     ["SHAMAN"] = {
-        [1] = { name = "元素", role = "ranged" },
-        [2] = { name = "增强", role = "melee" },
-        [3] = { name = "恢复", role = "healer" },
+        [1] = { name = "元素", role = "ranged", icon = "Interface\\Icons\\spell_nature_lightning" },
+        [2] = { name = "增强", role = "melee", icon = "Interface\\Icons\\spell_nature_lightningshield" },
+        [3] = { name = "恢复", role = "healer", icon = "Interface\\Icons\\spell_nature_magicimmunity" },
     },
     -- 法师
     ["MAGE"] = {
-        [1] = { name = "奥术", role = "ranged" },
-        [2] = { name = "火焰", role = "ranged" },
-        [3] = { name = "冰霜", role = "ranged" },
+        [1] = { name = "奥术", role = "ranged", icon = "Interface\\Icons\\spell_holy_magicalsentry" },
+        [2] = { name = "火焰", role = "ranged", icon = "Interface\\Icons\\spell_fire_firebolt02" },
+        [3] = { name = "冰霜", role = "ranged", icon = "Interface\\Icons\\spell_frost_frostbolt02" },
     },
     -- 术士
     ["WARLOCK"] = {
-        [1] = { name = "痛苦", role = "ranged" },
-        [2] = { name = "恶魔", role = "ranged" },
-        [3] = { name = "毁灭", role = "ranged" },
+        [1] = { name = "痛苦", role = "ranged", icon = "Interface\\Icons\\spell_shadow_deathcoil" },
+        [2] = { name = "恶魔", role = "ranged", icon = "Interface\\Icons\\spell_shadow_metamorphosis" },
+        [3] = { name = "毁灭", role = "ranged", icon = "Interface\\Icons\\spell_shadow_rainoffire" },
     },
     -- 德鲁伊
     ["DRUID"] = {
-        [1] = { name = "平衡", role = "ranged" },   -- 鸟德
-        [2] = { name = "野性", role = "melee" },    -- 熊/猫 (默认近战/副坦)
-        [3] = { name = "恢复", role = "healer" },   -- 奶德
+        [1] = { name = "平衡", role = "ranged", icon = "Interface\\Icons\\spell_nature_starfall" },   -- 鸟德
+        [2] = { name = "野性", role = "melee", icon = "Interface\\Icons\\ability_druid_catform" },     -- 默认猫
+        [3] = { name = "恢复", role = "healer", icon = "Interface\\Icons\\spell_nature_healingtouch" },   -- 奶德
     },
 }
+
+-- 专精图标高精匹配器 (兼顾德鲁伊熊/猫形态与各专精)
+local function GetSpecIcon(class, specName, specRole)
+    if not class then return "Interface\\Icons\\inv_misc_questionmark" end
+    if class == "DRUID" then
+        if specName == "平衡" then return "Interface\\Icons\\spell_nature_starfall" end
+        if specName == "恢复" then return "Interface\\Icons\\spell_nature_healingtouch" end
+        if specRole == "tank" then
+            return "Interface\\Icons\\ability_racial_bearform"
+        else
+            return "Interface\\Icons\\ability_druid_catform"
+        end
+    end
+    if SPEC_INFO[class] then
+        for i = 1, 3 do
+            if SPEC_INFO[class][i] and SPEC_INFO[class][i].name == specName then
+                return SPEC_INFO[class][i].icon
+            end
+        end
+        return SPEC_INFO[class][1] and SPEC_INFO[class][1].icon or "Interface\\Icons\\inv_misc_questionmark"
+    end
+    return "Interface\\Icons\\inv_misc_questionmark"
+end
 
 --------------------------------------------------------------------------------
 -- 2. 全团 Buff / Debuff 规则全家福定义 (24 大核心项，完整涵盖原图所有项目)
@@ -925,12 +948,19 @@ local function TryGetSpecFromPersistentCache(name)
     return nil
 end
 
--- 怀旧服安全天赋投入点数查询函数 (解决各版本返回值偏移与 string 比较崩溃)
+-- 怀旧服安全天赋投入点数查询函数 (深度适配 WLK/时光服 双天赋切换系统与各版本返回值偏移)
 local function SafeGetTalentPoints(tabIndex, isInspect)
     if not GetTalentTabInfo then return 0, "" end
+    local activeGroup = 1
+    if GetActiveTalentGroup then
+        local okGroup, grp = pcall(GetActiveTalentGroup, isInspect)
+        if okGroup and grp then
+            activeGroup = grp
+        end
+    end
     -- WLK Classic (3.4.x / 4.4.x):
-    -- id, name, description, iconTexture, pointsSpent, background, previewPointsSpent, isUnlocked = GetTalentTabInfo(...)
-    local ok, id, name, desc, icon, points = pcall(GetTalentTabInfo, tabIndex, isInspect)
+    -- id, name, description, iconTexture, pointsSpent, background, previewPointsSpent, isUnlocked = GetTalentTabInfo(tabIndex, isInspect, isPet, talentGroup)
+    local ok, id, name, desc, icon, points = pcall(GetTalentTabInfo, tabIndex, isInspect, false, activeGroup)
     if not ok then return 0, "" end
     local pts = tonumber(points)
     if not pts then
@@ -941,6 +971,15 @@ local function SafeGetTalentPoints(tabIndex, isInspect)
         end
     end
     return pts, (type(name) == "string" and name or "")
+end
+
+-- 统一包装成员天赋与专精详情 (注入高清官方专精技能图标)
+local function DecorateMemberInfo(info)
+    if not info then return nil end
+    if not info.specIcon then
+        info.specIcon = GetSpecIcon(info.class, info.specName, info.specRole)
+    end
+    return info
 end
 
 -- 多源专精解析裁决器：支持传入 member 对象或 unitToken，按优先级综合裁决，超视距全员 0 延迟秒级装配
@@ -992,11 +1031,11 @@ local function ResolveUnitSpecMultiSource(memberOrUnit)
             local sName = (SPEC_INFO[class] and SPEC_INFO[class][bestTab]) and SPEC_INFO[class][bestTab].name or "未知"
             local sRole = (SPEC_INFO[class] and SPEC_INFO[class][bestTab]) and SPEC_INFO[class][bestTab].role or "melee"
             SavePersistentSpec(name, class, sName, sRole, "自己")
-            return {
+            return DecorateMemberInfo({
                 name = name, class = class, unit = "player", guid = UnitGUID("player"),
                 specName = sName, specRole = sRole, source = "自己",
                 isInspected = true, isEstimated = false, points = table.concat(tabPoints, "/"),
-            }
+            })
         end
 
         -- 2. 依次查询外部插件接口 (NoWCL -> TalentEmu -> Details -> LGIST -> tdInspect -> 本地历史记忆)
@@ -1011,20 +1050,20 @@ local function ResolveUnitSpecMultiSource(memberOrUnit)
 
         if sName then
             SavePersistentSpec(name, class, sName, sRole, sourceTag)
-            return {
+            return DecorateMemberInfo({
                 name = name, class = class, unit = unit, guid = guid,
                 specName = sName, specRole = sRole, source = sourceTag,
                 isInspected = true, isEstimated = false, points = pts,
-            }
+            })
         end
 
         -- 3. 终极职责与职业常识智能推测 (绝对不留白、不报“未找到”，确保全团 100% 具备专精)
         local inferSpec, inferRole = SmartInferSpecAndRole(unit, class)
-        return {
+        return DecorateMemberInfo({
             name = name, class = class, unit = unit, guid = guid,
             specName = inferSpec, specRole = inferRole, source = "职责推导",
             isInspected = true, isEstimated = true, points = nil,
-        }
+        })
     end)
 
     if ok and res then
@@ -1033,11 +1072,11 @@ local function ResolveUnitSpecMultiSource(memberOrUnit)
         local n = (type(memberOrUnit) == "table" and memberOrUnit.name) or "队员"
         local c = (type(memberOrUnit) == "table" and memberOrUnit.class) or "WARRIOR"
         local inferSpec, inferRole = SmartInferSpecAndRole(nil, c)
-        return {
+        return DecorateMemberInfo({
             name = n, class = c, unit = nil, guid = nil,
             specName = inferSpec or "待定", specRole = inferRole or "melee", source = "智能兜底",
             isInspected = true, isEstimated = true, points = nil,
-        }
+        })
     end
 end
 
@@ -1069,12 +1108,12 @@ local function ParseInspectTalents(unit)
     end
 
     SavePersistentSpec(name, class, specName, role, "实时扫描")
-    return {
+    return DecorateMemberInfo({
         name = name, class = class, unit = unit, guid = guid,
         specTab = bestTab, specName = specName, specRole = role,
         points = table.concat(tabPoints, "/"), maxPoints = maxPoints,
         isInspected = true, isEstimated = false, source = "实时扫描",
-    }
+    })
 end
 
 -- 原生 Inspect 队列推进器 (仅对视距内且需精确校准的目标发起)
@@ -1086,6 +1125,9 @@ scannerFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
 scannerFrame:RegisterEvent("ZONE_CHANGED_NEW_AREA")
 pcall(function() scannerFrame:RegisterEvent("RAID_ROSTER_UPDATE") end)
 pcall(function() scannerFrame:RegisterEvent("CHAT_MSG_ADDON") end)
+pcall(function() scannerFrame:RegisterEvent("ACTIVE_TALENT_GROUP_CHANGED") end)
+pcall(function() scannerFrame:RegisterEvent("PLAYER_TALENT_UPDATE") end)
+pcall(function() scannerFrame:RegisterEvent("CHARACTER_POINTS_CHANGED") end)
 
 local function ProcessNextInspect()
     if #inspectQueue == 0 then
@@ -1110,36 +1152,6 @@ local function ProcessNextInspect()
     end
 end
 
-scannerFrame:SetScript("OnEvent", function(self, event, arg1, arg2, arg3, arg4)
-    if event == "INSPECT_READY" then
-        if currentInspectUnit and UnitExists(currentInspectUnit) then
-            local info = ParseInspectTalents(currentInspectUnit)
-            if info and info.isInspected then
-                rosterData[info.name] = info
-            end
-            currentInspectUnit = nil
-            C_Timer.After(0.15, ProcessNextInspect)
-        end
-    elseif event == "GROUP_ROSTER_UPDATE" or event == "PARTY_LEADER_CHANGED" or event == "RAID_ROSTER_UPDATE" or event == "PLAYER_ENTERING_WORLD" or event == "ZONE_CHANGED_NEW_AREA" then
-        RaidComp.StartScan(false)
-    elseif event == "CHAT_MSG_ADDON" and arg1 == "BGLitePlus_Spec" then
-        -- 接收来自其他安装了 BGLite_Plus 队员的专精广播
-        if arg2 and arg4 then
-            local pName, pClass, pSpec, pRole = strsplit(",", arg2)
-            if pName and pSpec and pSpec ~= "" then
-                SavePersistentSpec(pName, pClass, pSpec, pRole, "BGLitePlus")
-                if rosterData[pName] then
-                    rosterData[pName].specName = pSpec
-                    rosterData[pName].specRole = pRole or rosterData[pName].specRole
-                    rosterData[pName].isInspected = true
-                    rosterData[pName].source = "插件互联"
-                    RaidComp.OnRosterUpdated()
-                end
-            end
-        end
-    end
-end)
-
 -- 广播自己专精到队伍
 local function BroadcastMySpec()
     if not IsInGroup() and not IsInRaid() then return end
@@ -1153,6 +1165,53 @@ local function BroadcastMySpec()
         end)
     end
 end
+
+scannerFrame:SetScript("OnEvent", function(self, event, arg1, arg2, arg3, arg4)
+    if event == "INSPECT_READY" then
+        if currentInspectUnit and UnitExists(currentInspectUnit) then
+            local info = ParseInspectTalents(currentInspectUnit)
+            if info and info.isInspected then
+                rosterData[info.name] = info
+            end
+            currentInspectUnit = nil
+            C_Timer.After(0.15, ProcessNextInspect)
+        end
+    elseif event == "ACTIVE_TALENT_GROUP_CHANGED" or event == "PLAYER_TALENT_UPDATE" or event == "CHARACTER_POINTS_CHANGED" then
+        -- 玩家自身切换双天赋或调整天赋，立即重新计算自身最新专精并通知全插件
+        local pName = UnitName("player")
+        local myName = pName and GetCleanPlayerName(pName)
+        if myName then
+            local myInfo = ResolveUnitSpecMultiSource("player")
+            if myInfo then
+                rosterData[myName] = myInfo
+            end
+        end
+        BroadcastMySpec()
+        RaidComp.OnRosterUpdated()
+        local rt = ns.RaidTool or _G.RaidTool
+        if rt and rt.UpdateAllSlotVisuals then
+            rt.UpdateAllSlotVisuals()
+        end
+    elseif event == "GROUP_ROSTER_UPDATE" or event == "PARTY_LEADER_CHANGED" or event == "RAID_ROSTER_UPDATE" or event == "PLAYER_ENTERING_WORLD" or event == "ZONE_CHANGED_NEW_AREA" then
+        RaidComp.StartScan(false)
+    elseif event == "CHAT_MSG_ADDON" and arg1 == "BGLitePlus_Spec" then
+        -- 接收来自其他安装了 BGLite_Plus 队员的专精广播
+        if arg2 and arg4 then
+            local pName, pClass, pSpec, pRole = strsplit(",", arg2)
+            if pName and pSpec and pSpec ~= "" then
+                SavePersistentSpec(pName, pClass, pSpec, pRole, "BGLitePlus")
+                if rosterData[pName] then
+                    rosterData[pName].specName = pSpec
+                    rosterData[pName].specRole = pRole or rosterData[pName].specRole
+                    rosterData[pName].specIcon = GetSpecIcon(rosterData[pName].class, pSpec, rosterData[pName].specRole)
+                    rosterData[pName].isInspected = true
+                    rosterData[pName].source = "插件互联"
+                    RaidComp.OnRosterUpdated()
+                end
+            end
+        end
+    end
+end)
 
 -- 挂载 LibGroupInSpecT-1.1 回调
 local function HookLibGroupInSpecT()
@@ -1169,6 +1228,7 @@ local function HookLibGroupInSpecT()
                 if rosterData[info.name] then
                     rosterData[info.name].specName = info.spec_name
                     rosterData[info.name].specRole = role
+                    rosterData[info.name].specIcon = GetSpecIcon(rosterData[info.name].class, info.spec_name, role)
                     rosterData[info.name].isInspected = true
                     rosterData[info.name].source = "跨插件通信"
                     RaidComp.OnRosterUpdated()
@@ -1215,10 +1275,12 @@ function RaidComp.StartScan(force, externalList, externalClasses)
     -- 第一步：多源快速检索装配全员 (NoWCL + TalentEmu + Details + LGIST + tdInspect + 历史记忆 + 智能推导)
     -- 此步 0 延迟瞬间全部装配完成，无论队员是否在附近，100% 具备专精与角色！
     wipe(inspectQueue)
+    local myName = GetCleanPlayerName(UnitName("player"))
     for _, m in ipairs(members) do
         local n = m.name
         if n and n ~= "" then
-            if force or not rosterData[n] or not rosterData[n].isInspected then
+            local isMe = (n == myName) or (m.unit == "player")
+            if force or isMe or not rosterData[n] or not rosterData[n].isInspected then
                 local resolved = ResolveUnitSpecMultiSource(m)
                 if resolved then
                     rosterData[n] = resolved
@@ -1476,6 +1538,7 @@ function RaidComp.ManualSetMemberSpecRole(playerName, newSpecName, newRole)
     m.isEstimated = false
     m.source = "手动指定"
     m.isInspected = true
+    m.specIcon = GetSpecIcon(m.class, m.specName, m.specRole)
 
     -- 同步存入持久化缓存，下次进组自动生效
     SavePersistentSpec(playerName, m.class, m.specName, m.specRole, "Manual")
@@ -1483,10 +1546,87 @@ function RaidComp.ManualSetMemberSpecRole(playerName, newSpecName, newRole)
     RaidComp.OnRosterUpdated()
 end
 
--- 广播更新回调
+--------------------------------------------------------------------------------
+-- 统一团队天赋与专精识别中枢 (RaidTalents Hub Service)
+-- 供排兵布阵 40 人网格、团队 Buff 检测、团队技能监控、战术地图一键安排四大业务全局复用
+--------------------------------------------------------------------------------
+local RaidTalents = {}
+ns.RaidTalents = RaidTalents
+_G.BGLite_RaidTalents = RaidTalents
+
+local talentCallbacks = {}
+
+function RaidTalents.RegisterCallback(callbackFunc)
+    if type(callbackFunc) == "function" then
+        tinsert(talentCallbacks, callbackFunc)
+    end
+end
+
+function RaidTalents.FireCallbacks()
+    for _, cb in ipairs(talentCallbacks) do
+        pcall(cb)
+    end
+end
+
+function RaidTalents.GetMember(name)
+    if not name or name == "" then return nil end
+    local cleanName = GetCleanPlayerName(name)
+    local pName = UnitName("player")
+    local myName = pName and GetCleanPlayerName(pName)
+
+    -- 若查询的是玩家自己，始终确保获取的是当前激活天赋组的最新实时数据
+    if (myName and cleanName == myName) or cleanName == "player" then
+        local myInfo = ResolveUnitSpecMultiSource("player")
+        if myInfo then
+            rosterData[cleanName] = myInfo
+            return myInfo
+        end
+    end
+
+    local info = rosterData[cleanName]
+    if info then
+        if not info.specIcon then
+            info.specIcon = GetSpecIcon(info.class, info.specName, info.specRole)
+        end
+        return info
+    end
+    -- 兜底：若不在 rosterData 中但当前在队伍中
+    if UnitName(cleanName) or UnitExists(cleanName) then
+        local m = ResolveUnitSpecMultiSource(cleanName)
+        if m then
+            rosterData[cleanName] = m
+            return m
+        end
+    end
+    return nil
+end
+
+function RaidTalents.GetAllMembers()
+    for _, info in pairs(rosterData) do
+        if not info.specIcon then
+            info.specIcon = GetSpecIcon(info.class, info.specName, info.specRole)
+        end
+    end
+    return rosterData
+end
+
+function RaidTalents.StartScan(force)
+    RaidComp.StartScan(force)
+end
+
+function RaidTalents.GetSpecIcon(class, specName, specRole)
+    return GetSpecIcon(class, specName, specRole)
+end
+
+RaidTalents.SPEC_INFO = SPEC_INFO
+
+-- 广播更新回调 (同时驱动 RaidComp UI 与所有下游业务)
 function RaidComp.OnRosterUpdated()
     if RaidComp.UpdateUI then
         RaidComp.UpdateUI()
+    end
+    if RaidTalents and RaidTalents.FireCallbacks then
+        RaidTalents.FireCallbacks()
     end
 end
 

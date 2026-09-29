@@ -26,6 +26,10 @@ Core\RaidTool\RaidCD_PlayerModal.lua
 Core\RaidTool\RaidTool.lua
 Core\RaidTool\RaidComp.lua
 Core\RaidTool\RaidCompUI.lua
+Core\RaidTool\RaidMap_Data\Registry.lua
+Core\RaidTool\RaidMap_Data\General.lua
+Core\RaidTool\RaidMap_Data\ULD.lua
+Core\RaidTool\RaidMap.lua
 Core\WhoHistory.lua
 Core\TeamInfo.lua
 Core\TradeHistory.lua

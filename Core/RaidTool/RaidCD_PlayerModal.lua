@@ -287,10 +287,13 @@ function RaidCD.TogglePlayerSelectModal(targetTab)
         btnTankHeal:SetText("仅坦/疗/减伤")
         btnTankHeal:SetScript("OnClick", function()
             local slots = RaidCD.GetRoster40Slots()
-            local defClasses = RaidCD.DEFAULT_MONITORED_CLASSES or (ns and ns.DEFAULT_MONITORED_CLASSES) or DEFAULT_MONITORED_CLASSES
+            local db = BiaoGe and BiaoGe.RaidCD
             for _, s in ipairs(slots) do
                 if s.name and s.name ~= "" then
-                    local isCore = s.class and defClasses[s.class]
+                    if db and db.monitoredPlayers then
+                        db.monitoredPlayers[s.name] = nil -- 清空玩家个性化覆盖，让专精智能判定即刻生效
+                    end
+                    local isCore = RaidCD.IsPlayerMonitored(s.name, s.class)
                     RaidCD.SetPlayerMonitored(s.name, isCore and true or false)
                 end
             end
@@ -376,6 +379,13 @@ function RaidCD.TogglePlayerSelectModal(targetTab)
                 })
                 btn.slotIndex = slotIdx
 
+                local specIcon = btn:CreateTexture(nil, "ARTWORK")
+                specIcon:SetSize(15, 15)
+                specIcon:SetPoint("LEFT", 3, 0)
+                specIcon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+                specIcon:Hide()
+                btn.specIcon = specIcon
+
                 local nameText = btn:CreateFontString(nil, "OVERLAY")
                 nameText:SetFont(BIAOGE_TEXT_FONT, 11, "OUTLINE")
                 nameText:SetPoint("LEFT", 4, 0)
@@ -420,6 +430,17 @@ function RaidCD.TogglePlayerSelectModal(targetTab)
                     local classLabel = (LOCALIZED_CLASS_NAMES_MALE and LOCALIZED_CLASS_NAMES_MALE[btn.pClass]) or btn.pClass or ""
                     GameTooltip:AddDoubleLine(cCode .. btn.pName .. "|r", BG.STC_w1(subStr))
                     GameTooltip:AddLine(BG.STC_dis("职业: ") .. cCode .. classLabel .. "|r")
+
+                    local talentsHub = ns.RaidTalents or _G.BGLite_RaidTalents
+                    local mInfo = talentsHub and talentsHub.GetMember(btn.pName)
+                    if mInfo and mInfo.specName and mInfo.specName ~= "" then
+                        local roleStr = "输出"
+                        if mInfo.specRole == "tank" then roleStr = "|cff00bfff[坦克]|r"
+                        elseif mInfo.specRole == "healer" then roleStr = "|cff00ff00[治疗]|r"
+                        elseif mInfo.specRole == "melee" then roleStr = "|cffff7f00[近战输出]|r"
+                        elseif mInfo.specRole == "ranged" then roleStr = "|cffffd700[远程输出]|r" end
+                        GameTooltip:AddLine(BG.STC_dis("天赋专精: ") .. "|cffffd100" .. mInfo.specName .. "|r  " .. roleStr)
+                    end
 
                     -- 列出该玩家可用的受监控大招
                     local tracked = {}
@@ -571,7 +592,23 @@ function RaidCD.RefreshPlayerModalUI()
                         g = RAID_CLASS_COLORS[class].g
                         b = RAID_CLASS_COLORS[class].b
                     end
-                    btn.nameText:SetText(name)
+                    local talentsHub = ns.RaidTalents or _G.BGLite_RaidTalents
+                    local mInfo = talentsHub and talentsHub.GetMember(name)
+                    if mInfo and mInfo.specIcon and btn.specIcon then
+                        btn.specIcon:SetTexture(mInfo.specIcon)
+                        btn.specIcon:Show()
+                        btn.nameText:ClearAllPoints()
+                        btn.nameText:SetPoint("LEFT", btn.specIcon, "RIGHT", 3, 0)
+                        btn.nameText:SetPoint("RIGHT", -22, 0)
+                        local sName = (mInfo.specName and mInfo.specName ~= "" and mInfo.specName ~= "未知") and (" (" .. mInfo.specName .. ")") or ""
+                        btn.nameText:SetText(name .. sName)
+                    else
+                        if btn.specIcon then btn.specIcon:Hide() end
+                        btn.nameText:ClearAllPoints()
+                        btn.nameText:SetPoint("LEFT", 4, 0)
+                        btn.nameText:SetPoint("RIGHT", -22, 0)
+                        btn.nameText:SetText(name)
+                    end
                     btn.nameText:SetTextColor(r, g, b)
                     btn:SetBackdropColor(r * 0.25, g * 0.25, b * 0.25, 0.85)
                     btn:SetBackdropBorderColor(0.2, 0.2, 0.2, 0.7)
@@ -580,6 +617,10 @@ function RaidCD.RefreshPlayerModalUI()
                     btn.cbMonitor:SetChecked(isMon)
                     btn.cbMonitor:Show()
                 else
+                    if btn.specIcon then btn.specIcon:Hide() end
+                    btn.nameText:ClearAllPoints()
+                    btn.nameText:SetPoint("LEFT", 4, 0)
+                    btn.nameText:SetPoint("RIGHT", -22, 0)
                     btn.nameText:SetText("")
                     btn:SetBackdropColor(0.04, 0.04, 0.04, 0.4)
                     btn:SetBackdropBorderColor(0.15, 0.15, 0.15, 0.3)
@@ -723,4 +764,13 @@ function RaidCD.RefreshPlayerModalUI()
 
         playerModal.sortChild:SetHeight(math.max(150, #currentList * 28 + 20))
     end
+end
+
+-- 注册天赋更新全局监听，当有新队员专精解析完毕时，人员配置弹窗实时同步渲染专精
+if ns.RaidTalents and ns.RaidTalents.RegisterCallback then
+    ns.RaidTalents.RegisterCallback(function()
+        if RaidCD and RaidCD.RefreshPlayerModalUI then
+            RaidCD.RefreshPlayerModalUI()
+        end
+    end)
 end

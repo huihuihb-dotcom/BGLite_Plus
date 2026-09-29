@@ -1243,6 +1243,12 @@ function RaidTool.CreateUI(parent)
         BG.PlaySound(1)
     end)
 
+    -- 4. 战术站位图专属控制区块 (奥杜尔/通用)
+    local rMap = ns.RaidMap or _G.RaidMap or (BG and BG.RaidMap)
+    if rMap and rMap.CreateRaidToolPanel then
+        rMap.CreateRaidToolPanel(leftPanel)
+    end
+
 
     ----------------------------------------------------------------------------
     -- 右侧：阵容助手 (Raid Groups Optimizer) - 宽度与高度自适应拉满整个容器
@@ -1363,6 +1369,48 @@ function RaidTool.CreateUI(parent)
     cbLockHUD:SetScript("OnLeave", GameTooltip_Hide)
     if ns.RaidCD then ns.RaidCD.cbLockHUD = cbLockHUD end
 
+    local btnOpenRaidMap = BG.CreateButton(rightPanel)
+    btnOpenRaidMap:SetSize(86, 26)
+    btnOpenRaidMap:SetPoint("LEFT", cbLockHUD.text, "RIGHT", 10, 0)
+    btnOpenRaidMap:SetText(BG.STC_b1("战术站位图"))
+    btnOpenRaidMap:SetScript("OnClick", function()
+        DEFAULT_CHAT_FRAME:AddMessage("|cff00ffff[RaidTool Click]|r 战术站位图按钮被点击")
+        local rMap = ns.RaidMap or _G.RaidMap or (BG and BG.RaidMap)
+        DEFAULT_CHAT_FRAME:AddMessage(string.format("  rMap 检查: ns.RaidMap=%s, _G.RaidMap=%s, BG.RaidMap=%s",
+            tostring(ns.RaidMap ~= nil), tostring(_G.RaidMap ~= nil), tostring(BG and BG.RaidMap ~= nil)))
+
+        if not rMap then
+            DEFAULT_CHAT_FRAME:AddMessage("|cffff0000[RaidTool Click Error]|r 未找到 RaidMap 模块！请检查 RaidMap.lua 是否被加载！")
+            return
+        end
+
+        local mapF = BG.RaidMapFrame or _G["BG.RaidMapFrame"]
+        DEFAULT_CHAT_FRAME:AddMessage(string.format("  mapF 初始状态: %s (是否显示: %s)", tostring(mapF ~= nil), tostring(mapF and mapF:IsShown())))
+
+        if mapF and mapF:IsShown() then
+            DEFAULT_CHAT_FRAME:AddMessage("  mapF 当前已在显示状态，执行 Hide()")
+            mapF:Hide()
+        else
+            DEFAULT_CHAT_FRAME:AddMessage("  准备打开看板，调用 LoadBossTacticalPreset...")
+            if rMap.LoadBossTacticalPreset then
+                rMap.LoadBossTacticalPreset(5)
+            elseif rMap.ShowDemoTacticalBoard then
+                rMap.ShowDemoTacticalBoard()
+            else
+                DEFAULT_CHAT_FRAME:AddMessage("|cffff0000[RaidTool Click Error]|r rMap 中既无 LoadBossTacticalPreset 也无 ShowDemoTacticalBoard！")
+            end
+        end
+        BG.PlaySound(1)
+    end)
+    btnOpenRaidMap:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_TOP")
+        GameTooltip:AddLine(BG.STC_b1("打开战术站位图看板"), 1, 1, 1)
+        GameTooltip:AddLine("即时呼出或关闭奥杜尔/通用战术站位看板，展示团长最新排布站位。", 0.85, 0.85, 0.85, true)
+        GameTooltip:AddLine("快捷命令: /bgmap 或 /tjmap", 0.2, 1, 0.4, true)
+        GameTooltip:Show()
+    end)
+    btnOpenRaidMap:SetScript("OnLeave", GameTooltip_Hide)
+
     -- 8 个小队网格 (加大单格尺寸至 142x145, 队员槽位高度 23px, 文字 14px)
     local slotButtons = {}
     local currentRosterList = {}
@@ -1381,8 +1429,9 @@ function RaidTool.CreateUI(parent)
         if not btn then return end
         local name = currentRosterList[slotIndex]
         if name and name ~= "" then
-            btn.text:SetText(name)
-            local class = currentRosterClasses[slotIndex]
+            local talentsHub = ns.RaidTalents or _G.BGLite_RaidTalents
+            local mInfo = talentsHub and talentsHub.GetMember(name)
+            local class = currentRosterClasses[slotIndex] or (mInfo and mInfo.class)
             if not class and UnitName(name) then
                 class = select(2, UnitClass(name))
             end
@@ -1394,6 +1443,21 @@ function RaidTool.CreateUI(parent)
             elseif UnitName(name) then
                 r, g, b = GetClassRGB(name)
             end
+
+            if mInfo and mInfo.specIcon and btn.specIcon then
+                btn.specIcon:SetTexture(mInfo.specIcon)
+                btn.specIcon:Show()
+                btn.text:ClearAllPoints()
+                btn.text:SetPoint("LEFT", btn.specIcon, "RIGHT", 3, 0)
+                btn.text:SetPoint("RIGHT", btn.cbMonitor, "LEFT", -2, 0)
+            else
+                if btn.specIcon then btn.specIcon:Hide() end
+                btn.text:ClearAllPoints()
+                btn.text:SetPoint("LEFT", 6, 0)
+                btn.text:SetPoint("RIGHT", btn.cbMonitor, "LEFT", -2, 0)
+            end
+
+            btn.text:SetText(name)
             btn.text:SetTextColor(r, g, b)
             btn:SetBackdropColor(r * 0.25, g * 0.25, b * 0.25, 0.85)
             btn:SetBackdropBorderColor(r * 0.75, g * 0.75, b * 0.75, 0.9)
@@ -1404,6 +1468,10 @@ function RaidTool.CreateUI(parent)
                 btn.cbMonitor:SetChecked(isMon and true or false)
             end
         else
+            if btn.specIcon then btn.specIcon:Hide() end
+            btn.text:ClearAllPoints()
+            btn.text:SetPoint("LEFT", 6, 0)
+            btn.text:SetPoint("RIGHT", btn.cbMonitor, "LEFT", -2, 0)
             btn.text:SetText(BG.STC_dis(format(L["空位 %d"], ((slotIndex - 1) % MEMBERS_PER_GROUP) + 1)))
             btn:SetBackdropColor(0.08, 0.08, 0.08, 0.4)
             btn:SetBackdropBorderColor(0.2, 0.2, 0.2, 0.5)
@@ -1499,6 +1567,13 @@ function RaidTool.CreateUI(parent)
             })
             slotBtn.index = idx
 
+            local specIcon = slotBtn:CreateTexture(nil, "ARTWORK")
+            specIcon:SetSize(16, 16)
+            specIcon:SetPoint("LEFT", slotBtn, "LEFT", 3, 0)
+            specIcon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+            specIcon:Hide()
+            slotBtn.specIcon = specIcon
+
             local cbMonitor = CreateFrame("CheckButton", nil, slotBtn, "UICheckButtonTemplate")
             cbMonitor:SetSize(16, 16)
             cbMonitor:SetPoint("RIGHT", slotBtn, "RIGHT", -2, 0)
@@ -1579,14 +1654,71 @@ function RaidTool.CreateUI(parent)
 
             slotBtn:SetScript("OnEnter", function(self)
                 self:SetBackdropBorderColor(1, 0.8, 0, 1)
+                local name = currentRosterList[self.index]
+                if not name or name == "" then return end
+
+                GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+                GameTooltip:ClearLines()
+
+                local talentsHub = ns.RaidTalents or _G.BGLite_RaidTalents
+                local mInfo = talentsHub and talentsHub.GetMember(name)
+                local class = currentRosterClasses[self.index] or (mInfo and mInfo.class)
+                if not class and UnitName(name) then
+                    class = select(2, UnitClass(name))
+                end
+
+                local cCode = "|cffffffff"
+                if class and RAID_CLASS_COLORS and RAID_CLASS_COLORS[class] then
+                    cCode = RAID_CLASS_COLORS[class].colorStr and ("|c" .. RAID_CLASS_COLORS[class].colorStr) or cCode
+                end
+
+                local grpNum = math.floor((self.index - 1) / 5) + 1
+                local slotNum = ((self.index - 1) % 5) + 1
+                GameTooltip:AddDoubleLine(cCode .. name .. "|r", BG.STC_w1(format("[第 %d 队 - 槽位 %d]", grpNum, slotNum)))
+
+                local classLabel = (LOCALIZED_CLASS_NAMES_MALE and LOCALIZED_CLASS_NAMES_MALE[class]) or class or "未知职业"
+                GameTooltip:AddLine(BG.STC_dis("职业: ") .. cCode .. classLabel .. "|r")
+
+                if mInfo and mInfo.specName and mInfo.specName ~= "" then
+                    local roleStr = "输出"
+                    if mInfo.specRole == "tank" then
+                        roleStr = "|cff00bfff[坦克]|r"
+                    elseif mInfo.specRole == "healer" then
+                        roleStr = "|cff00ff00[治疗]|r"
+                    elseif mInfo.specRole == "melee" then
+                        roleStr = "|cffff7f00[近战输出]|r"
+                    elseif mInfo.specRole == "ranged" then
+                        roleStr = "|cffffd700[远程输出]|r"
+                    end
+
+                    local ptsStr = mInfo.points and (" (" .. mInfo.points .. ")") or ""
+                    GameTooltip:AddLine(BG.STC_dis("天赋专精: ") .. "|cffffd100" .. mInfo.specName .. "|r" .. ptsStr .. "  " .. roleStr)
+                    GameTooltip:AddLine(BG.STC_dis("数据来源: ") .. "|cff808080" .. (mInfo.source or "智能推测") .. "|r")
+                else
+                    GameTooltip:AddLine(BG.STC_dis("天赋专精: ") .. "|cff808080正在后台扫描或尚未进视距|r")
+                end
+
+                GameTooltip:AddLine(" ")
+                GameTooltip:AddLine(BG.STC_g1("操作提示: ") .. "|cffcccccc左键拖拽调队，右键移出槽位|r")
+                GameTooltip:Show()
             end)
             slotBtn:SetScript("OnLeave", function(self)
+                GameTooltip_Hide()
                 UpdateSlotVisual(self.index)
             end)
 
             slotButtons[idx] = slotBtn
             UpdateSlotVisual(idx)
         end
+    end
+
+    -- 注册天赋更新全局监听，当有新队员专精解析完毕时，40人网格实时同步渲染专精图标
+    if ns.RaidTalents and ns.RaidTalents.RegisterCallback then
+        ns.RaidTalents.RegisterCallback(function()
+            if RaidTool and RaidTool.UpdateAllSlotVisuals then
+                RaidTool.UpdateAllSlotVisuals()
+            end
+        end)
     end
 
     RaidTool.UpdateSlotVisual = UpdateSlotVisual
@@ -1607,18 +1739,19 @@ function RaidTool.CreateUI(parent)
                 currentRosterList[1] = CleanPlayerName(pName)
                 currentRosterClasses[1] = select(2, UnitClass("player"))
             end
-            for i = 1, 40 do
-                UpdateSlotVisual(i)
-            end
-            UpdateGroupBoxesVisibility()
 
             local comp = ns.RaidComp or _G.RaidComp
             if comp and comp.StartScan then
-                comp.StartScan(false, currentRosterList, currentRosterClasses)
+                comp.StartScan(isManual and true or false, currentRosterList, currentRosterClasses)
             end
             if comp and comp.UpdateUI then
                 comp.UpdateUI()
             end
+
+            for i = 1, 40 do
+                UpdateSlotVisual(i)
+            end
+            UpdateGroupBoxesVisibility()
 
             if isManual then
                 DEFAULT_CHAT_FRAME:AddMessage("|cffff2020[BGLite 团队工具] 你当前不在任何队伍或团队中！|r")
@@ -1676,19 +1809,19 @@ function RaidTool.CreateUI(parent)
             end
         end
 
-        for i = 1, 40 do
-            UpdateSlotVisual(i)
-        end
-        UpdateGroupBoxesVisibility()
-
-        -- 联动底部团队阵容与 Buff 分析模块同步刷新
+        -- 联动底部团队阵容与 Buff 分析模块同步刷新 (优先刷新专精数据池)
         local comp = ns.RaidComp or _G.RaidComp
         if comp and comp.StartScan then
-            comp.StartScan(false, currentRosterList, currentRosterClasses)
+            comp.StartScan(isManual and true or false, currentRosterList, currentRosterClasses)
         end
         if comp and comp.UpdateUI then
             comp.UpdateUI()
         end
+
+        for i = 1, 40 do
+            UpdateSlotVisual(i)
+        end
+        UpdateGroupBoxesVisibility()
 
         if isManual then
             BG.PlaySound(1)

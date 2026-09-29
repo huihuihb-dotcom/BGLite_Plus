@@ -260,6 +260,36 @@ function RaidCD.IsPlayerMonitored(name, class)
     if not class and UnitName(clean) then
         class = select(2, UnitClass(clean))
     end
+
+    -- 接入统一专精识别中枢 ns.RaidTalents 智能研判专精与角色
+    local talentsHub = ns.RaidTalents or _G.BGLite_RaidTalents
+    local mInfo = talentsHub and talentsHub.GetMember(clean)
+    if mInfo and mInfo.specName and mInfo.specName ~= "" and mInfo.specName ~= "未知" then
+        local spec = mInfo.specName
+        local role = mInfo.specRole
+        if class == "PALADIN" then
+            -- 圣骑：防护、神圣默认监控；惩戒骑自动排除
+            return (spec == "防护" or spec == "神圣" or role == "tank" or role == "healer")
+        elseif class == "PRIEST" then
+            -- 牧师：戒律、神圣默认监控；暗牧自动排除
+            return (spec == "戒律" or spec == "神圣" or role == "healer")
+        elseif class == "DRUID" then
+            -- 德鲁伊：奶德、熊坦默认监控；平衡/猫德自动排除
+            return (spec == "恢复" or role == "tank" or role == "healer")
+        elseif class == "WARRIOR" then
+            -- 战士：防战默认监控；狂暴/武器自动排除
+            return (spec == "防护" or role == "tank")
+        elseif class == "DEATHKNIGHT" then
+            -- 死骑：血DK(坦)默认监控；纯输出自动排除
+            return (spec == "鲜血" or role == "tank")
+        elseif class == "SHAMAN" then
+            -- 萨满：奶萨默认监控
+            return (spec == "恢复" or role == "healer")
+        end
+        return (role == "tank" or role == "healer")
+    end
+
+    -- 未扫描到专精时的安全托底
     if class and DEFAULT_MONITORED_CLASSES[class] then
         return true
     end
