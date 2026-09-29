@@ -270,6 +270,21 @@ local function GetRaidLeaders()
     return leaders
 end
 
+-- 获取当前团队/队伍领袖名称 (纯净名字)
+local function GetActiveLeaderName()
+    local leaders = GetRaidLeaders()
+    for name, role in pairs(leaders) do
+        if role == "leader" then
+            return CleanName(name)
+        end
+    end
+    for name in pairs(leaders) do
+        return CleanName(name)
+    end
+    return ""
+end
+TeamInfo.GetActiveLeaderName = GetActiveLeaderName
+
 -- 玩家最后在集结号点击/申请的活动暂存
 local LastAppliedMeetingHornActivity = nil
 
@@ -1545,7 +1560,7 @@ function TeamInfo.ClearOnSaveHistory(targetFB)
         if not IsInGroup() and not IsInRaid() then
             staging.leader = ""
         else
-            staging.leader = GetRaidLeaderName() or ""
+            staging.leader = GetActiveLeaderName()
         end
     end
 

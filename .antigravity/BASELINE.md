@@ -1936,8 +1936,41 @@ aid40)；
      - 彻底删除了密语邀请成功、进组密语发送、进组欢迎通报、调队转团队、阵容同步、预设方案存删读、频道号复制以及语音广播等业务逻辑中散落的全部 `RaidTool.Log(...)` 打印代码；
      - 团队工具运行全流程完全纯净静默，零聊天框垃圾信息输出。
 
+## 25. 团队信息 ClearOnSaveHistory 清空保存时 GetRaidLeaderName nil 调用 Bug 修复 (2026-09-29)
+* **用户报错堆栈**:
+  ```text
+  Interface/AddOns/BGLite_Plus/Core/TeamInfo.lua:1548: attempt to call a nil value
+  Count: 1
+  Call Stack:
+  [1] [Interface/AddOns/BGLite_Plus/Core/TeamInfo.lua]:1548: in function 'ClearOnSaveHistory'
+  [2] [Interface/AddOns/BGLite_Plus/Core/History.lua]:1723: in function 'ClearBiaoGe'
+  [3] [Interface/AddOns/BGLite/Core/Module/ClearBiaoGe.lua]:281: in function <ClearBiaoGe.lua:245>
+  ```
+* **根因深度分析**:
+  - **触发条件**：当玩家处于组队（小队或团队）状态下，点击【清空表格】或点击【保存历史】（自动触发清空旧表格）时发生；
+  - **病根定位**：在 `TeamInfo.ClearOnSaveHistory` 中，未组队时重置为空字符串 `staging.leader = ""`，但在组队分支中错误调用了未定义的全局函数 `staging.leader = GetRaidLeaderName() or ""`；
+  - **魔兽 API 特性**：魔兽原生 API 并不存在 `GetRaidLeaderName`，导致作为未声明的全局变量为 `nil`，从而在组队清空时触发 `attempt to call a nil value`。
+* **业务影响评估**:
+  - **阻断清空后半段流程**：报错中断了 `ClearOnSaveHistory` 内部后续对 YY 输入框清空、团队信息侧边栏卡片 UI 刷新的执行；且可能中断外层 `ClearBiaoGe` 的后续流程；
+  - **不损坏已存核心数据**：账单数据已在清空前保存完毕，不影响已落盘的历史账单数据，但会弹窗打扰玩家体验。
+* **修复与加固落地**:
+  - 在 `Core/TeamInfo.lua` 中封装安全的纯净团长名字提取函数 `GetActiveLeaderName()`，复用模块内成熟的 `GetRaidLeaders()` 字典，优先提取 `role == "leader"` 的纯净姓名；
+  - 将 `TeamInfo.ClearOnSaveHistory` 中对 `GetRaidLeaderName()` 的非法调用彻底替换为 `GetActiveLeaderName()`，并在模块对象上对外暴露 `TeamInfo.GetActiveLeaderName` 供安全调用。
 
-
-
-
-
+## 26. RaidCD_PlayerModal 人员监控弹窗中 DEFAULT_MONITORED_CLASSES 跨文件访问 nil 报错修复 (2026-09-29)
+* **用户报错堆栈**:
+  ```text
+  ...Ons/BGLite_Plus/Core/RaidTool/RaidCD_PlayerModal.lua:284: attempt to index global 'DEFAULT_MONITORED_CLASSES' (a nil value)
+  Count: 26
+  Call Stack:
+  [1] in function <...Ons/BGLite_Plus/Core/RaidTool/RaidCD_PlayerModal.lua:280>
+  ```
+* **根因深度分析**:
+  - **触发条件**：在技能冷却监控面板中，点击打开人员监控弹窗，并点击【仅坦/疗/减伤】批量筛选按钮时触发；
+  - **病根定位**：`DEFAULT_MONITORED_CLASSES`（坦/治疗/减伤职业白名单）最初是在 `Core/RaidTool/RaidCD.lua` 文件中声明为局部变量（`local DEFAULT_MONITORED_CLASSES`），未暴露到命名空间或全局。当另外一个文件 `Core/RaidTool/RaidCD_PlayerModal.lua` 尝试跨文件直接索引全局 `DEFAULT_MONITORED_CLASSES[s.class]` 时，由于其为 `nil`，导致团队内每个人员都触发一次 `attempt to index global`（26 人团连报 26 次）。
+* **业务影响评估**:
+  - 点击【仅坦/疗/减伤】按钮时批量选中逻辑被异常中断，未完成人员筛选，并弹出错误窗口。
+* **修复与多重防护落地**:
+  1. 在 `Core/RaidTool/RaidCD.lua` 中将白名单通过 `RaidCD.DEFAULT_MONITORED_CLASSES` 与 `ns.DEFAULT_MONITORED_CLASSES` 挂载至跨文件共享命名空间；
+  2. 在 `Core/RaidTool/RaidCD_PlayerModal.lua` 头部优先从 `RaidCD` / `ns` 获取，同时配备本地兜底白名单表（PALADIN/PRIEST/DRUID/WARRIOR/DEATHKNIGHT）；
+  3. 在点击事件循环中，增加 `s.class and defClasses[s.class]` 的安全空值短路保护，100% 杜绝 nil 索引异常。

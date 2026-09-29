@@ -11,6 +11,14 @@ local RaidCD = ns.RaidCD or {}
 ns.RaidCD = RaidCD
 _G.RaidCD = RaidCD
 
+local DEFAULT_MONITORED_CLASSES = RaidCD.DEFAULT_MONITORED_CLASSES or (ns and ns.DEFAULT_MONITORED_CLASSES) or {
+    PALADIN = true,
+    PRIEST = true,
+    DRUID = true,
+    WARRIOR = true,
+    DEATHKNIGHT = true,
+}
+
 local function CleanPlayerName(name)
     if not name then return "" end
     return (name:gsub("%-.+", ""))
@@ -279,9 +287,10 @@ function RaidCD.TogglePlayerSelectModal(targetTab)
         btnTankHeal:SetText("仅坦/疗/减伤")
         btnTankHeal:SetScript("OnClick", function()
             local slots = RaidCD.GetRoster40Slots()
+            local defClasses = RaidCD.DEFAULT_MONITORED_CLASSES or (ns and ns.DEFAULT_MONITORED_CLASSES) or DEFAULT_MONITORED_CLASSES
             for _, s in ipairs(slots) do
                 if s.name and s.name ~= "" then
-                    local isCore = DEFAULT_MONITORED_CLASSES[s.class]
+                    local isCore = s.class and defClasses[s.class]
                     RaidCD.SetPlayerMonitored(s.name, isCore and true or false)
                 end
             end

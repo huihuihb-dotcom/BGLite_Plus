@@ -82,6 +82,8 @@ local DEFAULT_MONITORED_CLASSES = {
     WARRIOR = true,
     DEATHKNIGHT = true,
 }
+RaidCD.DEFAULT_MONITORED_CLASSES = DEFAULT_MONITORED_CLASSES
+ns.DEFAULT_MONITORED_CLASSES = DEFAULT_MONITORED_CLASSES
 
 local function CleanPlayerName(name)
     if not name then return "" end
