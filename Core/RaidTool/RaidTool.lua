@@ -79,39 +79,15 @@ function ns.InitRaidToolDB()
     end
 end
 
--- 统一调试状态获取与设置（全局共享同一个配置）
+-- 统一调试状态与日志接口 (已清理日志功能)
 function RaidTool.IsDebugEnabled()
-    if BiaoGe and BiaoGe.RaidTool and BiaoGe.RaidTool.debugLog ~= nil then
-        return BiaoGe.RaidTool.debugLog == true or BiaoGe.RaidTool.debugLog == 1
-    end
-    if BiaoGe and BiaoGe.options and BiaoGe.options.raidToolDebugLog ~= nil then
-        return BiaoGe.options.raidToolDebugLog == 1 or BiaoGe.options.raidToolDebugLog == true
-    end
     return false
 end
 
 function RaidTool.SetDebugEnabled(val)
-    local enabled = val and true or false
-    if BiaoGe then
-        BiaoGe.RaidTool = BiaoGe.RaidTool or {}
-        BiaoGe.RaidTool.debugLog = enabled
-        BiaoGe.options = BiaoGe.options or {}
-        BiaoGe.options.raidToolDebugLog = enabled and 1 or 0
-    end
-    if BG_RaidTool_LeftPanel_DebugLog then
-        BG_RaidTool_LeftPanel_DebugLog:SetChecked(enabled)
-    end
-    if BG_Button_RaidToolDebugLog then
-        BG_Button_RaidToolDebugLog:SetChecked(enabled)
-    end
 end
 
--- 统一调试日志打印函数 (受全局 debugLog 配置控制)
 function RaidTool.Log(msg, colorHex)
-    if RaidTool.IsDebugEnabled() then
-        local c = colorHex or "00ff00"
-        DEFAULT_CHAT_FRAME:AddMessage("|cff" .. c .. "[BGLite 团队工具] " .. msg .. "|r")
-    end
 end
 
 --------------------------------------------------------------------------------
@@ -286,7 +262,6 @@ local function DoInvite(sender)
     elseif InviteUnit then
         InviteUnit(shortName)
     end
-    RaidTool.Log("收到来自 [" .. shortName .. "] 的密语邀请请求，已发出邀请！")
 end
 
 local function HandleIncomingChatMessage(msg, sender)
@@ -368,7 +343,6 @@ local function SendNewMemberNotification(targetName)
         if db.autoWhisperNewMember and db.whisperNewMemberText and db.whisperNewMemberText ~= "" then
             local wMsg = db.whisperNewMemberText:gsub("{name}", cleanName)
             SendChatMessage(wMsg, "WHISPER", nil, cleanName)
-            RaidTool.Log("已向新成员 [" .. cleanName .. "] 发送进组密语。")
         end
 
         -- 2. 自动团队/小队发言
@@ -378,7 +352,6 @@ local function SendNewMemberNotification(targetName)
             local channel = inRaid and "RAID" or "PARTY"
 
             SendChatMessage(rMsg, channel)
-            RaidTool.Log("已在 " .. (channel == "RAID" and "团队" or "小队") .. " 频道发送进组欢迎公告。")
         end
     end)
 end
@@ -500,9 +473,6 @@ function RaidTool.StopProcessRoster(msg)
     RosterState.lockedUnit = {}
     RosterState.groupsReady = false
     rosterEventFrame:UnregisterEvent("GROUP_ROSTER_UPDATE")
-    if msg then
-        RaidTool.Log(msg, "00BFFF")
-    end
     if RaidTool.SyncCurrentRaidRoster then
         RaidTool.SyncCurrentRaidRoster(true)
     end
@@ -727,23 +697,6 @@ function RaidTool.CreateUI(parent)
     leftTitle:SetFont(BIAOGE_TEXT_FONT, 18, "OUTLINE")
     leftTitle:SetPoint("TOPLEFT", 14, -12)
     leftTitle:SetText(BG.STC_g1(L["组队工具"]))
-
-    local cbDebugLog = CreateFrame("CheckButton", "BG_RaidTool_LeftPanel_DebugLog", leftPanel, "UICheckButtonTemplate")
-    cbDebugLog:SetSize(18, 18)
-    cbDebugLog:SetPoint("TOPRIGHT", leftPanel, "TOPRIGHT", -80, -12)
-    cbDebugLog.text = cbDebugLog:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
-    cbDebugLog.text:SetPoint("LEFT", cbDebugLog, "RIGHT", 4, 0)
-    cbDebugLog.text:SetFont(BIAOGE_TEXT_FONT, 13, "OUTLINE")
-    cbDebugLog.text:SetText(L["调试日志"])
-    cbDebugLog:SetChecked(RaidTool.IsDebugEnabled())
-    cbDebugLog:SetHitRectInsets(-2, -cbDebugLog.text:GetStringWidth() - 4, -2, -2)
-    cbDebugLog:SetScript("OnClick", function(self)
-        RaidTool.SetDebugEnabled(self:GetChecked())
-        BG.PlaySound(1)
-    end)
-    cbDebugLog:SetScript("OnShow", function(self)
-        self:SetChecked(RaidTool.IsDebugEnabled())
-    end)
 
     local leftY = -38
 
@@ -1493,7 +1446,6 @@ function RaidTool.CreateUI(parent)
             elseif ConvertToRaid then
                 ConvertToRaid()
             end
-            RaidTool.Log("检测到跨队调整，已自动将小队转换为团队！")
         end
 
         local val1 = currentRosterList[idx1]
@@ -1739,7 +1691,6 @@ function RaidTool.CreateUI(parent)
         end
 
         if isManual then
-            RaidTool.Log(format("已成功同步当前阵容（共 %d 名成员）！", loadedCount))
             BG.PlaySound(1)
         end
     end
@@ -1865,7 +1816,6 @@ function RaidTool.CreateUI(parent)
         end
         BiaoGe.RaidGroups.selectedProfile = name
         if RefreshProfileTabs then RefreshProfileTabs() end
-        RaidTool.Log(format("已成功保存预设方案 [%s]！", name))
         BG.PlaySound(1)
     end
 
@@ -1876,7 +1826,6 @@ function RaidTool.CreateUI(parent)
             if BiaoGe.RaidGroups.selectedProfile == self.profileName then
                 BiaoGe.RaidGroups.selectedProfile = nil
             end
-            RaidTool.Log(format("已删除预设方案 [%s]。", self.profileName))
             if RefreshProfileTabs then RefreshProfileTabs() end
             BG.PlaySound(1)
         elseif IsAltKeyDown() then
@@ -1885,7 +1834,6 @@ function RaidTool.CreateUI(parent)
         else
             -- 加载预设
             LoadProfile(self.profileName)
-            RaidTool.Log(format("已载入预设方案 [%s]。", self.profileName))
             BG.PlaySound(1)
         end
     end
@@ -2269,7 +2217,6 @@ local function ShowYYCopyModal(yyNumber, tag)
         end)
         eb:SetScript("OnKeyUp", function(self, key)
             if IsControlKeyDown() and key == "C" then
-                RaidTool.Log("频道号 [" .. self:GetText() .. "] 已复制！")
                 BG.PlaySound(1)
                 C_Timer.After(0.25, function() copyModal:Hide() end)
             end
@@ -2316,7 +2263,6 @@ hooksecurefunc("SetItemRef", function(link, text, button)
             -- ALT 点击：在团队/小队广播
             local channel = (IsInRaid and IsInRaid()) and "RAID" or (IsInGroup and IsInGroup() and "PARTY" or "SAY")
             SendChatMessage(format("请进%s语音频道：%s", tag, yyNum), channel)
-            RaidTool.Log(format("已在频道广播 %s: %s", tag, yyNum))
         else
             -- 普通左键点击：呼出全选复制浮窗
             ShowYYCopyModal(yyNum, tag)
@@ -2328,73 +2274,4 @@ end)
 -- 5. 在插件设置【其他功能】页面注入调试日志复选框
 --------------------------------------------------------------------------------
 function ns.InitRaidToolOthersOptions()
-    if not (BG and BG.FrameOptions_others) then return end
-    if BG.FrameOptions_others.hasInitedRaidToolDebug then return end
-    BG.FrameOptions_others.hasInitedRaidToolDebug = true
-
-    local parentFrame = BG.FrameOptions_others
-    local content = nil
-    for _, child in ipairs({ parentFrame:GetChildren() }) do
-        if child.scroll and child.scroll.GetScrollChild then
-            content = child.scroll:GetScrollChild()
-            break
-        end
-    end
-    content = content or parentFrame
-
-    -- 计算已存在控件的最底部 Y 坐标，确保紧凑自然追加在末尾
-    local minY = -350
-    for _, child in ipairs({ content:GetChildren() }) do
-        local p, rel, relP, x, y = child:GetPoint()
-        if y and type(y) == "number" and y < minY then
-            minY = y
-        end
-    end
-
-    local startY = minY - 45
-
-    -- 团队与组队工具分区标题
-    local sectionTitle = content:CreateFontString(nil, "OVERLAY")
-    sectionTitle:SetFont(BIAOGE_TEXT_FONT, 15, "OUTLINE")
-    sectionTitle:SetPoint("TOPLEFT", content, "TOPLEFT", 15, startY)
-    sectionTitle:SetText(BG.STC_g1(L["团队与组队工具"]))
-
-    local splitLine = content:CreateLine()
-    splitLine:SetColorTexture(0.5, 0.5, 0.5, 0.8)
-    splitLine:SetStartPoint("TOPLEFT", 5, startY - 20)
-    splitLine:SetEndPoint("TOPLEFT", 480, startY - 20)
-    splitLine:SetThickness(1.5)
-
-    -- 调试日志复选框
-    local cbDebug = CreateFrame("CheckButton", "BG_Button_RaidToolDebugLog", content, "ChatConfigCheckButtonTemplate")
-    cbDebug:SetSize(30, 30)
-    cbDebug:SetPoint("TOPLEFT", content, "TOPLEFT", 15, startY - 28)
-    local cbText = cbDebug.Text or _G[cbDebug:GetName() .. "Text"] or cbDebug:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
-    cbDebug.Text = cbText
-    cbText:SetFont(BIAOGE_TEXT_FONT, 15, "OUTLINE")
-    cbText:SetText(L["开启团队工具调试日志"])
-    cbText:SetWordWrap(false)
-    local textW = (cbText.GetStringWidth and cbText:GetStringWidth() or 120) + 20
-    if cbText.SetWidth then cbText:SetWidth(textW) end
-    if cbDebug.SetHitRectInsets then cbDebug:SetHitRectInsets(0, -textW, 0, 0) end
-
-    cbDebug:SetChecked(RaidTool.IsDebugEnabled())
-
-    cbDebug:SetScript("OnClick", function(self)
-        RaidTool.SetDebugEnabled(self:GetChecked())
-        BG.PlaySound(1)
-    end)
-    cbDebug:SetScript("OnShow", function(self)
-        self:SetChecked(RaidTool.IsDebugEnabled())
-    end)
-
-    cbDebug:SetScript("OnEnter", function(self)
-        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-        GameTooltip:AddLine(BG.STC_g1(L["开启团队工具调试日志"]))
-        GameTooltip:AddLine(L["开启后，在聊天框打印新成员进组密语发送、进组欢迎广播、自动邀请响应及调队状态等绿色提示信息；关闭后静默执行，不打扰聊天框。"], 1, 1, 1, true)
-        GameTooltip:Show()
-    end)
-    cbDebug:SetScript("OnLeave", function()
-        GameTooltip:Hide()
-    end)
 end

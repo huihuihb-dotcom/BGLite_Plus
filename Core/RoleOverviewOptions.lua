@@ -10,7 +10,7 @@ local function RefreshRoleOverview()
         if BG.FBCDFrame.click then
             BG.SetFBCD(nil, nil, true, true)
         else
-            BG.SetFBCD(BG.FBCDFrame.lastSelf, BG.FBCDFrame.lastPosition)
+            BG.FBCDFrame:Hide()
         end
     end
 end
@@ -23,8 +23,9 @@ local defaultOptionsMap = {
     roleOverviewShowTalent = 1,
     roleOverviewShowBuffCD = 1,
     searchList = 1,
-    roleOverviewShortName = 0, -- 默认关闭/否
-    roleOverviewShowNote = 0,  -- 默认关闭/否
+    roleOverviewMinimapHover = 1, -- 默认开启：小地图图标悬停显示总览
+    roleOverviewShortName = 0,    -- 默认关闭/否
+    roleOverviewShowNote = 0,     -- 默认关闭/否
     roleOverviewShowNote_width = 100,
     roleOverviewShowNote_useClassColor = 1,
 }
@@ -662,7 +663,7 @@ function ns.InitRoleOverviewOptions()
 
     yOffset = yOffset - 35
 
-    -- 基础开关 - 行 4 (左侧：O键查询记录侧边栏，右侧：显示副本简称)
+    -- 基础开关 - 行 4 (左侧：O键查询记录侧边栏，右侧：小地图图标悬停显示总览)
     local btSearchList = CreateCheckButton("searchList", L["O键角色查询记录侧边栏"], content, 15, yOffset, {
         L["O键角色查询记录侧边栏"],
         L["开启时：在官方好友/查询（O键）面板右侧显示历史查询记录侧边栏与名单导出功能。"],
@@ -679,52 +680,22 @@ function ns.InitRoleOverviewOptions()
         end
     end)
 
-    local btShortName = CreateCheckButton("roleOverviewShortName", L["显示副本简称"], content, 260, yOffset, {
+    local btHover = CreateCheckButton("roleOverviewMinimapHover", L["小地图图标悬停显示总览"], content, 260, yOffset, {
+        L["小地图图标悬停显示总览"],
+        L["开启时：鼠标悬停在小地图图标上时即时弹出角色总览浮窗，移开鼠标自动隐去。\n关闭时：仅能通过点击（中键/Ctrl+左键）呼出角色总览。"],
+    }, function(val)
+        RefreshRoleOverview()
+    end, 1)
+
+    yOffset = yOffset - 35
+
+    -- 基础开关 - 行 5 (左侧：显示副本简称，右侧：快捷键绑定)
+    local btShortName = CreateCheckButton("roleOverviewShortName", L["显示副本简称"], content, 15, yOffset, {
         L["显示副本简称"],
         L["开启时：角色总览列标题使用紧凑副本简称（如 SW、TOC、NAXX）。"],
         L["关闭时：使用完整副本名称。"],
     }, function(val)
         RefreshRoleOverview()
-    end)
-
-    yOffset = yOffset - 35
-
-    -- 基础开关 - 行 5 (左侧：显示角色备注 + 宽度设置，右侧：快捷键绑定)
-    local btNote = CreateCheckButton("roleOverviewShowNote", L["显示角色备注"], content, 15, yOffset, {
-        L["显示角色备注"],
-        L["在角色名字后面，增加显示一段自定义文本。"],
-        " ",
-        L["使用方法：/BGR，把角色总览面板固定，然后鼠标点击角色对应的备注栏即可修改备注。"]
-    }, function(val)
-        RefreshRoleOverview()
-    end, 0)
-
-    local tWidth = content:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
-    tWidth:SetFont(BIAOGE_TEXT_FONT, 13, "OUTLINE")
-    tWidth:SetPoint("LEFT", btNote.text, "RIGHT", 8, 0)
-    tWidth:SetText(L["宽度:"])
-
-    local editWidth = CreateFrame("EditBox", nil, content, "InputBoxTemplate")
-    editWidth:SetSize(36, 20)
-    editWidth:SetPoint("LEFT", tWidth, "RIGHT", 4, 0)
-    editWidth:SetAutoFocus(false)
-    editWidth:SetNumeric(true)
-    editWidth:SetMaxLetters(3)
-    local curW = (BiaoGe and BiaoGe.options and tonumber(BiaoGe.options.roleOverviewShowNote_width)) or 100
-    BiaoGe.options.roleOverviewShowNote_width = curW
-    editWidth:SetText(tostring(curW))
-    editWidth:SetScript("OnTextChanged", function(self)
-        local w = tonumber(self:GetText()) or 100
-        w = math.max(40, math.min(300, w))
-        BiaoGe.options.roleOverviewShowNote_width = w
-        RefreshRoleOverview()
-    end)
-    editWidth:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
-    editWidth:SetScript("OnEnterPressed", function(self) self:ClearFocus() end)
-    editWidth:SetScript("OnEditFocusLost", function(self)
-        local w = tonumber(self:GetText()) or 100
-        w = math.max(40, math.min(300, w))
-        self:SetText(tostring(w))
     end)
 
     local tBind = content:CreateFontString()
@@ -762,9 +733,49 @@ function ns.InitRoleOverviewOptions()
     btnBind:SetScript("OnShow", UpdateBindKeyText)
     UpdateBindKeyText()
 
+    yOffset = yOffset - 35
+
+    -- 基础开关 - 行 6 (左侧：显示角色备注 + 宽度设置)
+    local btNote = CreateCheckButton("roleOverviewShowNote", L["显示角色备注"], content, 15, yOffset, {
+        L["显示角色备注"],
+        L["在角色名字后面，增加显示一段自定义文本。"],
+        " ",
+        L["使用方法：/BGR，把角色总览面板固定，然后鼠标点击角色对应的备注栏即可修改备注。"]
+    }, function(val)
+        RefreshRoleOverview()
+    end, 0)
+
+    local tWidth = content:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
+    tWidth:SetFont(BIAOGE_TEXT_FONT, 13, "OUTLINE")
+    tWidth:SetPoint("LEFT", btNote.text, "RIGHT", 8, 0)
+    tWidth:SetText(L["宽度:"])
+
+    local editWidth = CreateFrame("EditBox", nil, content, "InputBoxTemplate")
+    editWidth:SetSize(36, 20)
+    editWidth:SetPoint("LEFT", tWidth, "RIGHT", 4, 0)
+    editWidth:SetAutoFocus(false)
+    editWidth:SetNumeric(true)
+    editWidth:SetMaxLetters(3)
+    local curW = (BiaoGe and BiaoGe.options and tonumber(BiaoGe.options.roleOverviewShowNote_width)) or 100
+    BiaoGe.options.roleOverviewShowNote_width = curW
+    editWidth:SetText(tostring(curW))
+    editWidth:SetScript("OnTextChanged", function(self)
+        local w = tonumber(self:GetText()) or 100
+        w = math.max(40, math.min(300, w))
+        BiaoGe.options.roleOverviewShowNote_width = w
+        RefreshRoleOverview()
+    end)
+    editWidth:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
+    editWidth:SetScript("OnEnterPressed", function(self) self:ClearFocus() end)
+    editWidth:SetScript("OnEditFocusLost", function(self)
+        local w = tonumber(self:GetText()) or 100
+        w = math.max(40, math.min(300, w))
+        self:SetText(tostring(w))
+    end)
+
     yOffset = yOffset - 42
 
-    -- 基础开关 - 行 6 (左侧：角色总览排序方式 + 修改排序，右侧：角色总览缩放比例)
+    -- 基础开关 - 行 7 (左侧：角色总览排序方式 + 修改排序，右侧：角色总览缩放比例)
     local tSort = content:CreateFontString()
     tSort:SetFont(BIAOGE_TEXT_FONT, 13, "OUTLINE")
     tSort:SetPoint("TOPLEFT", content, 15, yOffset + 2)

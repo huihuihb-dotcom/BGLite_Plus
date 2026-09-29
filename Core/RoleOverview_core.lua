@@ -287,7 +287,7 @@ local function CreateItem(t_paizi, i, v, isNewUI)
         tex:SetAllPoints()
         tex:SetTexture(Texture)
         tex:SetTexCoord(unpack(BG.iconTexCoord))
-        if stackCount > 1 then
+        if stackCount and stackCount > 1 then
             f.count = f:CreateFontString()
             f.count:SetFont(BIAOGE_TEXT_FONT, 9, "OUTLINE")
             f.count:SetPoint("BOTTOMRIGHT", 1, 0)
@@ -308,6 +308,88 @@ local function CreateItem(t_paizi, i, v, isNewUI)
         f:SetScript("OnLeave", OnLeave)
     end)
 end
+
+local function SafeL(key, default)
+    local val = L and L[key]
+    if type(val) == "string" and val ~= "" then
+        return val
+    end
+    return default or key
+end
+
+local function CreateMoreItemsButton(t_paizi, displayIndex, info, titleName, isNewUI)
+    local totalCount = #info
+    local moreCount = totalCount - 3
+    if moreCount <= 0 then return end
+
+    local f = CreateFrame("Button", nil, BG.FBCDFrame, "BackdropTemplate")
+    f:SetSize(itemWidth, itemWidth)
+    f:SetPoint("RIGHT", t_paizi, "RIGHT", -(itemWidth + 0) * (displayIndex - 1), isNewUI and 0 or 1)
+    f:SetBackdrop({
+        bgFile = "Interface/Buttons/WHITE8X8",
+        edgeFile = "Interface/Tooltips/UI-Tooltip-Border",
+        edgeSize = 8,
+        insets = { left = 1, right = 1, top = 1, bottom = 1 }
+    })
+    f:SetBackdropColor(0.1, 0.1, 0.15, 0.95)
+    f:SetBackdropBorderColor(0.8, 0.6, 0.2, 0.9)
+
+    local text = f:CreateFontString(nil, "OVERLAY")
+    text:SetFont(BIAOGE_TEXT_FONT, 9, "OUTLINE")
+    text:SetPoint("CENTER", 0, 0)
+    text:SetText(format("|cff00FF7F+%d|r", moreCount))
+    f.text = text
+
+    f:SetScript("OnEnter", function(self)
+        self:SetBackdropColor(0.25, 0.25, 0.35, 0.98)
+        self:SetBackdropBorderColor(1, 0.85, 0.2, 1)
+
+        local isRight = (BG.ButtonIsInRight and BG.ButtonIsInRight(self)) or (SafeButtonIsInRight and SafeButtonIsInRight(self))
+        GameTooltip:SetOwner(self, isRight and "ANCHOR_LEFT" or "ANCHOR_RIGHT", 0, 0)
+        GameTooltip:ClearLines()
+
+        local title = titleName or SafeL("升级物品", "升级物品")
+        GameTooltip:AddDoubleLine(BG.STC_g1(title) .. " " .. SafeL("全量清单", "全量清单"), format("|cff00FF7F" .. SafeL("共 %d 件", "共 %d 件") .. "|r", totalCount))
+        GameTooltip:AddLine(" ")
+
+        for idx, itemData in ipairs(info) do
+            local itemID = itemData.id
+            local count = itemData.count or 1
+            local name, link, quality, _, _, _, _, _, _, texture = GetItemInfo(itemID)
+            if not texture then
+                texture = select(5, GetItemInfoInstant(itemID)) or 134400
+            end
+            if not name then
+                name = select(1, GetItemInfoInstant(itemID)) or ("item:" .. itemID)
+            end
+            local r, g, b, hex = GetItemQualityColor(quality or 1)
+            local iconStr = format("|T%s:14:14:0:0:64:64:5:59:5:59|t", texture)
+            local nameStr = format("|c%s[%s]|r", hex or "ffffffff", name)
+            local countStr = (count and count > 1) and format("|cffFFFFFF x%d|r", count) or "|cff808080 x1|r"
+
+            local prefix = (idx <= 3) and format("|cff808080%d.|r ", idx) or format("|cff00FF7F%d.|r ", idx)
+
+            GameTooltip:AddDoubleLine(prefix .. iconStr .. " " .. nameStr, countStr)
+        end
+
+        GameTooltip:AddLine(" ")
+        GameTooltip:AddLine(SafeL("提示：主面板直接展示前3件，悬停此处查看全部清单。", "提示：主面板直接展示前3件，悬停此处查看全部清单。"), 1, 1, 1, true)
+        GameTooltip:Show()
+    end)
+
+    f:SetScript("OnLeave", function(self)
+        self:SetBackdropColor(0.1, 0.1, 0.15, 0.95)
+        self:SetBackdropBorderColor(0.8, 0.6, 0.2, 0.9)
+        GameTooltip:Hide()
+    end)
+
+    -- 异步预热物品数据
+    for _, itemData in ipairs(info) do
+        if itemData.id then
+            Item:CreateFromItemID(itemData.id):ContinueOnItemLoad(function() end)
+        end
+    end
+end
 local defaultEquipSlots = {
     weapons = { "16", "17", "18" },
     trinkets = { "13", "14" },
@@ -326,7 +408,7 @@ local function CreateEquipIcons(t_paizi, equip, slots, isNewUI)
             displayIndex = displayIndex + 1
             local f = CreateFrame("Frame", nil, BG.FBCDFrame, "BackdropTemplate")
             f:SetSize(itemWidth, itemWidth)
-            f:SetPoint("LEFT", t_paizi, "LEFT", (displayIndex - 1) * (itemWidth + 1), isNewUI and 0 or 1)
+            f:SetPoint("RIGHT", t_paizi, "RIGHT", -(displayIndex - 1) * (itemWidth + 0), isNewUI and 0 or 1)
             f:EnableMouse(true)
             f.link = info.link
 
@@ -937,7 +1019,11 @@ end
 
 function BG.RefreshFBCDFrame()
     if BG.FBCDFrame and BG.FBCDFrame:IsVisible() then
-        BG.SetFBCD(nil, nil, true, true)
+        if BG.FBCDFrame.click then
+            BG.SetFBCD(nil, nil, true, true)
+        else
+            BG.FBCDFrame:Hide()
+        end
     end
 end
 
@@ -1030,6 +1116,10 @@ function BG.SetFBCD(self, position, click, refresh)
     else
         if BG.FBCDFrame and BG.FBCDFrame.click and BG.FBCDFrame:IsVisible() then
             return
+        end
+        -- 核心防御：若当前已存在悬浮态 FBCDFrame，重建前先彻底隐藏，杜绝孤儿 Frame 残留
+        if BG.FBCDFrame then
+            BG.FBCDFrame:Hide()
         end
     end
     BG.UpdateFBCD()
@@ -1285,6 +1375,46 @@ function BG.SetFBCD(self, position, click, refresh)
             else
                 mainFrame:SetPoint("BOTTOMRIGHT", self, "TOPRIGHT", 0, 0)
             end
+
+            -- 核心守护：智能离开自愈守护器 (Hover Auto-Dismiss Watchdog)
+            -- 彻底消除“悬停过久没有鼠标动作”、“OnLeave 丢失”、“小地图收纳插件收起图标”等造成的悬浮框锁死残留
+            local anchorButton = self
+            local elapsedSum = 0
+            mainFrame:SetScript("OnUpdate", function(f, elapsed)
+                elapsedSum = elapsedSum + elapsed
+                if elapsedSum < 0.08 then return end
+                elapsedSum = 0
+
+                -- 1. 战斗状态下强制隐去悬浮窗
+                if InCombatLockdown() then
+                    f:Hide()
+                    return
+                end
+
+                -- 2. 锚点按钮已隐藏（如被 SexyMap/MBB 收起或切地图）
+                if anchorButton and not anchorButton:IsVisible() then
+                    f:Hide()
+                    return
+                end
+
+                -- 3. 鼠标位置检测：
+                -- 只要鼠标在触发源小地图按钮上，或者鼠标移动到了悬浮窗内部（支持查看装备/角色），保持显示
+                local isOverSource = anchorButton and anchorButton:IsVisible() and anchorButton:IsMouseOver()
+                local isOverSelf = f:IsVisible() and f:IsMouseOver()
+
+                if not isOverSource and not isOverSelf then
+                    f._outDelay = (f._outDelay or 0) + 0.08
+                    if f._outDelay >= 0.25 then -- 离开 0.25 秒缓冲后平滑关闭
+                        f:Hide()
+                    end
+                else
+                    f._outDelay = 0
+                end
+            end)
+
+            mainFrame:HookScript("OnHide", function(f)
+                f:SetScript("OnUpdate", nil)
+            end)
         end
     end
     CheckBiaoGeAccounts(mainFrame)
@@ -1894,11 +2024,21 @@ function BG.SetFBCD(self, position, click, refresh)
                     t_paizi:SetText(" ")
                     if type(info) == "table" then
                         if next(info) then
+                            local totalCount = #info
+                            local maxDisplay = 3
+                            local directCount = math.min(maxDisplay, totalCount)
+                            local hasMore = totalCount > maxDisplay
+
                             if isNewUI then
-                                t_paizi:SetWidth(itemWidth * #info)
+                                t_paizi:SetWidth(itemWidth * (directCount + (hasMore and 1 or 0)))
                             end
-                            for i, v in ipairs(info) do
-                                CreateItem(t_paizi, i, v, isNewUI)
+
+                            for i = 1, directCount do
+                                CreateItem(t_paizi, i, info[i], isNewUI)
+                            end
+
+                            if hasMore then
+                                CreateMoreItemsButton(t_paizi, directCount + 1, info, vv.name, isNewUI)
                             end
                         else
                             t_paizi:SetText(L["无"])

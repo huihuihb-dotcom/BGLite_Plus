@@ -63,7 +63,7 @@ local function DoSaveReputation()
         if BG.FBCDFrame.click then
             pcall(BG.SetFBCD, nil, nil, true, true)
         else
-            pcall(BG.SetFBCD, BG.FBCDFrame.lastSelf, BG.FBCDFrame.lastPosition)
+            pcall(function() BG.FBCDFrame:Hide() end)
         end
     end
 end

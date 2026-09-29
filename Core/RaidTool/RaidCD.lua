@@ -30,7 +30,7 @@ RaidCD.SPELLS = {
 
     -- 牧师 (PRIEST)
     { id = 33206, name = "痛苦压制", class = "PRIEST", cd = 180, category = "external", default = true,  icon = 135936, desc = "戒律牧40%单体高额减伤" },
-    { id = 47788, name = "守护之魂", class = "PRIEST", cd = 180, category = "external", default = true,  icon = 237542, desc = "神牧翅膀，免死并回血50%" },
+    { id = 47788, name = "守护之魂", class = "PRIEST", cd = 180, category = "external", default = false,  icon = 237542, desc = "神牧翅膀，免死并回血50%" },
     { id = 64843, name = "神圣赞美诗", class = "PRIEST", cd = 480, category = "raid",   default = false, icon = 237540, desc = "全团持续高额抬血" },
     { id = 64901, name = "希望圣歌", class = "PRIEST", cd = 360, category = "raid",     default = false, icon = 237541, desc = "全团回蓝与提升法力上限" },
 
@@ -112,6 +112,75 @@ local function GetSpellHyperlink(spellId, fallbackName)
     return format("|cff71d5ff|Hspell:%d|h[%s]|h|r", spellId, name)
 end
 RaidCD.GetSpellHyperlink = GetSpellHyperlink
+
+--------------------------------------------------------------------------------
+-- 通用聊天频道判定与安全发送引擎 (支持随机地下城/随机团队/战场副本频道 INSTANCE_CHAT)
+--------------------------------------------------------------------------------
+local function GetAnnounceChannel(allowEmote)
+    -- 1. 优先判定是否处于随机地下城 / 随机团队 / 战场等匹配副本队伍 (Instance Group)
+    local isInstanceGroup = false
+    local category = _G.LE_PARTY_CATEGORY_INSTANCE or 2
+    if IsInGroup and pcall(IsInGroup, category) and IsInGroup(category) then
+        isInstanceGroup = true
+    elseif IsInRaid and pcall(IsInRaid, category) and IsInRaid(category) then
+        isInstanceGroup = true
+    elseif IsPartyLFG and IsPartyLFG() then
+        isInstanceGroup = true
+    elseif HasLFGRestrictions and HasLFGRestrictions() then
+        isInstanceGroup = true
+    end
+
+    if isInstanceGroup then
+        return "INSTANCE_CHAT"
+    end
+
+    -- 2. 常规团队
+    if IsInRaid and IsInRaid() then
+        return "RAID"
+    end
+
+    -- 3. 常规小队
+    if IsInGroup and IsInGroup() then
+        return "PARTY"
+    end
+
+    -- 4. 未组队状态
+    return allowEmote and "EMOTE" or nil
+end
+RaidCD.GetAnnounceChannel = GetAnnounceChannel
+
+local function SafeSendChatMessage(msg, targetChannel)
+    if not targetChannel or targetChannel == "EMOTE" then
+        if DEFAULT_CHAT_FRAME then
+            DEFAULT_CHAT_FRAME:AddMessage("|cff00BFFF" .. msg .. "|r")
+        end
+        return true
+    end
+
+    local ok = pcall(SendChatMessage, msg, targetChannel)
+    if not ok then
+        -- 智能降级兜底：若 INSTANCE_CHAT 发送失败，降级尝试常规队伍；反之若 PARTY 失败，尝试 INSTANCE_CHAT
+        local fallbackChannel
+        if targetChannel == "INSTANCE_CHAT" then
+            fallbackChannel = (IsInRaid and IsInRaid()) and "RAID" or ((IsInGroup and IsInGroup()) and "PARTY" or nil)
+        elseif targetChannel == "PARTY" or targetChannel == "RAID" then
+            fallbackChannel = "INSTANCE_CHAT"
+        end
+
+        if fallbackChannel then
+            local retryOk = pcall(SendChatMessage, msg, fallbackChannel)
+            if retryOk then return true end
+        end
+
+        -- 若所有公共频道均失败，本地输出防止吞消息并给出提示
+        if DEFAULT_CHAT_FRAME then
+            DEFAULT_CHAT_FRAME:AddMessage("|cff00BFFF" .. msg .. "|r")
+        end
+        return false
+    end
+    return true
+end
+RaidCD.SafeSendChatMessage = SafeSendChatMessage
 
 --------------------------------------------------------------------------------
 -- 2. 数据库与配置项初始化
@@ -1031,12 +1100,8 @@ local function GetOrCreateSpellButton(row, sIdx)
             local rem = RaidCD.GetCooldownRemaining(self.pName, self.sDef.id)
             local statusStr = (rem > 0) and ("冷却剩余: " .. RaidCD.FormatRemainingTime(rem)) or "已就绪"
             local msg = format("[BGLite 技能监控] %s 的 %s %s", self.pName, self.sDef.name, statusStr)
-            local channel = IsInRaid() and "RAID" or (IsInGroup() and "PARTY" or "EMOTE")
-            if channel == "EMOTE" then
-                DEFAULT_CHAT_FRAME:AddMessage("|cff00BFFF" .. msg .. "|r")
-            else
-                SendChatMessage(msg, channel)
-            end
+            local channel = RaidCD.GetAnnounceChannel(true)
+            RaidCD.SafeSendChatMessage(msg, channel)
             BG.PlaySound(1)
         end
     end)
@@ -1185,7 +1250,7 @@ function RaidCD.BroadcastCooldownStatus()
         return
     end
 
-    local channel = (IsInRaid and IsInRaid()) and "RAID" or ((IsInGroup and IsInGroup()) and "PARTY" or nil)
+    local channel = RaidCD.GetAnnounceChannel(false)
     local lines = {}
 
     -- 模式1：存在冷却中的技能 -> 播报倒计时列表
@@ -1222,11 +1287,12 @@ function RaidCD.BroadcastCooldownStatus()
     if channel then
         for i, line in ipairs(lines) do
             C_Timer.After((i - 1) * 0.35, function()
-                SendChatMessage(line, channel)
+                RaidCD.SafeSendChatMessage(line, channel)
             end)
         end
         if DEFAULT_CHAT_FRAME then
-            DEFAULT_CHAT_FRAME:AddMessage("|cff00BFFF[BGLite PLUS]|r 已成功将技能状态通报至 [" .. (channel == "RAID" and "团队" or "小队") .. "] 频道！")
+            local chName = (channel == "INSTANCE_CHAT" and "副本") or (channel == "RAID" and "团队") or "小队"
+            DEFAULT_CHAT_FRAME:AddMessage("|cff00BFFF[BGLite PLUS]|r 已成功将技能状态通报至 [" .. chName .. "] 频道！")
         end
     else
         -- 单人未组队状态下本地预览输出
@@ -2049,12 +2115,8 @@ function RaidCD.UpdatePanelUI()
                             local rem = RaidCD.GetCooldownRemaining(self.pName, sDef.id)
                             local statusStr = (rem > 0) and ("冷却剩余: " .. FormatRemainingTime(rem)) or "【已就绪】"
                             local msg = format("[BGLite 技能监控] %s 的 %s %s", self.pName, sDef.name, statusStr)
-                            local channel = IsInRaid() and "RAID" or (IsInGroup() and "PARTY" or "EMOTE")
-                            if channel == "EMOTE" then
-                                DEFAULT_CHAT_FRAME:AddMessage("|cff00BFFF" .. msg .. "|r")
-                            else
-                                SendChatMessage(msg, channel)
-                            end
+                            local channel = RaidCD.GetAnnounceChannel(true)
+                            RaidCD.SafeSendChatMessage(msg, channel)
                             BG.PlaySound(1)
                         end
                     end)

@@ -649,21 +649,8 @@ function TeamInfo.SetYY(yy)
     TeamInfo.UpdateUI()
 end
 
--- 统一团队信息调试日志打印 (受团队工具中的“开启调试日志”复选框控制)
+-- 统一团队信息调试日志接口 (已清理日志功能)
 function TeamInfo.Log(msg, colorHex)
-    local isDebug = false
-    if ns.RaidTool and ns.RaidTool.IsDebugEnabled then
-        isDebug = ns.RaidTool.IsDebugEnabled()
-    elseif BiaoGe and BiaoGe.RaidTool and BiaoGe.RaidTool.debugLog ~= nil then
-        isDebug = (BiaoGe.RaidTool.debugLog == true or BiaoGe.RaidTool.debugLog == 1)
-    elseif BiaoGe and BiaoGe.options and BiaoGe.options.raidToolDebugLog ~= nil then
-        isDebug = (BiaoGe.options.raidToolDebugLog == 1 or BiaoGe.options.raidToolDebugLog == true)
-    end
-
-    if isDebug then
-        local c = colorHex or "00FFCC"
-        DEFAULT_CHAT_FRAME:AddMessage("|cff" .. c .. "[BGLite 团队信息] " .. msg .. "|r")
-    end
 end
 
 -- 7. 进团/组队主触发逻辑 (含团长变更追踪与进本自动绑定)

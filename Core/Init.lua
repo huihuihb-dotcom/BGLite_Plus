@@ -32,6 +32,18 @@ local function HookMinimap()
     if not plugin then return end
 
     plugin.OnEnter = function(self)
+        -- 检查开关：若玩家关闭了小地图悬停预览，仅显示快捷操作说明 Tooltip
+        if BiaoGe and BiaoGe.options and BiaoGe.options["roleOverviewMinimapHover"] == 0 then
+            GameTooltip:SetOwner(self, "ANCHOR_BOTTOMLEFT", 0, 0)
+            GameTooltip:ClearLines()
+            GameTooltip:AddLine(BG.STC_g1(L["BGLite"]) .. " " .. BG.STC_white(L["金团表格"]), 1, 1, 1)
+            GameTooltip:AddLine(L["|cffFFFFFF左键：|r打开/关闭金团表格"], 1, 0.82, 0)
+            GameTooltip:AddLine(L["|cffFFFFFF中键 / Ctrl+左键：|r打开/关闭角色总览"], 1, 0.82, 0)
+            GameTooltip:AddLine(L["|cffFFFFFF右键：|r打开插件设置选项"], 1, 0.82, 0)
+            GameTooltip:Show()
+            return
+        end
+
         if (not BG.FBCDall_table or #BG.FBCDall_table == 0) and BG.RoleOverviewUI then
             pcall(BG.RoleOverviewUI)
         end
@@ -52,6 +64,11 @@ local function HookMinimap()
 
     local orig_OnClick = plugin.OnClick
     plugin.OnClick = function(self, button)
+        -- 任何点击动作（左键/中键/右键）均立即强行关闭未固定的悬浮窗
+        if BG.FBCDFrame and not BG.FBCDFrame.click then
+            SafeHide(BG.FBCDFrame)
+        end
+
         if button == "MiddleButton" or (button == "LeftButton" and IsControlKeyDown()) then
             if BG.SetFBCD then
                 BG.SetFBCD(nil, nil, true)
@@ -63,6 +80,13 @@ local function HookMinimap()
             if BG.MainFrame and not BG.MainFrame:IsVisible() then
                 RestoreLastTab()
             end
+        end
+        if button == "RightButton" then
+            -- 右键打开设置前，再次确保悬浮窗和 Tooltip 100% 隐藏
+            if BG.FBCDFrame and not BG.FBCDFrame.click then
+                SafeHide(BG.FBCDFrame)
+            end
+            GameTooltip:Hide()
         end
         if orig_OnClick then
             orig_OnClick(self, button)
@@ -211,6 +235,12 @@ local function InitPlusUI()
     if BG.OpenOption and not ns.hasHookedOpenOptionForRaidTool then
         ns.hasHookedOpenOptionForRaidTool = true
         hooksecurefunc(BG, "OpenOption", function()
+            -- 打开设置面板时，立即安全隐藏未固定的悬浮窗
+            if BG.FBCDFrame and not BG.FBCDFrame.click then
+                SafeHide(BG.FBCDFrame)
+            end
+            GameTooltip:Hide()
+
             if ns.InitRaidToolOthersOptions then
                 ns.InitRaidToolOthersOptions()
             end
