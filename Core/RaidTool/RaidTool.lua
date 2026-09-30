@@ -1243,10 +1243,13 @@ function RaidTool.CreateUI(parent)
         BG.PlaySound(1)
     end)
 
-    -- 4. 战术站位图专属控制区块 (奥杜尔/通用)
-    local rMap = ns.RaidMap or _G.RaidMap or (BG and BG.RaidMap)
-    if rMap and rMap.CreateRaidToolPanel then
-        rMap.CreateRaidToolPanel(leftPanel)
+    -- 4. 战术站位图专属控制区块 (当前版本设为隐藏，待实战完善后随后续版本正式发布)
+    local ENABLE_RAID_MAP_UI = false
+    if ENABLE_RAID_MAP_UI then
+        local rMap = ns.RaidMap or _G.RaidMap or (BG and BG.RaidMap)
+        if rMap and rMap.CreateRaidToolPanel then
+            rMap.CreateRaidToolPanel(leftPanel)
+        end
     end
 
 
@@ -1369,47 +1372,36 @@ function RaidTool.CreateUI(parent)
     cbLockHUD:SetScript("OnLeave", GameTooltip_Hide)
     if ns.RaidCD then ns.RaidCD.cbLockHUD = cbLockHUD end
 
-    local btnOpenRaidMap = BG.CreateButton(rightPanel)
-    btnOpenRaidMap:SetSize(86, 26)
-    btnOpenRaidMap:SetPoint("LEFT", cbLockHUD.text, "RIGHT", 10, 0)
-    btnOpenRaidMap:SetText(BG.STC_b1("战术站位图"))
-    btnOpenRaidMap:SetScript("OnClick", function()
-        DEFAULT_CHAT_FRAME:AddMessage("|cff00ffff[RaidTool Click]|r 战术站位图按钮被点击")
-        local rMap = ns.RaidMap or _G.RaidMap or (BG and BG.RaidMap)
-        DEFAULT_CHAT_FRAME:AddMessage(string.format("  rMap 检查: ns.RaidMap=%s, _G.RaidMap=%s, BG.RaidMap=%s",
-            tostring(ns.RaidMap ~= nil), tostring(_G.RaidMap ~= nil), tostring(BG and BG.RaidMap ~= nil)))
+    if ENABLE_RAID_MAP_UI then
+        local btnOpenRaidMap = BG.CreateButton(rightPanel)
+        btnOpenRaidMap:SetSize(86, 26)
+        btnOpenRaidMap:SetPoint("LEFT", cbLockHUD.text, "RIGHT", 10, 0)
+        btnOpenRaidMap:SetText(BG.STC_b1("战术站位图"))
+        btnOpenRaidMap:SetScript("OnClick", function()
+            local rMap = ns.RaidMap or _G.RaidMap or (BG and BG.RaidMap)
+            if not rMap then return end
 
-        if not rMap then
-            DEFAULT_CHAT_FRAME:AddMessage("|cffff0000[RaidTool Click Error]|r 未找到 RaidMap 模块！请检查 RaidMap.lua 是否被加载！")
-            return
-        end
-
-        local mapF = BG.RaidMapFrame or _G["BG.RaidMapFrame"]
-        DEFAULT_CHAT_FRAME:AddMessage(string.format("  mapF 初始状态: %s (是否显示: %s)", tostring(mapF ~= nil), tostring(mapF and mapF:IsShown())))
-
-        if mapF and mapF:IsShown() then
-            DEFAULT_CHAT_FRAME:AddMessage("  mapF 当前已在显示状态，执行 Hide()")
-            mapF:Hide()
-        else
-            DEFAULT_CHAT_FRAME:AddMessage("  准备打开看板，调用 LoadBossTacticalPreset...")
-            if rMap.LoadBossTacticalPreset then
-                rMap.LoadBossTacticalPreset(5)
-            elseif rMap.ShowDemoTacticalBoard then
-                rMap.ShowDemoTacticalBoard()
+            local mapF = BG.RaidMapFrame or _G["BG.RaidMapFrame"]
+            if mapF and mapF:IsShown() then
+                mapF:Hide()
             else
-                DEFAULT_CHAT_FRAME:AddMessage("|cffff0000[RaidTool Click Error]|r rMap 中既无 LoadBossTacticalPreset 也无 ShowDemoTacticalBoard！")
+                if rMap.LoadBossTacticalPreset then
+                    rMap.LoadBossTacticalPreset(5)
+                elseif rMap.ShowDemoTacticalBoard then
+                    rMap.ShowDemoTacticalBoard()
+                end
             end
-        end
-        BG.PlaySound(1)
-    end)
-    btnOpenRaidMap:SetScript("OnEnter", function(self)
-        GameTooltip:SetOwner(self, "ANCHOR_TOP")
-        GameTooltip:AddLine(BG.STC_b1("打开战术站位图看板"), 1, 1, 1)
-        GameTooltip:AddLine("即时呼出或关闭奥杜尔/通用战术站位看板，展示团长最新排布站位。", 0.85, 0.85, 0.85, true)
-        GameTooltip:AddLine("快捷命令: /bgmap 或 /tjmap", 0.2, 1, 0.4, true)
-        GameTooltip:Show()
-    end)
-    btnOpenRaidMap:SetScript("OnLeave", GameTooltip_Hide)
+            BG.PlaySound(1)
+        end)
+        btnOpenRaidMap:SetScript("OnEnter", function(self)
+            GameTooltip:SetOwner(self, "ANCHOR_TOP")
+            GameTooltip:AddLine(BG.STC_b1("打开战术站位图看板"), 1, 1, 1)
+            GameTooltip:AddLine("即时呼出或关闭奥杜尔/通用战术站位看板，展示团长最新排布站位。", 0.85, 0.85, 0.85, true)
+            GameTooltip:AddLine("快捷命令: /bgmap 或 /tjmap", 0.2, 1, 0.4, true)
+            GameTooltip:Show()
+        end)
+        btnOpenRaidMap:SetScript("OnLeave", GameTooltip_Hide)
+    end
 
     -- 8 个小队网格 (加大单格尺寸至 142x145, 队员槽位高度 23px, 文字 14px)
     local slotButtons = {}

@@ -30,7 +30,7 @@ local SPEC_INFO = {
     -- 圣骑士
     ["PALADIN"] = {
         [1] = { name = "神圣", role = "healer", icon = "Interface\\Icons\\spell_holy_holybolt" },
-        [2] = { name = "防护", role = "tank", icon = "Interface\\Icons\\spell_holy_auraofprotection" },
+        [2] = { name = "防护", role = "tank", icon = "Interface\\Icons\\spell_holy_devotionaura" },
         [3] = { name = "惩戒", role = "melee", icon = "Interface\\Icons\\spell_holy_auraoflight" },
     },
     -- 猎人

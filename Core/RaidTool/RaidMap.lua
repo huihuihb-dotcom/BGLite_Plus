@@ -11,7 +11,6 @@ local RaidMap = ns.RaidMap or _G.RaidMap or {}
 ns.RaidMap = RaidMap
 _G.RaidMap = RaidMap
 if BG then BG.RaidMap = RaidMap end
-DEFAULT_CHAT_FRAME:AddMessage("|cff00BFFF[RaidMap]|r RaidMap.lua 正文开始执行初始化...")
 
 local channelPrefix = "BiaoGeAIMap"
 local channelCount = 10
@@ -195,18 +194,205 @@ function RaidMap.GetRegisteredFBs()
 end
 
 --------------------------------------------------------------------------------
--- 4. 智能动态弹性阵型排布引擎 (Dynamic Elastic Tactical Layout Engine)
+-- 4. 战术阵型与队形几何计算引擎 (Tactical Formation Engine)
 --------------------------------------------------------------------------------
+local currentMeleeMode = "group"
+local currentRangedMode = "arc"
+
+function RaidMap.GetCurrentMeleeMode()
+    return currentMeleeMode or "group"
+end
+
+function RaidMap.GetCurrentRangedMode()
+    return currentRangedMode or "arc"
+end
+
+RaidMap.MELEE_MODE_NAMES = {
+    ["group"] = "聚合群组 (9人合一)",
+    ["arc"] = "背后弧形展开 (个人散点)",
+    ["double_row"] = "背后双排错位 (紧凑层次)",
+    ["two_groups"] = "左右分翼站位 (分边转火)",
+    ["compact"] = "背后集中单点 (极度抱团)",
+}
+
+RaidMap.RANGED_MODE_NAMES = {
+    ["arc"] = "南侧大扇形",
+    ["two_groups"] = "左右双堆站位",
+    ["campfire"] = "中场环形抱团",
+    ["matrix"] = "后方整齐方阵",
+}
+
+-- 核心算法：近战组几何坐标计算 (彻底消除人员重叠)
+function RaidMap.CalculateMeleePositions(bossX, bossY, cx, cy, nMelee, mode)
+    mode = mode or "arc"
+    local spots = {}
+    if nMelee <= 0 then return spots end
+    local bX = bossX or cx
+    local bY = bossY or (cy + 90)
+
+    if mode == "double_row" then
+        local front = {}
+        local back = {}
+        for i = 1, nMelee do
+            if i % 2 == 1 then table.insert(front, i) else table.insert(back, i) end
+        end
+        local n1 = #front
+        local n2 = #back
+        local span1 = math.min(240, math.max(60, n1 * 40))
+        local step1 = (n1 > 1) and (span1 / (n1 - 1)) or 0
+        local startX1 = bX - span1 / 2
+        for idx, origI in ipairs(front) do
+            local x = (n1 == 1) and bX or (startX1 + (idx - 1) * step1)
+            local y = bY - 48
+            spots[origI] = { x = x, y = y }
+        end
+        local span2 = math.min(240, math.max(60, n2 * 40))
+        local step2 = (n2 > 1) and (span2 / (n2 - 1)) or 0
+        local startX2 = bX - span2 / 2
+        for idx, origI in ipairs(back) do
+            local x = (n2 == 1) and bX or (startX2 + (idx - 1) * step2)
+            local y = bY - 76
+            spots[origI] = { x = x, y = y }
+        end
+
+    elseif mode == "two_groups" then
+        local leftIdxs = {}
+        local rightIdxs = {}
+        for i = 1, nMelee do
+            if i <= math.ceil(nMelee / 2) then
+                table.insert(leftIdxs, i)
+            else
+                table.insert(rightIdxs, i)
+            end
+        end
+        local nL = #leftIdxs
+        local nR = #rightIdxs
+        local spanL = math.min(100, math.max(40, nL * 30))
+        local stepL = (nL > 1) and (spanL / (nL - 1)) or 0
+        local startXL = (bX - 75) - spanL / 2
+        for idx, origI in ipairs(leftIdxs) do
+            local x = (nL == 1) and (bX - 75) or (startXL + (idx - 1) * stepL)
+            local y = bY - 55 - (idx % 2 == 0 and 12 or 0)
+            spots[origI] = { x = x, y = y }
+        end
+        local spanR = math.min(100, math.max(40, nR * 30))
+        local stepR = (nR > 1) and (spanR / (nR - 1)) or 0
+        local startXR = (bX + 75) - spanR / 2
+        for idx, origI in ipairs(rightIdxs) do
+            local x = (nR == 1) and (bX + 75) or (startXR + (idx - 1) * stepR)
+            local y = bY - 55 - (idx % 2 == 0 and 12 or 0)
+            spots[origI] = { x = x, y = y }
+        end
+
+    elseif mode == "compact" then
+        for i = 1, nMelee do
+            local offX = (i - (nMelee + 1) / 2) * 12
+            local offY = (i % 2 == 0 and -6 or 0)
+            spots[i] = { x = bX + offX, y = bY - 55 + offY }
+        end
+
+    else -- "arc" (默认背后弧形展开，彻底消除遮挡)
+        if nMelee == 1 then
+            spots[1] = { x = bX, y = bY - 60 }
+        else
+            local totalAngle = math.min(140, math.max(55, nMelee * 15))
+            local halfAng = totalAngle / 2
+            local stepAng = totalAngle / (nMelee - 1)
+            for i = 1, nMelee do
+                local curAngDeg = -halfAng + (i - 1) * stepAng
+                local curAngRad = math.rad(curAngDeg)
+                local radius = (i % 2 == 0) and 74 or 58
+                local x = bX + math.sin(curAngRad) * radius
+                local y = bY - math.cos(curAngRad) * radius
+                spots[i] = { x = x, y = y }
+            end
+        end
+    end
+    return spots
+end
+
+-- 核心算法：远程组几何坐标计算 (大扇形防炸弹互炸/双堆/方阵/抱团)
+function RaidMap.CalculateRangedPositions(cx, cy, nRanged, mode, opts)
+    mode = mode or "arc"
+    opts = opts or {}
+    local spots = {}
+    if nRanged <= 0 then return spots end
+
+    if mode == "two_groups" then
+        local groupA = opts.groupA or { x = -145, y = -90 }
+        local groupB = opts.groupB or { x = 145, y = -90 }
+        local leftGroup = {}
+        local rightGroup = {}
+        for i = 1, nRanged do
+            if i % 2 == 1 then table.insert(leftGroup, i) else table.insert(rightGroup, i) end
+        end
+        for idx, origI in ipairs(leftGroup) do
+            local col = (idx - 1) % 3
+            local row = math.floor((idx - 1) / 3)
+            local gx = cx + groupA.x + (col - 1) * 36
+            local gy = cy + groupA.y - row * 34
+            spots[origI] = { x = gx, y = gy }
+        end
+        for idx, origI in ipairs(rightGroup) do
+            local col = (idx - 1) % 3
+            local row = math.floor((idx - 1) / 3)
+            local gx = cx + groupB.x + (col - 1) * 36
+            local gy = cy + groupB.y - row * 34
+            spots[origI] = { x = gx, y = gy }
+        end
+
+    elseif mode == "campfire" then
+        local cp = opts.campfirePos or { x = 0, y = 0 }
+        for i = 1, nRanged do
+            local ang = math.pi * 0.15 + (i - 1) / math.max(1, nRanged - 1) * (math.pi * 0.7)
+            local radius = 85 + (i % 2 == 0 and 22 or 0)
+            local rx = cx + cp.x + math.cos(ang) * radius
+            local ry = cy - 35 - math.sin(ang) * (radius * 0.6)
+            spots[i] = { x = rx, y = ry }
+        end
+
+    elseif mode == "matrix" then
+        local perRow = 5
+        local nRows = math.ceil(nRanged / perRow)
+        for i = 1, nRanged do
+            local row = math.floor((i - 1) / perRow)
+            local col = (i - 1) % perRow
+            local rowCount = (row == nRows - 1) and (nRanged - row * perRow) or perRow
+            local rowSpan = (rowCount - 1) * 48
+            local rx = cx - rowSpan / 2 + col * 48
+            local ry = cy - 65 - row * 38
+            spots[i] = { x = rx, y = ry }
+        end
+
+    else -- "arc" (默认南侧大扇形大分散)
+        for i = 1, nRanged do
+            local ang = (nRanged == 1) and (math.pi * 0.5) or (math.pi * 0.10 + (i - 1) / (nRanged - 1) * (math.pi * 0.80))
+            local radius = (i % 2 == 0) and 230 or 195
+            local rx = cx + math.cos(ang) * radius
+            local ry = cy - 70 - math.sin(ang) * (radius * 0.55)
+            spots[i] = { x = rx, y = ry }
+        end
+    end
+    return spots
+end
+
 function RaidMap.GenerateDynamicTacticalSpots(cx, cy, opts, rosterData)
     opts = opts or {}
     local spots = {}
 
     local tankY = opts.tankY or 160
     local meleeY = opts.meleeY or 35
-    local rangedMode = opts.rangedMode or "arc"
+    local bossOffsetY = opts.bossOffsetY or 90
+    local userMeleeMode = (RaidMap.GetCurrentMeleeMode and RaidMap.GetCurrentMeleeMode()) or currentMeleeMode or "group"
+    local userRangedMode = (RaidMap.GetCurrentRangedMode and RaidMap.GetCurrentRangedMode()) or currentRangedMode or "arc"
+    local meleeMode = userMeleeMode or opts.meleeMode or "group"
+    local rangedMode = opts.rangedMode or userRangedMode or "arc"
+
+    local bossX = cx
+    local bossY = cy + bossOffsetY
 
     ----------------------------------------------------------------------------
-    -- A. 未组队或未提供实际阵容：提供标准的 25 人示范规范架构 (全职业名字各异，绝不重复)
+    -- A. 未组队或未提供实际阵容：提供标准的 25 人示范规范架构
     ----------------------------------------------------------------------------
     if not rosterData then
         -- 1. 坦克组 3 人
@@ -228,7 +414,7 @@ function RaidMap.GenerateDynamicTacticalSpots(cx, cy, opts, rosterData)
         }
         for _, h in ipairs(rhList) do table.insert(spots, { x = h.x, y = h.y, num = h.num, role = "healer", name = h.name, cls = h.cls }) end
 
-        -- 4. 近战输出 6 人 (BOSS 正背后脚后跟紧凑等分排布)
+        -- 4. 近战输出 6 人 (算法自适应)
         local defaultMelees = {
             { name = "近战-狂暴", cls = "WARRIOR" },
             { name = "近战-潜行A", cls = "ROGUE" },
@@ -237,13 +423,26 @@ function RaidMap.GenerateDynamicTacticalSpots(cx, cy, opts, rosterData)
             { name = "近战-猫德", cls = "DRUID" },
             { name = "近战-增强", cls = "SHAMAN" },
         }
-        for i, m in ipairs(defaultMelees) do
-            local mx = cx - 65 + (i - 1) * 26
-            local myOffset = (i % 2 == 0) and -6 or 0
-            table.insert(spots, { x = mx, y = cy + meleeY + myOffset, num = tostring(8 + i), role = "melee", name = m.name, cls = m.cls })
+        if meleeMode == "group" then
+            table.insert(spots, {
+                x = bossX,
+                y = bossY - 55,
+                num = "⚔️",
+                role = "melee_group",
+                name = string.format("近战组 (%d人)", #defaultMelees),
+                cls = "WARRIOR",
+                specIcon = "Interface\\Icons\\ability_warrior_bladestorm",
+                members = defaultMelees,
+            })
+        else
+            local mSpots = RaidMap.CalculateMeleePositions(bossX, bossY, cx, cy, #defaultMelees, meleeMode)
+            for i, m in ipairs(defaultMelees) do
+                local sp = mSpots[i] or { x = cx, y = cy + meleeY }
+                table.insert(spots, { x = sp.x, y = sp.y, num = tostring(8 + i), role = "melee", name = m.name, cls = m.cls })
+            end
         end
 
-        -- 5. 远程输出 11 人
+        -- 5. 远程输出 11 人 (算法自适应)
         local defaultRangeds = {
             { name = "远程-法师A", cls = "MAGE" },
             { name = "远程-法师B", cls = "MAGE" },
@@ -257,37 +456,17 @@ function RaidMap.GenerateDynamicTacticalSpots(cx, cy, opts, rosterData)
             { name = "远程-邪DK",   cls = "DEATHKNIGHT" },
             { name = "远程-术士C", cls = "WARLOCK" },
         }
-
-        if rangedMode == "two_groups" then
-            for i, r in ipairs(defaultRangeds) do
-                local isA = (i % 2 == 1)
-                local gx = isA and (cx - 130) or (cx + 130)
-                local gy = cy - 90
-                local offX = (math.floor((i - 1) / 2) % 3 - 1) * 14
-                local offY = (math.floor((i - 1) / 6)) * 14
-                table.insert(spots, { x = gx + offX, y = gy - offY, num = tostring(14 + i), role = "ranged", name = r.name, cls = r.cls })
-            end
-        elseif rangedMode == "campfire" then
-            for i, r in ipairs(defaultRangeds) do
-                local ang = math.pi * 0.15 + (i - 1) / 10 * (math.pi * 0.7)
-                local rx = cx + math.cos(ang) * 125
-                local ry = cy - 25 - math.sin(ang) * 75
-                table.insert(spots, { x = rx, y = ry, num = tostring(14 + i), role = "ranged", name = r.name, cls = r.cls })
-            end
-        else
-            for i, r in ipairs(defaultRangeds) do
-                local ang = math.pi * 0.12 + (i - 1) / 10 * (math.pi * 0.76)
-                local rx = cx + math.cos(ang) * 230 * (i % 2 == 0 and 1.0 or 0.85)
-                local ry = cy - 70 - math.sin(ang) * 115
-                table.insert(spots, { x = rx, y = ry, num = tostring(14 + i), role = "ranged", name = r.name, cls = r.cls })
-            end
+        local rSpots = RaidMap.CalculateRangedPositions(cx, cy, #defaultRangeds, rangedMode, opts)
+        for i, r in ipairs(defaultRangeds) do
+            local sp = rSpots[i] or { x = cx, y = cy - 70 }
+            table.insert(spots, { x = sp.x, y = sp.y, num = tostring(14 + i), role = "ranged", name = r.name, cls = r.cls })
         end
 
         return spots
     end
 
     ----------------------------------------------------------------------------
-    -- B. 传入了实际团队阵容 (真实开荒团队)：动态弹性排布，一人一位不多不少！
+    -- B. 传入了实际团队阵容：动态弹性排布
     ----------------------------------------------------------------------------
     local tanks = rosterData.tanks or {}
     local tankHealers = rosterData.tankHealers or {}
@@ -350,50 +529,35 @@ function RaidMap.GenerateDynamicTacticalSpots(cx, cy, opts, rosterData)
 
     local nMelee = #melees
     if nMelee > 0 then
-        local totalSpan = math.min(180, math.max(60, nMelee * 24))
-        local step = (nMelee > 1) and (totalSpan / (nMelee - 1)) or 0
-        local startX = cx - totalSpan / 2
-        for i, m in ipairs(melees) do
-            local mx = (nMelee == 1) and cx or (startX + (i - 1) * step)
-            local myOffset = (i % 2 == 0) and -6 or 0
-            table.insert(spots, { x = mx, y = cy + meleeY + myOffset, num = tostring(spotIndex), role = "melee", name = m.name, cls = m.class, specIcon = m.specIcon })
+        if meleeMode == "group" then
+            table.insert(spots, {
+                x = bossX,
+                y = bossY - 55,
+                num = "⚔️",
+                role = "melee_group",
+                name = string.format("近战组 (%d人)", nMelee),
+                cls = "WARRIOR",
+                specIcon = "Interface\\Icons\\ability_warrior_bladestorm",
+                members = melees,
+            })
             spotIndex = spotIndex + 1
+        else
+            local mSpots = RaidMap.CalculateMeleePositions(bossX, bossY, cx, cy, nMelee, meleeMode)
+            for i, m in ipairs(melees) do
+                local sp = mSpots[i] or { x = cx, y = cy + meleeY }
+                table.insert(spots, { x = sp.x, y = sp.y, num = tostring(spotIndex), role = "melee", name = m.name, cls = m.class, specIcon = m.specIcon })
+                spotIndex = spotIndex + 1
+            end
         end
     end
 
     local nRanged = #rangeds
     if nRanged > 0 then
-        if rangedMode == "two_groups" then
-            local groupA = opts.groupA or { x = -130, y = -90 }
-            local groupB = opts.groupB or { x = 130, y = -90 }
-            for i, r in ipairs(rangeds) do
-                local isA = (i % 2 == 1)
-                local gx = isA and (cx + groupA.x) or (cx + groupB.x)
-                local gy = cy + (isA and groupA.y or groupB.y)
-                local offX = (math.floor((i - 1) / 2) % 3 - 1) * 14
-                local offY = (math.floor((i - 1) / 6)) * 14
-                table.insert(spots, { x = gx + offX, y = gy - offY, num = tostring(spotIndex), role = "ranged", name = r.name, cls = r.class, specIcon = r.specIcon })
-                spotIndex = spotIndex + 1
-            end
-        elseif rangedMode == "campfire" then
-            local cp = opts.campfirePos or { x = 0, y = 0 }
-            for i, r in ipairs(rangeds) do
-                local ang = math.pi * 0.15 + (i - 1) / math.max(1, nRanged - 1) * (math.pi * 0.7)
-                local radius = 80 + (i % 2 == 0 and 20 or 0)
-                local rx = cx + cp.x + math.cos(ang) * radius
-                local ry = cy + cp.y - 25 - math.sin(ang) * (radius * 0.6)
-                table.insert(spots, { x = rx, y = ry, num = tostring(spotIndex), role = "ranged", name = r.name, cls = r.class, specIcon = r.specIcon })
-                spotIndex = spotIndex + 1
-            end
-        else
-            for i, r in ipairs(rangeds) do
-                local ang = (nRanged == 1) and (math.pi * 0.5) or (math.pi * 0.12 + (i - 1) / (nRanged - 1) * (math.pi * 0.76))
-                local radius = (i % 2 == 0) and 230 or 195
-                local rx = cx + math.cos(ang) * radius
-                local ry = cy - 70 - math.sin(ang) * (radius * 0.5)
-                table.insert(spots, { x = rx, y = ry, num = tostring(spotIndex), role = "ranged", name = r.name, cls = r.class, specIcon = r.specIcon })
-                spotIndex = spotIndex + 1
-            end
+        local rSpots = RaidMap.CalculateRangedPositions(cx, cy, nRanged, rangedMode, opts)
+        for i, r in ipairs(rangeds) do
+            local sp = rSpots[i] or { x = cx, y = cy - 70 }
+            table.insert(spots, { x = sp.x, y = sp.y, num = tostring(spotIndex), role = "ranged", name = r.name, cls = r.class, specIcon = r.specIcon })
+            spotIndex = spotIndex + 1
         end
     end
 
@@ -668,8 +832,15 @@ function RaidMap.InitDB()
         BiaoGe.RaidMap = {
             enableAutoPopup = true,
             mapScale = 0.85,
+            meleeMode = "group",
+            rangedMode = "arc",
         }
+    else
+        if not BiaoGe.RaidMap.meleeMode then BiaoGe.RaidMap.meleeMode = "group" end
+        if not BiaoGe.RaidMap.rangedMode then BiaoGe.RaidMap.rangedMode = "arc" end
     end
+    currentMeleeMode = BiaoGe.RaidMap.meleeMode
+    currentRangedMode = BiaoGe.RaidMap.rangedMode
 end
 
 -- 优雅纯净的降级战术刻度网格 (仅当无真实地图时作为安全兜底，绝无任何怪异小地图边框与多余矩形)
@@ -729,13 +900,10 @@ local function DrawProceduralTacticalGrid(parent, width, height, bossID)
 end
 
 function RaidMap.CreateUI()
-    DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00[RaidMap]|r CreateUI() 被调用, mapFrame 是否已存在: " .. tostring(mapFrame ~= nil))
     if mapFrame then
-        DEFAULT_CHAT_FRAME:AddMessage("  mapFrame 实例已存在，直接返回! IsShown=" .. tostring(mapFrame:IsShown()))
         return mapFrame
     end
     RaidMap.InitDB()
-    DEFAULT_CHAT_FRAME:AddMessage("  RaidMap.InitDB() 执行完成，开始构建主 Frame: BG.RaidMapFrame")
 
     local frameName = "BG.RaidMapFrame"
     local f = CreateFrame("Frame", frameName, UIParent, "BackdropTemplate")
@@ -756,15 +924,12 @@ function RaidMap.CreateUI()
         local p4 = saved[4] or 0
         local p5 = saved[5] or 40
         f:SetPoint(p1, p2, p3, p4, p5)
-        DEFAULT_CHAT_FRAME:AddMessage(string.format("  设置已保存坐标: point=%s, relPoint=%s, x=%s, y=%s", tostring(p1), tostring(p3), tostring(p4), tostring(p5)))
     else
         f:SetPoint(unpack(f.defaultPoint))
-        DEFAULT_CHAT_FRAME:AddMessage("  设置默认居中坐标: CENTER, UIParent, CENTER, 0, 40")
     end
 
     local savedScale = BiaoGe.RaidMap and BiaoGe.RaidMap.mapScale or 0.85
     f:SetScale(savedScale)
-    DEFAULT_CHAT_FRAME:AddMessage(string.format("  设置缩放 Scale=%s, FrameStrata=%s", tostring(savedScale), tostring(f:GetFrameStrata())))
 
     f:SetBackdrop({
         bgFile = "Interface/ChatFrame/ChatFrameBackground",
@@ -995,9 +1160,11 @@ function RaidMap.CreateUI()
     btnReset:SetPoint("LEFT", btnAuto, "RIGHT", 4, 0)
     btnReset:SetText(BG.STC_w1("恢复默认"))
     btnReset:SetScript("OnClick", function()
+        currentMeleeMode = "group"
+        currentRangedMode = "arc"
         RaidMap.LoadBossTacticalPreset(currentBossID, nil)
         BG.PlaySound(1)
-        DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00[BGLite 战术站位图]|r 已恢复当前 BOSS 的官方推荐标准 25 人示范战术阵型！")
+        DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00[BGLite 战术站位图]|r 已恢复当前 BOSS 的官方推荐标准 25 人示范战术阵型 (近战聚合+远程扇形)！")
     end)
     btnReset:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_TOP")
@@ -1006,12 +1173,96 @@ function RaidMap.CreateUI()
         GameTooltip:Show()
     end)
     btnReset:SetScript("OnLeave", GameTooltip_Hide)
-    f.btnReset = btnReset
+    -- 3.3 阵型布局与快速组织下拉菜单
+    local dropFormation = LibBG and LibBG:Create_UIDropDownMenu("BG_RaidMapFormationDropdown", editControls) or CreateFrame("Frame", "BG_RaidMapFormationDropdown", editControls, "UIDropDownMenuTemplate")
+    f.dropFormation = dropFormation
 
-    -- 3.3 一键全团广播 (SendMap)
+    local function InitFormationMenu(self, level)
+        local infoM = LibBG and LibBG:UIDropDownMenu_CreateInfo() or UIDropDownMenu_CreateInfo()
+        infoM.text = "|cffffd100── 近战组队形编排 ──|r"
+        infoM.isTitle = true
+        infoM.notCheckable = true
+        if LibBG then LibBG:UIDropDownMenu_AddButton(infoM, level) else UIDropDownMenu_AddButton(infoM, level) end
+
+        local meleeList = {
+            { id = "group", name = "★ 聚合群组模式 (近战组 9人合一)" },
+            { id = "arc", name = "背后弧形展开 (个人独立散点)" },
+            { id = "double_row", name = "背后双排错位 (紧凑双层)" },
+            { id = "two_groups", name = "左右分翼站位 (左侧/右侧)" },
+            { id = "compact", name = "背后集中单点 (极度抱团)" },
+        }
+        for _, m in ipairs(meleeList) do
+            local mi = LibBG and LibBG:UIDropDownMenu_CreateInfo() or UIDropDownMenu_CreateInfo()
+            mi.text = m.name
+            mi.checked = (currentMeleeMode == m.id)
+            mi.func = function()
+                RaidMap.ApplyFormation(m.id, nil)
+            end
+            if LibBG then LibBG:UIDropDownMenu_AddButton(mi, level) else UIDropDownMenu_AddButton(mi, level) end
+        end
+
+        local infoR = LibBG and LibBG:UIDropDownMenu_CreateInfo() or UIDropDownMenu_CreateInfo()
+        infoR.text = "|cffffd100── 远程组队形编排 ──|r"
+        infoR.isTitle = true
+        infoR.notCheckable = true
+        if LibBG then LibBG:UIDropDownMenu_AddButton(infoR, level) else UIDropDownMenu_AddButton(infoR, level) end
+
+        local rangedList = {
+            { id = "arc", name = "南侧大扇形 (防点名大分散)" },
+            { id = "two_groups", name = "左右双堆站位 (左翼/右翼分群)" },
+            { id = "campfire", name = "中场环形抱团 (吃增益/集合)" },
+            { id = "matrix", name = "后方整齐方阵 (三行矩阵)" },
+        }
+        for _, r in ipairs(rangedList) do
+            local ri = LibBG and LibBG:UIDropDownMenu_CreateInfo() or UIDropDownMenu_CreateInfo()
+            ri.text = r.name
+            ri.checked = (currentRangedMode == r.id)
+            ri.func = function()
+                RaidMap.ApplyFormation(nil, r.id)
+            end
+            if LibBG then LibBG:UIDropDownMenu_AddButton(ri, level) else UIDropDownMenu_AddButton(ri, level) end
+        end
+
+        local infoOpt = LibBG and LibBG:UIDropDownMenu_CreateInfo() or UIDropDownMenu_CreateInfo()
+        infoOpt.text = "|cff00ff00★ 一键智能排布 (近战聚合+远程扇形)|r"
+        infoOpt.notCheckable = true
+        infoOpt.func = function()
+            RaidMap.ApplyFormation("group", "arc")
+        end
+        if LibBG then LibBG:UIDropDownMenu_AddButton(infoOpt, level) else UIDropDownMenu_AddButton(infoOpt, level) end
+    end
+
+    if LibBG and LibBG.UIDropDownMenu_Initialize then
+        LibBG:UIDropDownMenu_Initialize(dropFormation, InitFormationMenu)
+    else
+        UIDropDownMenu_Initialize(dropFormation, InitFormationMenu)
+    end
+
+    local btnFormation = BG.CreateButton(editControls)
+    btnFormation:SetSize(90, 24)
+    btnFormation:SetPoint("LEFT", btnReset, "RIGHT", 4, 0)
+    btnFormation:SetText(BG.STC_b1("阵型布局 ▾"))
+    btnFormation:SetScript("OnClick", function(self)
+        if LibBG and LibBG.ToggleDropDownMenu then
+            LibBG:ToggleDropDownMenu(1, nil, dropFormation, self, 0, 0)
+        else
+            ToggleDropDownMenu(1, nil, dropFormation, self, 0, 0)
+        end
+        BG.PlaySound(1)
+    end)
+    btnFormation:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_TOP")
+        GameTooltip:AddLine("近战与远程组队形快速组织", 1, 1, 1)
+        GameTooltip:AddLine("一键快速重组当前地图上的近战组与远程组队形：\n• 近战组：背后弧形展开 (推荐/防重叠)、双排错位、左右分翼、集中单点；\n• 远程组：南侧大扇形 (防点名大分散)、左右双堆、环形抱团、三行矩阵。\n排列规则将写入广播协议，全团同步实时生效！", 0.85, 0.85, 0.85, true)
+        GameTooltip:Show()
+    end)
+    btnFormation:SetScript("OnLeave", GameTooltip_Hide)
+    f.btnFormation = btnFormation
+
+    -- 3.4 一键全团广播 (SendMap)
     local btnSend = BG.CreateButton(editControls)
     btnSend:SetSize(86, 24)
-    btnSend:SetPoint("LEFT", btnReset, "RIGHT", 4, 0)
+    btnSend:SetPoint("LEFT", btnFormation, "RIGHT", 4, 0)
     btnSend:SetText(BG.STC_g1("广播全团"))
     btnSend:SetScript("OnClick", function()
         RaidMap.BroadcastCurrentMap()
@@ -1118,8 +1369,6 @@ function RaidMap.CreateUI()
     mapFrame = f
     BG.RaidMapFrame = f
     _G["BG.RaidMapFrame"] = f
-    DEFAULT_CHAT_FRAME:AddMessage(string.format("  CreateUI() 实例化完毕! Width=%s, Height=%s, FrameStrata=%s",
-        tostring(f:GetWidth()), tostring(f:GetHeight()), tostring(f:GetFrameStrata())))
     return f
 end
 
@@ -1129,7 +1378,7 @@ end
 local function CreateDraggablePointIcon(parent, level, x, y, width, height, iconType, iconTex, coord,
                                        broderShow, broderColor,
                                        numText, numColor,
-                                       playerText, playerColor, role)
+                                       playerText, playerColor, role, members)
     local f = CreateFrame("Frame", nil, parent)
     f:SetSize(width, height)
     f:SetPoint("CENTER", parent, "TOPLEFT", x, y)
@@ -1138,9 +1387,11 @@ local function CreateDraggablePointIcon(parent, level, x, y, width, height, icon
     f.y = y
     f.role = role
     f.playerText = playerText
+    f.members = members
 
     local isBoss = (role == "boss")
     local isNpc = (role == "npc")
+    local isMeleeGroup = (role == "melee_group")
 
     local icon = f:CreateTexture(nil, "ARTWORK")
     icon:SetAllPoints()
@@ -1161,7 +1412,7 @@ local function CreateDraggablePointIcon(parent, level, x, y, width, height, icon
 
     -- 序号与名字
     local numFS = f:CreateFontString(nil, "OVERLAY")
-    numFS:SetFont(BIAOGE_TEXT_FONT, 13, "OUTLINE")
+    numFS:SetFont(BIAOGE_TEXT_FONT, isMeleeGroup and 14 or 13, "OUTLINE")
     numFS:SetPoint("CENTER", 0, 0)
     numFS:SetText(numText or "")
     if numColor and #numColor >= 3 then
@@ -1170,11 +1421,13 @@ local function CreateDraggablePointIcon(parent, level, x, y, width, height, icon
     f.numFS = numFS
 
     local nameFS = f:CreateFontString(nil, "OVERLAY")
-    nameFS:SetFont(BIAOGE_TEXT_FONT, isBoss and 13 or 12, "OUTLINE")
+    nameFS:SetFont(BIAOGE_TEXT_FONT, (isBoss or isMeleeGroup) and 13 or 12, "OUTLINE")
     nameFS:SetPoint("TOP", f, "BOTTOM", 0, -2)
     nameFS:SetText(playerText or "")
     if isBoss then
         nameFS:SetTextColor(1, 0.35, 0.35)
+    elseif isMeleeGroup then
+        nameFS:SetTextColor(1, 0.85, 0.1)
     elseif playerColor and #playerColor >= 3 then
         nameFS:SetTextColor(unpack(playerColor))
     end
@@ -1236,6 +1489,29 @@ local function CreateDraggablePointIcon(parent, level, x, y, width, height, icon
                 GameTooltip:AddLine(" ")
                 GameTooltip:AddLine(bossData.tacticTip, 1, 0.85, 0.1, true)
             end
+        elseif isMeleeGroup then
+            GameTooltip:AddLine("【⚔️ 战术群组】 " .. (playerText ~= "" and playerText or "近战组"), 1, 0.85, 0.1)
+            GameTooltip:AddLine("战术职责: BOSS 正背后脚后跟集中输出 (全员集合点)", 0.6, 0.85, 1)
+            if self.members and #self.members > 0 then
+                GameTooltip:AddLine(" ")
+                GameTooltip:AddLine(string.format("包含近战成员 (%d人):", #self.members), 1, 1, 1)
+                for _, m in ipairs(self.members) do
+                    local mName = m.name or "队员"
+                    local mCls = m.class
+                    local cCode = "|cffffffff"
+                    if mCls and RAID_CLASS_COLORS and RAID_CLASS_COLORS[mCls] then
+                        cCode = RAID_CLASS_COLORS[mCls].colorStr and ("|c" .. RAID_CLASS_COLORS[mCls].colorStr) or cCode
+                    end
+                    local specText = m.specName and (" (" .. m.specName .. ")") or ""
+                    GameTooltip:AddLine("  • " .. cCode .. mName .. "|r" .. "|cffaaaaaa" .. specText .. "|r")
+                end
+            end
+            if not parent.isViewMode then
+                GameTooltip:AddLine(" ")
+                GameTooltip:AddLine("提示: 拖动此标记可整体调整近战集合点；点击顶部【阵型布局】可随时展开为个人散点", 0.3, 1, 0.5, true)
+            end
+            GameTooltip:Show()
+            return
         elseif isNpc then
             GameTooltip:AddLine("【战术标记】 " .. (playerText ~= "" and playerText or "核心地标"), 0.3, 0.9, 1)
         else
@@ -1282,19 +1558,50 @@ local function CreateDraggablePointIcon(parent, level, x, y, width, height, icon
     return f
 end
 
+-- 8. 阵型实时重组与排布执行器 (ApplyFormation)
+function RaidMap.ApplyFormation(newMeleeMode, newRangedMode)
+    if newMeleeMode then currentMeleeMode = newMeleeMode end
+    if newRangedMode then currentRangedMode = newRangedMode end
+    if BiaoGe and BiaoGe.RaidMap then
+        BiaoGe.RaidMap.meleeMode = currentMeleeMode
+        BiaoGe.RaidMap.rangedMode = currentRangedMode
+    end
+
+    local f = mapFrame
+    if not f or not f:IsShown() then return end
+
+    -- 重新加载当前 BOSS 站位，根据新的队形模式重新生成点位（支持群组与散点无缝切换）
+    RaidMap.LoadBossTacticalPreset(currentBossID, RaidMap.lastRosterData)
+
+    local mName = RaidMap.MELEE_MODE_NAMES and RaidMap.MELEE_MODE_NAMES[currentMeleeMode] or currentMeleeMode
+    local rName = RaidMap.RANGED_MODE_NAMES and RaidMap.RANGED_MODE_NAMES[currentRangedMode] or currentRangedMode
+    DEFAULT_CHAT_FRAME:AddMessage(string.format("|cff00BFFF[战术站位图]|r 已应用队形布局：近战【%s】、远程【%s】。点击【广播全团】即可推送到全团！", mName, rName))
+end
+
 function RaidMap.RefreshSelfHighlight(f)
     if not f or not f.icons then return end
     local myName = UnitName("player")
     local mySpot = nil
+    local isMeleeGroupMember = false
+
     for _, icon in ipairs(f.icons) do
+        local isMine = false
         local pText = icon.playerText or (icon.nameFS and icon.nameFS:GetText())
         if pText and pText ~= "" and myName and (pText == myName) then
-            if not mySpot then
-                mySpot = icon
-                if icon.glow then icon.glow:Show() end
-            else
-                if icon.glow then icon.glow:Hide() end
+            isMine = true
+        elseif icon.role == "melee_group" and icon.members and myName then
+            for _, m in ipairs(icon.members) do
+                if m.name == myName then
+                    isMine = true
+                    isMeleeGroupMember = true
+                    break
+                end
             end
+        end
+
+        if isMine and not mySpot then
+            mySpot = icon
+            if icon.glow then icon.glow:Show() end
         else
             if icon.glow then icon.glow:Hide() end
         end
@@ -1302,8 +1609,12 @@ function RaidMap.RefreshSelfHighlight(f)
 
     if mySpot then
         if f.selfNotice then
-            local numStr = (mySpot.numFS and mySpot.numFS:GetText() ~= "") and (mySpot.numFS:GetText() .. "号位") or "指定点"
-            f.selfNotice:SetText(string.format("【您的专属站位: %s (%s)】", mySpot.playerText, numStr))
+            if isMeleeGroupMember then
+                f.selfNotice:SetText("【您的专属站位: ⚔️ 近战集合组 (BOSS正背后输出)】")
+            else
+                local numStr = (mySpot.numFS and mySpot.numFS:GetText() ~= "") and (mySpot.numFS:GetText() .. "号位") or "指定点"
+                f.selfNotice:SetText(string.format("【您的专属站位: %s (%s)】", mySpot.playerText or "", numStr))
+            end
         end
     else
         local bossData = RaidMap.GetBoss(currentBossID)
@@ -1318,15 +1629,10 @@ end
 -- 8. 核心 BOSS 专属预设构建与贴图加载器
 --------------------------------------------------------------------------------
 function RaidMap.LoadBossTacticalPreset(bossID, rosterData)
-    DEFAULT_CHAT_FRAME:AddMessage(string.format("|cff00ff00[RaidMap]|r LoadBossTacticalPreset() 启动: bossID=%s", tostring(bossID)))
     local f = RaidMap.CreateUI()
-    if not f then
-        DEFAULT_CHAT_FRAME:AddMessage("|cffff0000[RaidMap Error]|r CreateUI 返回了 nil！")
-        return
-    end
+    if not f then return end
     bossID = bossID or 5
     currentBossID = bossID
-    DEFAULT_CHAT_FRAME:AddMessage(string.format("  当前首领 bossID=%s, 开始准备画布与战术点...", tostring(currentBossID)))
 
     local width, height = 780, 560
     f.originalWidth = width
@@ -1337,6 +1643,7 @@ function RaidMap.LoadBossTacticalPreset(bossID, rosterData)
     if not rosterData and RaidMap.GetAutoRosterData and GetNumGroupMembers() > 0 then
         rosterData = RaidMap.GetAutoRosterData()
     end
+    RaidMap.lastRosterData = rosterData
 
     -- 从数据中心按需提取当前 BOSS 战术数据
     local bossData = RaidMap.GetBoss(bossID)
@@ -1413,9 +1720,11 @@ function RaidMap.LoadBossTacticalPreset(bossID, rosterData)
             end
             local classIcons = RaidMap.CLASS_ICONS or {}
             local iconTex = s.specIcon or (s.cls and classIcons[s.cls]) or "Interface\\Icons\\INV_Misc_QuestionMark"
-            local iconSz = (s.role == "tank") and 30 or 28
+            local isMeleeGroup = (s.role == "melee_group")
+            local iconSz = (s.role == "tank") and 30 or (isMeleeGroup and 36 or 28)
             local pointIcon = CreateDraggablePointIcon(f, 3, s.x, s.y, iconSz, iconSz, "tex", iconTex, nil,
-                                                      1, { cr, cg, cb }, s.num or "", { 1, 1, 1 }, s.name or "", { cr, cg, cb }, s.role or "player")
+                                                      1, { cr, cg, cb }, s.num or "", { 1, 1, 1 }, s.name or "", { cr, cg, cb }, s.role or "player", s.members)
+            pointIcon.members = s.members
             pointIcon.isTankHealer = s.isTankHealer
         end
     end
@@ -1424,8 +1733,6 @@ function RaidMap.LoadBossTacticalPreset(bossID, rosterData)
     RaidMap.SetViewMode(false)
     f:Show()
     f:Raise()
-    DEFAULT_CHAT_FRAME:AddMessage(string.format("|cff00ff00[RaidMap]|r f:Show() 已执行! IsShown=%s, Alpha=%s, FrameStrata=%s, Level=%s",
-        tostring(f:IsShown()), tostring(f:GetAlpha()), tostring(f:GetFrameStrata()), tostring(f:GetFrameLevel())))
 end
 
 RaidMap.ShowDemoTacticalBoard = function(bossID)
@@ -1577,7 +1884,8 @@ function RaidMap.BroadcastCurrentMap()
     local bossName = bossData and bossData.name or "奥杜尔战术"
     local FB = bossData and bossData.fb or "ULDtitan"
 
-    local str = format("%s&&%d&&%d&&%d&&%s&&%s^^", FB, currentBossID, mapWidth, mapHeight, "", bossName)
+    local fmtTag = string.format("FMT:m=%s,r=%s", currentMeleeMode or "arc", currentRangedMode or "arc")
+    local str = format("%s&&%d&&%d&&%d&&%s&&%s^^", FB, currentBossID, mapWidth, mapHeight, fmtTag, bossName)
 
     local iconStr = ""
     for _, icon in ipairs(f.icons) do
@@ -1667,6 +1975,7 @@ function RaidMap.RenderByCode(code, notSave, sender)
             FB = FB,
             bossIndex = bossIndex,
             bossName = bossName,
+            formation = childIndex,
         })
         while #BiaoGe.maps > 10 do table.remove(BiaoGe.maps, #BiaoGe.maps) end
     end
@@ -1682,7 +1991,21 @@ function RaidMap.RenderByCode(code, notSave, sender)
             UIDropDownMenu_SetText(f.dropBoss, bossName or "战术站位")
         end
     end
-    f.title:SetText(string.format("【%s】 %s", FB or "团本", bossName or "战术站位"))
+
+    local fmtNotice = ""
+    if childIndex and type(childIndex) == "string" and string.find(childIndex, "^FMT:") then
+        local mMode = string.match(childIndex, "m=([%a_]+)")
+        local rMode = string.match(childIndex, "r=([%a_]+)")
+        if mMode then currentMeleeMode = mMode end
+        if rMode then currentRangedMode = rMode end
+        local mName = RaidMap.MELEE_MODE_NAMES and RaidMap.MELEE_MODE_NAMES[currentMeleeMode]
+        local rName = RaidMap.RANGED_MODE_NAMES and RaidMap.RANGED_MODE_NAMES[currentRangedMode]
+        if mName or rName then
+            fmtNotice = string.format(" [%s | %s]", mName or "近战", rName or "远程")
+        end
+    end
+
+    f.title:SetText(string.format("【%s】 %s%s", FB or "团本", bossName or "战术站位", fmtNotice))
     f.selfNotice:SetText(string.format("(推送者: %s)", sender or "团长"))
 
     -- 接收端背景贴图渲染
@@ -1718,6 +2041,12 @@ function RaidMap.RenderByCode(code, notSave, sender)
                 width = tonumber(width) or 28
                 height = tonumber(height) or width
 
+                local isMeleeGroup = (numText == "⚔️" or (playerText and string.find(playerText, "近战组")))
+                if isMeleeGroup then
+                    width = 36
+                    height = 36
+                end
+
                 local coord = nil
                 if left and right and top and bottom and left ~= "" then
                     coord = { tonumber(left) or 0, tonumber(right) or 1, tonumber(top) or 0, tonumber(bottom) or 1 }
@@ -1727,9 +2056,20 @@ function RaidMap.RenderByCode(code, notSave, sender)
                 local numColor = { tonumber(num_r) or 1, tonumber(num_g) or 1, tonumber(num_b) or 1 }
                 local playerColor = { tonumber(player_r) or 1, tonumber(player_g) or 1, tonumber(player_b) or 1 }
 
-                CreateDraggablePointIcon(f, level, x, y, width, height, iconType, iconTex, coord,
+                local members = nil
+                if isMeleeGroup and RaidMap.GetAutoRosterData then
+                    local rData = RaidMap.GetAutoRosterData()
+                    if rData and rData.melees then
+                        members = rData.melees
+                    end
+                end
+
+                local role = (iconType == "boss" and "boss") or (isMeleeGroup and "melee_group") or "player"
+
+                local pointIcon = CreateDraggablePointIcon(f, level, x, y, width, height, iconType, iconTex, coord,
                                          tonumber(broderShow) or 1, broderColor,
-                                         numText, numColor, playerText, playerColor, (iconType == "boss" and "boss" or "player"))
+                                         numText, numColor, playerText, playerColor, role, members)
+                pointIcon.members = members
             end
         end
     end
@@ -1928,5 +2268,3 @@ SlashCmdList["BGLITEMAP"] = function()
         end
     end
 end
-
-DEFAULT_CHAT_FRAME:AddMessage("|cff00BFFF[RaidMap]|r RaidMap.lua 文件加载完成，命令 /bgmap 已注册")
