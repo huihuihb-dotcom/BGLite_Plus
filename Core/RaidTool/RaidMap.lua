@@ -1028,6 +1028,7 @@ function RaidMap.CreateUI()
     btnReset:SetScript("OnClick", function()
         wipe(RaidMap.assignedPlayers)
         wipe(RaidMap.meleeRoster)
+        if RaidMap.ClearCustomMarkers then RaidMap.ClearCustomMarkers(f) end
         RaidMap.LoadBossTacticalPreset(currentBossID, currentPhase)
         BG.PlaySound(1)
         DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00[BGLite 战术站位图]|r 已恢复当前阶段的标准预设点位！")
@@ -1035,7 +1036,7 @@ function RaidMap.CreateUI()
     btnReset:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_TOP")
         GameTooltip:AddLine("恢复默认站位阵型", 1, 1, 1)
-        GameTooltip:AddLine("一键重置当前 BOSS/阶段的所有点位，消除所有手动拖动位移并清空分配。", 0.85, 0.85, 0.85, true)
+        GameTooltip:AddLine("一键重置当前 BOSS/阶段的所有点位，消除所有手动拖动位移并清空分配与画板标注。", 0.85, 0.85, 0.85, true)
         GameTooltip:Show()
     end)
     btnReset:SetScript("OnLeave", GameTooltip_Hide)
@@ -1076,6 +1077,30 @@ function RaidMap.CreateUI()
     end)
     btnLock:SetScript("OnLeave", GameTooltip_Hide)
     f.btnLock = btnLock
+
+    -- 3.5 简易战术画板/标注工具箱入口按钮
+    local btnDraw = BG.CreateButton(editControls)
+    btnDraw:SetSize(86, 24)
+    btnDraw:SetPoint("LEFT", btnLock, "RIGHT", 4, 0)
+    btnDraw:SetText(BG.STC_b1("|TInterface\\TargetingFrame\\UI-RaidTargetingIcon_8:13:13:0:0|t 战术画板"))
+    btnDraw:SetScript("OnClick", function()
+        local bar = f.drawToolbar or RaidMap.CreateDrawToolbar(f)
+        if bar:IsShown() then
+            bar:Hide()
+        else
+            bar:Show()
+            bar:Raise()
+        end
+        BG.PlaySound(1)
+    end)
+    btnDraw:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_TOP")
+        GameTooltip:AddLine("打开简易战术画板", 1, 1, 1)
+        GameTooltip:AddLine("呼出悬浮战术标注工具箱：\n- 随心在画板上放置 8 大团队标记（骷髅、大饼、红叉等）；\n- 自由添加战术文字便签（可自定义输入战术提示）；\n- 快速添加单兵玩家标记；\n- 所有图元支持鼠标自由拖拽与右键快速删除！", 0.85, 0.85, 0.85, true)
+        GameTooltip:Show()
+    end)
+    btnDraw:SetScript("OnLeave", GameTooltip_Hide)
+    f.btnDraw = btnDraw
 
     -- 4. 历史战术预设下拉菜单
     local dropHistory = LibBG and LibBG:Create_UIDropDownMenu("BG_RaidMapHistoryDropdown", topControls) or CreateFrame("Frame", "BG_RaidMapHistoryDropdown", topControls, "UIDropDownMenuTemplate")
@@ -1213,6 +1238,7 @@ function RaidMap.CreateUI()
         f.isViewMode = isView
         if isView then
             f.editControls:Hide()
+            if f.drawToolbar then f.drawToolbar:Hide() end
             f.viewBadge:Show()
         else
             f.viewBadge:Hide()
@@ -1548,6 +1574,535 @@ function RaidMap.ShowPlayerPicker(icon)
     end
 end
 
+--------------------------------------------------------------------------------
+-- 7.1 自定义画板与战术标注系统 (团队标记 / 便签 / 玩家标志)
+--------------------------------------------------------------------------------
+RaidMap.customMarkers = {}
+
+function RaidMap.ClearCustomMarkers(f)
+    f = f or mapFrame or BG.RaidMapFrame
+    if not f or not f.customMarkers then return end
+    for _, marker in ipairs(f.customMarkers) do
+        marker:Hide()
+    end
+    wipe(f.customMarkers)
+end
+
+function RaidMap.ShowTextEditPopup(targetMarker, parent)
+    parent = parent or mapFrame or BG.RaidMapFrame
+    if not parent or not targetMarker then return end
+
+    if not parent.textEditDialog then
+        local dlg = CreateFrame("Frame", nil, parent, "BackdropTemplate")
+        dlg:SetSize(240, 86)
+        dlg:SetPoint("CENTER", parent, "CENTER", 0, 40)
+        dlg:SetFrameLevel(parent:GetFrameLevel() + 50)
+        if dlg.SetBackdrop then
+            dlg:SetBackdrop({
+                bgFile = "Interface\\ChatFrame\\ChatFrameBackground",
+                edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+                tile = true, tileSize = 16, edgeSize = 14,
+                insets = { left = 4, right = 4, top = 4, bottom = 4 },
+            })
+            dlg:SetBackdropColor(0.04, 0.06, 0.1, 0.96)
+            dlg:SetBackdropBorderColor(0.2, 0.7, 1, 0.95)
+        end
+        dlg:EnableMouse(true)
+
+        local title = dlg:CreateFontString(nil, "OVERLAY")
+        title:SetFont(BIAOGE_TEXT_FONT, 12, "OUTLINE")
+        title:SetPoint("TOPLEFT", 12, -8)
+        title:SetText(BG.STC_b1("编辑战术便签文字"))
+
+        local eb = CreateFrame("EditBox", nil, dlg, "InputBoxTemplate")
+        eb:SetSize(210, 22)
+        eb:SetPoint("TOPLEFT", 14, -28)
+        eb:SetAutoFocus(true)
+        eb:SetMaxLetters(30)
+        dlg.editBox = eb
+
+        local btnOk = BG.CreateButton(dlg)
+        btnOk:SetSize(60, 20)
+        btnOk:SetPoint("BOTTOMRIGHT", -78, 8)
+        btnOk:SetText(BG.STC_g1("确定"))
+
+        local btnCancel = BG.CreateButton(dlg)
+        btnCancel:SetSize(60, 20)
+        btnCancel:SetPoint("BOTTOMRIGHT", -12, 8)
+        btnCancel:SetText(BG.STC_w1("取消"))
+
+        local function Confirm()
+            local text = eb:GetText()
+            if dlg.targetMarker and dlg.targetMarker.UpdateText then
+                dlg.targetMarker:UpdateText(text ~= "" and text or "战术便签")
+            end
+            dlg:Hide()
+            BG.PlaySound(1)
+        end
+
+        btnOk:SetScript("OnClick", Confirm)
+        eb:SetScript("OnEnterPressed", Confirm)
+
+        local function Cancel()
+            dlg:Hide()
+            BG.PlaySound(1)
+        end
+        btnCancel:SetScript("OnClick", Cancel)
+        eb:SetScript("OnEscapePressed", Cancel)
+
+        parent.textEditDialog = dlg
+    end
+
+    local dlg = parent.textEditDialog
+    dlg.targetMarker = targetMarker
+    dlg.editBox:SetText(targetMarker.text or "战术便签")
+    dlg:Show()
+    dlg.editBox:SetFocus()
+    dlg.editBox:HighlightText()
+    dlg:Raise()
+end
+
+function RaidMap.ShowPlayerCustomMarkerPicker(anchorFrame)
+    local f = mapFrame or BG.RaidMapFrame
+    if not f then return end
+
+    local menu = {
+        {
+            text = "── 选择要标注的团队成员 ──",
+            isTitle = true,
+            notCheckable = true,
+        },
+    }
+
+    local rosterData = RaidMap.GetAutoRosterData()
+    local hasPlayer = false
+    if rosterData then
+        local all = {}
+        for _, t in ipairs(rosterData.tanks) do tinsert(all, t) end
+        for _, h in ipairs(rosterData.tankHealers) do tinsert(all, h) end
+        for _, h in ipairs(rosterData.raidHealers) do tinsert(all, h) end
+        for _, r in ipairs(rosterData.rangeds) do tinsert(all, r) end
+        for _, m in ipairs(rosterData.melees) do tinsert(all, m) end
+
+        for _, p in ipairs(all) do
+            hasPlayer = true
+            local cCode = RAID_CLASS_COLORS[p.class] and RAID_CLASS_COLORS[p.class].colorStr or "ffffffff"
+            tinsert(menu, {
+                text = string.format("|c%s%s|r (%s)", cCode, p.name, p.specName or p.role or ""),
+                func = function()
+                    RaidMap.CreateCustomMarker(f.mapCanvas, "player", p)
+                    BG.PlaySound(1)
+                end,
+                notCheckable = true,
+            })
+        end
+    end
+
+    if not hasPlayer then
+        local dummyPlayers = {
+            { name = "圣盾主坦", class = "PALADIN", specName = "防骑", specIcon = "Interface\\Icons\\spell_holy_auraofprotection" },
+            { name = "强袭狂暴", class = "WARRIOR", specName = "狂暴战", specIcon = "Interface\\Icons\\ability_warrior_innerrage" },
+            { name = "神圣道标", class = "PALADIN", specName = "奶骑", specIcon = "Interface\\Icons\\spell_holy_holybolt" },
+            { name = "苦修护盾", class = "PRIEST", specName = "戒律牧", specIcon = "Interface\\Icons\\spell_holy_powerwordshield" },
+            { name = "混沌之箭", class = "WARLOCK", specName = "毁灭术", specIcon = "Interface\\Icons\\spell_shadow_rainoffire" },
+            { name = "极寒刺骨", class = "MAGE", specName = "冰法", specIcon = "Interface\\Icons\\spell_frost_frostbolt02" },
+        }
+        for _, p in ipairs(dummyPlayers) do
+            local cCode = RAID_CLASS_COLORS[p.class] and RAID_CLASS_COLORS[p.class].colorStr or "ffffffff"
+            tinsert(menu, {
+                text = string.format("|c%s%s|r (%s)", cCode, p.name, p.specName),
+                func = function()
+                    RaidMap.CreateCustomMarker(f.mapCanvas, "player", p)
+                    BG.PlaySound(1)
+                end,
+                notCheckable = true,
+            })
+        end
+    end
+
+    local drop = f.customPlayerPickerDropdown
+    if not drop then
+        drop = LibBG and LibBG:Create_UIDropDownMenu("BG_RaidMapCustomPlayerPicker", f) or CreateFrame("Frame", "BG_RaidMapCustomPlayerPicker", f, "UIDropDownMenuTemplate")
+        f.customPlayerPickerDropdown = drop
+    end
+
+    local function InitPicker(self, level)
+        for _, item in ipairs(menu) do
+            local info = LibBG and LibBG:UIDropDownMenu_CreateInfo() or UIDropDownMenu_CreateInfo()
+            info.text = item.text
+            info.func = item.func
+            info.isTitle = item.isTitle
+            info.notCheckable = item.notCheckable
+            if LibBG then LibBG:UIDropDownMenu_AddButton(info, level) else UIDropDownMenu_AddButton(info, level) end
+        end
+    end
+
+    if LibBG and LibBG.UIDropDownMenu_Initialize then
+        LibBG:UIDropDownMenu_Initialize(drop, InitPicker)
+        LibBG:ToggleDropDownMenu(1, nil, drop, anchorFrame, 0, 0)
+    else
+        UIDropDownMenu_Initialize(drop, InitPicker)
+        ToggleDropDownMenu(1, nil, drop, anchorFrame, 0, 0)
+    end
+end
+
+function RaidMap.CreateCustomMarker(mapCanvas, markerType, data)
+    mapCanvas = mapCanvas or (mapFrame and mapFrame.mapCanvas)
+    if not mapCanvas then return end
+
+    local f = mapFrame or BG.RaidMapFrame
+    f.customMarkers = f.customMarkers or {}
+
+    local curW = mapCanvas:GetWidth() or 748
+    local curH = mapCanvas:GetHeight() or 452
+    local scaleX = (curW and curW > 100) and (curW / 748) or 1
+    local scaleY = (curH and curH > 100) and (curH / 452) or 1
+
+    -- 在画布中心略带随机偏移生成，避免多图元重叠
+    local randOffsetX = math.random(-36, 36)
+    local randOffsetY = math.random(-36, 36)
+    local baseX = 374 + randOffsetX
+    local baseY = -226 + randOffsetY
+    local curX = math.floor(baseX * scaleX + 0.5)
+    local curY = math.floor(baseY * scaleY + 0.5)
+
+    local marker = CreateFrame("Button", nil, mapCanvas, "BackdropTemplate")
+    marker.markerType = markerType
+    marker.baseX = baseX
+    marker.baseY = baseY
+    marker.x = curX
+    marker.y = curY
+    marker:SetPoint("CENTER", mapCanvas, "TOPLEFT", curX, curY)
+    marker:SetFrameLevel(mapCanvas:GetFrameLevel() + 22)
+
+    if markerType == "raidIcon" then
+        local iconID = data and data.iconID or 8
+        marker.iconID = iconID
+        marker:SetSize(32, 32)
+
+        local shadow = marker:CreateTexture(nil, "BACKGROUND")
+        shadow:SetPoint("CENTER", 1, -1)
+        shadow:SetSize(34, 34)
+        shadow:SetTexture("Interface\\TargetingFrame\\UI-RaidTargetingIcon_" .. iconID)
+        shadow:SetVertexColor(0, 0, 0, 0.6)
+        marker.shadow = shadow
+
+        local icon = marker:CreateTexture(nil, "ARTWORK")
+        icon:SetAllPoints()
+        icon:SetTexture("Interface\\TargetingFrame\\UI-RaidTargetingIcon_" .. iconID)
+        marker.icon = icon
+
+        local border = marker:CreateTexture(nil, "OVERLAY")
+        border:SetAllPoints()
+        border:SetTexture([[Interface\AddOns\BGLite_Plus\Media\icon\broder.png]])
+        border:SetVertexColor(1, 1, 1, 0.45)
+        marker.border = border
+
+    elseif markerType == "text" then
+        marker.text = (data and data.text) or "战术便签"
+        marker:SetHeight(26)
+        if marker.SetBackdrop then
+            marker:SetBackdrop({
+                bgFile = "Interface\\ChatFrame\\ChatFrameBackground",
+                edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+                tile = true, tileSize = 16, edgeSize = 12,
+                insets = { left = 3, right = 3, top = 3, bottom = 3 },
+            })
+            marker:SetBackdropColor(0.02, 0.04, 0.08, 0.88)
+            marker:SetBackdropBorderColor(1, 0.82, 0.0, 0.9)
+        end
+
+        local fontStr = marker:CreateFontString(nil, "OVERLAY")
+        fontStr:SetFont(BIAOGE_TEXT_FONT, 12, "OUTLINE")
+        fontStr:SetPoint("CENTER", 0, 0)
+        fontStr:SetTextColor(1, 0.88, 0.25)
+        marker.fontStr = fontStr
+        marker.playerText = fontStr
+
+        function marker:UpdateText(newText)
+            self.text = newText or self.text or "战术便签"
+            self.fontStr:SetText(self.text)
+            local w = math.max(68, self.fontStr:GetStringWidth() + 18)
+            self:SetWidth(w)
+        end
+        marker:UpdateText(marker.text)
+
+    elseif markerType == "player" then
+        marker.playerData = data
+        local pName = data and data.name or "队员"
+        local pClass = data and data.class or "WARRIOR"
+        marker.text = pName
+
+        local r, g, b = 1, 1, 1
+        if RAID_CLASS_COLORS and RAID_CLASS_COLORS[pClass] then
+            local c = RAID_CLASS_COLORS[pClass]; r, g, b = c.r, c.g, c.b
+        end
+
+        marker:SetHeight(26)
+        if marker.SetBackdrop then
+            marker:SetBackdrop({
+                bgFile = "Interface\\ChatFrame\\ChatFrameBackground",
+                edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+                tile = true, tileSize = 16, edgeSize = 12,
+                insets = { left = 3, right = 3, top = 3, bottom = 3 },
+            })
+            marker:SetBackdropColor(0.04, 0.07, 0.12, 0.9)
+            marker:SetBackdropBorderColor(r, g, b, 0.9)
+        end
+
+        local mask = marker:CreateMaskTexture()
+        mask:SetPoint("LEFT", 4, 0)
+        mask:SetSize(18, 18)
+        mask:SetTexture([[Interface\CharacterFrame\TempPortraitAlphaMask]], "CLAMPTOBLACKADDITIVE", "CLAMPTOBLACKADDITIVE")
+
+        local icon = marker:CreateTexture(nil, "ARTWORK")
+        icon:SetPoint("LEFT", 4, 0)
+        icon:SetSize(18, 18)
+        icon:AddMaskTexture(mask)
+        icon:SetTexture(data and data.specIcon or (RaidMap.CLASS_ICONS and RaidMap.CLASS_ICONS[pClass]) or "Interface\\Icons\\INV_Misc_QuestionMark")
+        marker.icon = icon
+
+        local fontStr = marker:CreateFontString(nil, "OVERLAY")
+        fontStr:SetFont(BIAOGE_TEXT_FONT, 12, "OUTLINE")
+        fontStr:SetPoint("LEFT", icon, "RIGHT", 5, 0)
+        fontStr:SetText(pName)
+        fontStr:SetTextColor(r, g, b)
+        marker.fontStr = fontStr
+        marker.playerText = fontStr
+
+        local w = math.max(80, fontStr:GetStringWidth() + 32)
+        marker:SetWidth(w)
+    end
+
+    marker:SetMovable(true)
+    marker:EnableMouse(true)
+    marker:RegisterForDrag("LeftButton")
+    marker:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+
+    marker:SetScript("OnDragStart", function(self)
+        if mapFrame and mapFrame.isViewMode then return end
+        self:StartMoving()
+        self.isDragging = true
+        self.wasDragged = true
+    end)
+
+    marker:SetScript("OnDragStop", function(self)
+        if self.isDragging then
+            self.isDragging = false
+            self:StopMovingOrSizing()
+            local s = mapCanvas:GetEffectiveScale() or 1
+            local curX, curY = GetCursorPosition()
+            curX = curX / s
+            curY = curY / s
+            local pLeft = mapCanvas:GetLeft()
+            local pTop = mapCanvas:GetTop()
+            if pLeft and pTop then
+                local relX = math.floor(curX - pLeft + 0.5)
+                local relY = math.floor(curY - pTop + 0.5)
+                self.x = relX
+                self.y = relY
+                local curW = mapCanvas:GetWidth() or 748
+                local curH = mapCanvas:GetHeight() or 452
+                local scaleX = (curW and curW > 100) and (curW / 748) or 1
+                local scaleY = (curH and curH > 100) and (curH / 452) or 1
+                self.baseX = math.floor(relX / scaleX + 0.5)
+                self.baseY = math.floor(relY / scaleY + 0.5)
+                self:ClearAllPoints()
+                self:SetPoint("CENTER", mapCanvas, "TOPLEFT", relX, relY)
+            end
+        end
+    end)
+
+    marker:SetScript("OnClick", function(self, button)
+        if button == "RightButton" then
+            self:Hide()
+            for i, m in ipairs(f.customMarkers) do
+                if m == self then
+                    table.remove(f.customMarkers, i)
+                    break
+                end
+            end
+            BG.PlaySound(1)
+            DEFAULT_CHAT_FRAME:AddMessage("|cffff8800[战术画板]|r 已移除图元。")
+        elseif button == "LeftButton" then
+            if self.wasDragged then
+                self.wasDragged = false
+                return
+            end
+            if self.markerType == "text" then
+                RaidMap.ShowTextEditPopup(self, f)
+            end
+        end
+    end)
+
+    marker:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+        GameTooltip:ClearLines()
+        if self.markerType == "raidIcon" then
+            local raidIconNames = {
+                [1] = "星星 (Star)", [2] = "大饼 (Circle)", [3] = "菱形 (Diamond)", [4] = "三角 (Triangle)",
+                [5] = "月亮 (Moon)", [6] = "方块 (Square)", [7] = "红叉 (Cross)", [8] = "骷髅 (Skull)",
+            }
+            local name = raidIconNames[self.iconID or 8] or "团队标记"
+            GameTooltip:AddLine("【战术标记】 " .. name, 1, 0.85, 0.1)
+            GameTooltip:AddLine("|cff00ff00左键按住:|r 自由拖拽摆放位置", 0.9, 0.9, 0.9)
+            GameTooltip:AddLine("|cffff4444右键单击:|r 快速删除此标记", 0.9, 0.9, 0.9)
+        elseif self.markerType == "text" then
+            GameTooltip:AddLine("【战术便签】", 1, 0.85, 0.1)
+            GameTooltip:AddLine(self.text or "", 1, 1, 1, true)
+            GameTooltip:AddLine(" ")
+            GameTooltip:AddLine("|cff00e5ff左键单击:|r 修改便签文字", 0.9, 0.9, 0.9)
+            GameTooltip:AddLine("|cff00ff00左键按住:|r 自由拖拽摆放位置", 0.9, 0.9, 0.9)
+            GameTooltip:AddLine("|cffff4444右键单击:|r 快速删除此便签", 0.9, 0.9, 0.9)
+        elseif self.markerType == "player" then
+            GameTooltip:AddLine("【单兵玩家标记】 " .. (self.text or ""), 0.2, 0.8, 1)
+            if self.playerData and self.playerData.class then
+                local cName = LOCALIZED_CLASS_NAMES_MALE and LOCALIZED_CLASS_NAMES_MALE[self.playerData.class] or self.playerData.class
+                GameTooltip:AddLine("职业专精: " .. (self.playerData.specName or cName), 0.85, 0.85, 0.85)
+            end
+            GameTooltip:AddLine("|cff00ff00左键按住:|r 自由拖拽摆放位置", 0.9, 0.9, 0.9)
+            GameTooltip:AddLine("|cffff4444右键单击:|r 快速删除此标记", 0.9, 0.9, 0.9)
+        end
+        GameTooltip:Show()
+    end)
+    marker:SetScript("OnLeave", GameTooltip_Hide)
+
+    table.insert(f.customMarkers, marker)
+    marker:Show()
+    return marker
+end
+
+function RaidMap.CreateDrawToolbar(f)
+    if f.drawToolbar then return f.drawToolbar end
+
+    local bar = CreateFrame("Frame", nil, f, "BackdropTemplate")
+    bar:SetSize(256, 92)
+    bar:SetPoint("TOPRIGHT", f.mapCanvas, "TOPRIGHT", -8, -8)
+    bar:SetFrameLevel(f.mapCanvas:GetFrameLevel() + 25)
+    if bar.SetBackdrop then
+        bar:SetBackdrop({
+            bgFile = "Interface\\ChatFrame\\ChatFrameBackground",
+            edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+            tile = true, tileSize = 16, edgeSize = 14,
+            insets = { left = 4, right = 4, top = 4, bottom = 4 },
+        })
+        bar:SetBackdropColor(0.03, 0.05, 0.09, 0.94)
+        bar:SetBackdropBorderColor(0.2, 0.65, 0.95, 0.9)
+    end
+    bar:EnableMouse(true)
+    bar:SetMovable(true)
+    bar:RegisterForDrag("LeftButton")
+    bar:SetScript("OnDragStart", function(self) self:StartMoving() end)
+    bar:SetScript("OnDragStop", function(self) self:StopMovingOrSizing() end)
+
+    local title = bar:CreateFontString(nil, "OVERLAY")
+    title:SetFont(BIAOGE_TEXT_FONT, 12, "OUTLINE")
+    title:SetPoint("TOPLEFT", 10, -7)
+    title:SetText(BG.STC_b1("战术画板工具箱") .. " |cff888888(可拖动)|r")
+
+    local btnClose = CreateFrame("Button", nil, bar)
+    btnClose:SetSize(16, 16)
+    btnClose:SetPoint("TOPRIGHT", -6, -6)
+    local closeText = btnClose:CreateFontString(nil, "OVERLAY")
+    closeText:SetFont(BIAOGE_TEXT_FONT, 12, "OUTLINE")
+    closeText:SetPoint("CENTER", 0, 0)
+    closeText:SetText(BG.STC_r1("×"))
+    btnClose:SetScript("OnClick", function()
+        bar:Hide()
+        BG.PlaySound(1)
+    end)
+
+    local raidIconNames = {
+        [1] = "星星", [2] = "大饼", [3] = "菱形", [4] = "三角",
+        [5] = "月亮", [6] = "方块", [7] = "红叉", [8] = "骷髅",
+    }
+    bar.iconButtons = {}
+    for i = 1, 8 do
+        local btn = CreateFrame("Button", nil, bar)
+        btn:SetSize(25, 25)
+        local leftOffset = 8 + (i - 1) * 30
+        btn:SetPoint("TOPLEFT", leftOffset, -28)
+
+        local tex = btn:CreateTexture(nil, "ARTWORK")
+        tex:SetAllPoints()
+        tex:SetTexture("Interface\\TargetingFrame\\UI-RaidTargetingIcon_" .. i)
+        btn.tex = tex
+
+        btn:SetScript("OnClick", function()
+            RaidMap.CreateCustomMarker(f.mapCanvas, "raidIcon", { iconID = i })
+            BG.PlaySound(1)
+        end)
+        btn:SetScript("OnEnter", function(self)
+            self.tex:SetVertexColor(1, 1, 0.4)
+            GameTooltip:SetOwner(self, "ANCHOR_TOP")
+            GameTooltip:AddLine("添加【" .. raidIconNames[i] .. "】标记", 1, 1, 1)
+            GameTooltip:AddLine("点击在画布中央生成该标记，可自由按住拖拽与右键删除。", 0.85, 0.85, 0.85, true)
+            GameTooltip:Show()
+        end)
+        btn:SetScript("OnLeave", function(self)
+            self.tex:SetVertexColor(1, 1, 1)
+            GameTooltip_Hide()
+        end)
+        bar.iconButtons[i] = btn
+    end
+
+    local btnNote = BG.CreateButton(bar)
+    btnNote:SetSize(72, 22)
+    btnNote:SetPoint("TOPLEFT", 8, -60)
+    btnNote:SetText(BG.STC_y1("[+] 便签"))
+    btnNote:SetScript("OnClick", function()
+        local marker = RaidMap.CreateCustomMarker(f.mapCanvas, "text", { text = "战术便签" })
+        if marker then
+            RaidMap.ShowTextEditPopup(marker, f)
+        end
+        BG.PlaySound(1)
+    end)
+    btnNote:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_TOP")
+        GameTooltip:AddLine("添加【文字战术便签】", 1, 1, 1)
+        GameTooltip:AddLine("在画布上生成随心便签（如说明、集合点、开嗜血处），单击编辑文字，可自由拖拽。", 0.85, 0.85, 0.85, true)
+        GameTooltip:Show()
+    end)
+    btnNote:SetScript("OnLeave", GameTooltip_Hide)
+
+    local btnPlayer = BG.CreateButton(bar)
+    btnPlayer:SetSize(72, 22)
+    btnPlayer:SetPoint("LEFT", btnNote, "RIGHT", 8, 0)
+    btnPlayer:SetText(BG.STC_b1("[+] 玩家"))
+    btnPlayer:SetScript("OnClick", function()
+        RaidMap.ShowPlayerCustomMarkerPicker(btnPlayer)
+        BG.PlaySound(1)
+    end)
+    btnPlayer:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_TOP")
+        GameTooltip:AddLine("添加【单兵玩家标记】", 1, 1, 1)
+        GameTooltip:AddLine("从团队队员中选取特定人员，生成带有其名字与职业颜色的单兵站位标记。", 0.85, 0.85, 0.85, true)
+        GameTooltip:Show()
+    end)
+    btnPlayer:SetScript("OnLeave", GameTooltip_Hide)
+
+    local btnClear = BG.CreateButton(bar)
+    btnClear:SetSize(76, 22)
+    btnClear:SetPoint("LEFT", btnPlayer, "RIGHT", 8, 0)
+    btnClear:SetText(BG.STC_r1("清空标注"))
+    btnClear:SetScript("OnClick", function()
+        RaidMap.ClearCustomMarkers(f)
+        BG.PlaySound(1)
+        DEFAULT_CHAT_FRAME:AddMessage("|cffff4444[战术画板]|r 已清空当前画布上的所有自定义图元与便签。")
+    end)
+    btnClear:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_TOP")
+        GameTooltip:AddLine("清空当前所有自定义标注", 1, 0.2, 0.2)
+        GameTooltip:AddLine("一键移除画板上所有手动放置的标记、便签与单兵图元。\n(不影响 BOSS 预设与系统 1~25 号站位点)", 0.85, 0.85, 0.85, true)
+        GameTooltip:Show()
+    end)
+    btnClear:SetScript("OnLeave", GameTooltip_Hide)
+
+    bar:Hide()
+    f.drawToolbar = bar
+    return bar
+end
+
 function RaidMap.RefreshSelfHighlight(f)
     if not f or not f.icons then return end
     local myName = UnitName("player")
@@ -1606,6 +2161,9 @@ function RaidMap.LoadBossTacticalPreset(bossID, phaseIndex)
         bossID = all[1].id
     end
     bossID = bossID or 5
+    if f.currentBossID and f.currentBossID ~= bossID then
+        if RaidMap.ClearCustomMarkers then RaidMap.ClearCustomMarkers(f) end
+    end
     currentBossID = bossID
 
     local bossData = RaidMap.GetBoss(bossID)
@@ -2053,6 +2611,39 @@ function RaidMap.BroadcastCurrentMap()
             numText, 1.0, 1.0, 1.0,
             playerText, 0.2, 0.8, 1.0
         )
+    end
+
+    if f.customMarkers then
+        for _, marker in ipairs(f.customMarkers) do
+            if marker:IsShown() then
+                local level = marker:GetFrameLevel() or 22
+                local x = math.floor(marker.x or 0)
+                local y = math.floor(marker.y or 0)
+                local w = math.floor(marker:GetWidth() or 32)
+                local iconTex = ""
+                local playerText = ""
+                local numText = ""
+                local iconType = "tex"
+
+                if marker.markerType == "raidIcon" then
+                    iconTex = string.format("Interface\\TargetingFrame\\UI-RaidTargetingIcon_%d", marker.iconID or 8)
+                elseif marker.markerType == "text" then
+                    iconTex = "Interface\\Icons\\INV_Scroll_02"
+                    playerText = marker.text or "便签"
+                elseif marker.markerType == "player" then
+                    iconTex = (marker.playerData and marker.playerData.specIcon) or "Interface\\Icons\\INV_Misc_QuestionMark"
+                    playerText = marker.text or ""
+                end
+
+                iconStr = iconStr .. format("%d¦%d¦%d¦%d¦%d¦%s¦%s¦%s¦%s¦%s¦%s¦%d¦%.2f¦%.2f¦%.2f¦%s¦%.2f¦%.2f¦%.2f¦%s¦%.2f¦%.2f¦%.2f&&",
+                    level, x, y, w, w, iconType, iconTex,
+                    "", "", "", "",
+                    1, 1.0, 1.0, 1.0,
+                    numText, 1.0, 1.0, 1.0,
+                    playerText, 0.2, 0.8, 1.0
+                )
+            end
+        end
     end
 
     str = str .. iconStr
