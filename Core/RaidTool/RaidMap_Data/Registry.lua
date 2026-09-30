@@ -22,56 +22,88 @@ RaidMap.CLASS_ICONS = {
 }
 
 --------------------------------------------------------------------------------
--- 2. 战术数据中心 (Registry)
+-- 2. 战术数据中心 (Registry - 共享全局表存储)
 --------------------------------------------------------------------------------
-local registeredBosses = {}
-local registeredFBOrder = {}
-local registeredFBs = {}
-local linearBossList = {}
+RaidMap.bosses = RaidMap.bosses or {}
+RaidMap.bossList = RaidMap.bossList or {}
+RaidMap.fbs = RaidMap.fbs or {}
+RaidMap.fbOrder = RaidMap.fbOrder or {}
 
 -- 注册副本分类
 function RaidMap.RegisterFB(fbKey, fbName)
     if not fbKey then return end
-    if not registeredFBs[fbKey] then
-        registeredFBs[fbKey] = {
+    RaidMap.fbs = RaidMap.fbs or {}
+    RaidMap.fbOrder = RaidMap.fbOrder or {}
+    if not RaidMap.fbs[fbKey] then
+        RaidMap.fbs[fbKey] = {
             key = fbKey,
             name = fbName or fbKey,
             bosses = {},
         }
-        table.insert(registeredFBOrder, fbKey)
+        table.insert(RaidMap.fbOrder, fbKey)
     end
-    return registeredFBs[fbKey]
+    return RaidMap.fbs[fbKey]
 end
 
 -- 注册 BOSS 战术预设
 function RaidMap.RegisterBoss(bossConfig)
     if not bossConfig or not bossConfig.id then return end
+    RaidMap.bosses = RaidMap.bosses or {}
+    RaidMap.bossList = RaidMap.bossList or {}
+    RaidMap.fbs = RaidMap.fbs or {}
+    RaidMap.fbOrder = RaidMap.fbOrder or {}
+
     local fbKey = bossConfig.fb or "GENERAL"
     RaidMap.RegisterFB(fbKey, bossConfig.fbName or fbKey)
 
-    registeredBosses[bossConfig.id] = bossConfig
-    table.insert(registeredFBs[fbKey].bosses, bossConfig)
-    table.insert(linearBossList, bossConfig)
+    RaidMap.bosses[bossConfig.id] = bossConfig
+
+    local exists = false
+    for i, b in ipairs(RaidMap.bossList) do
+        if b.id == bossConfig.id then
+            RaidMap.bossList[i] = bossConfig
+            exists = true
+            break
+        end
+    end
+    if not exists then
+        table.insert(RaidMap.bossList, bossConfig)
+    end
+
+    if RaidMap.fbs[fbKey] then
+        local fbExists = false
+        for i, b in ipairs(RaidMap.fbs[fbKey].bosses) do
+            if b.id == bossConfig.id then
+                RaidMap.fbs[fbKey].bosses[i] = bossConfig
+                fbExists = true
+                break
+            end
+        end
+        if not fbExists then
+            table.insert(RaidMap.fbs[fbKey].bosses, bossConfig)
+        end
+    end
 end
 
 -- 获取指定 BOSS 预设
 function RaidMap.GetBoss(bossID)
-    return registeredBosses[bossID]
+    if not RaidMap.bosses then return nil end
+    return RaidMap.bosses[bossID]
 end
 
 -- 获取全部 BOSS 列表 (保持线性有序，兼容旧版 BOSS_LIST)
 function RaidMap.GetAllBosses()
-    return linearBossList
+    return RaidMap.bossList or {}
 end
 
 -- 兼容旧版引用
-RaidMap.BOSS_LIST = linearBossList
+RaidMap.BOSS_LIST = RaidMap.bossList
 
 -- 获取全部注册的副本
 function RaidMap.GetRegisteredFBs()
     local list = {}
-    for _, k in ipairs(registeredFBOrder) do
-        table.insert(list, registeredFBs[k])
+    for _, k in ipairs(RaidMap.fbOrder or {}) do
+        table.insert(list, RaidMap.fbs[k])
     end
     return list
 end

@@ -147,48 +147,84 @@ RaidMap.CLASS_ICONS = {
     DRUID       = "Interface\\Icons\\ClassIcon_Druid",
 }
 
-local registeredBosses = {}
-local registeredFBOrder = {}
-local registeredFBs = {}
-local linearBossList = {}
+RaidMap.bosses = RaidMap.bosses or {}
+RaidMap.bossList = RaidMap.bossList or {}
+RaidMap.fbs = RaidMap.fbs or {}
+RaidMap.fbOrder = RaidMap.fbOrder or {}
 
-function RaidMap.RegisterFB(fbKey, fbName)
-    if not fbKey then return end
-    if not registeredFBs[fbKey] then
-        registeredFBs[fbKey] = {
-            key = fbKey,
-            name = fbName or fbKey,
-            bosses = {},
-        }
-        table.insert(registeredFBOrder, fbKey)
+if not RaidMap.RegisterFB then
+    function RaidMap.RegisterFB(fbKey, fbName)
+        if not fbKey then return end
+        RaidMap.fbs = RaidMap.fbs or {}
+        RaidMap.fbOrder = RaidMap.fbOrder or {}
+        if not RaidMap.fbs[fbKey] then
+            RaidMap.fbs[fbKey] = {
+                key = fbKey,
+                name = fbName or fbKey,
+                bosses = {},
+            }
+            table.insert(RaidMap.fbOrder, fbKey)
+        end
+        return RaidMap.fbs[fbKey]
     end
-    return registeredFBs[fbKey]
 end
 
-function RaidMap.RegisterBoss(bossConfig)
-    if not bossConfig or not bossConfig.id then return end
-    local fbKey = bossConfig.fb or "GENERAL"
-    RaidMap.RegisterFB(fbKey, bossConfig.fbName or fbKey)
+if not RaidMap.RegisterBoss then
+    function RaidMap.RegisterBoss(bossConfig)
+        if not bossConfig or not bossConfig.id then return end
+        RaidMap.bosses = RaidMap.bosses or {}
+        RaidMap.bossList = RaidMap.bossList or {}
+        RaidMap.fbs = RaidMap.fbs or {}
+        RaidMap.fbOrder = RaidMap.fbOrder or {}
 
-    registeredBosses[bossConfig.id] = bossConfig
-    table.insert(registeredFBs[fbKey].bosses, bossConfig)
-    table.insert(linearBossList, bossConfig)
+        local fbKey = bossConfig.fb or "GENERAL"
+        RaidMap.RegisterFB(fbKey, bossConfig.fbName or fbKey)
+
+        RaidMap.bosses[bossConfig.id] = bossConfig
+
+        local exists = false
+        for i, b in ipairs(RaidMap.bossList) do
+            if b.id == bossConfig.id then
+                RaidMap.bossList[i] = bossConfig
+                exists = true
+                break
+            end
+        end
+        if not exists then
+            table.insert(RaidMap.bossList, bossConfig)
+        end
+
+        if RaidMap.fbs[fbKey] then
+            local fbExists = false
+            for i, b in ipairs(RaidMap.fbs[fbKey].bosses) do
+                if b.id == bossConfig.id then
+                    RaidMap.fbs[fbKey].bosses[i] = bossConfig
+                    fbExists = true
+                    break
+                end
+            end
+            if not fbExists then
+                table.insert(RaidMap.fbs[fbKey].bosses, bossConfig)
+            end
+        end
+    end
 end
 
 function RaidMap.GetBoss(bossID)
-    return registeredBosses[bossID]
+    if not RaidMap.bosses then return nil end
+    return RaidMap.bosses[bossID]
 end
 
 function RaidMap.GetAllBosses()
-    return linearBossList
+    return RaidMap.bossList or {}
 end
 
-RaidMap.BOSS_LIST = linearBossList
+RaidMap.BOSS_LIST = RaidMap.bossList
 
 function RaidMap.GetRegisteredFBs()
     local list = {}
-    for _, fbKey in ipairs(registeredFBOrder) do
-        table.insert(list, registeredFBs[fbKey])
+    for _, fbKey in ipairs(RaidMap.fbOrder or {}) do
+        table.insert(list, RaidMap.fbs[fbKey])
     end
     return list
 end
@@ -569,258 +605,14 @@ RaidMap.GenerateStandard25Spots = function(cx, cy, opts)
 end
 
 --------------------------------------------------------------------------------
--- 5. 奥杜尔 9 大核心 BOSS 官方实战站位预设 (全部配置规范 1024x1024 高清实景场地背景)
+-- 5. 战术首领数据源已统一由 Core/RaidTool/RaidMap_Data/ULD.lua 加载
 --------------------------------------------------------------------------------
-local FB_KEY = "ULDtitan"
-local FB_NAME = "奥杜尔"
-
--- 1. 拆解者 XT-002 (Boss ID = 4)
-RaidMap.RegisterBoss({
-    id = 4,
-    fb = FB_KEY,
-    fbName = FB_NAME,
-    name = "拆解者 XT-002",
-    sub = "主坦背墙拉北面 | 近战正背后 | 远程南半场大分散 | 白光跑右 黑光跑左",
-    tacticTip = "【拆解者站位要点】\n1. 主坦在 12 点正北背靠北墙拉怪，使 BOSS 背对全团，避免正面震耳发聩AOE；\n2. 保坦奶（奶骑/戒律）靠近坦克两翼 20 码，道标与牺牲无死角覆盖；\n3. 近战集中在 BOSS 正背后 6 点脚后跟输出；\n4. 远程与团补在南半场大扇形分散保持 10 码；\n5. 点名发光炸弹(白光)迅速向右侧(东)跑出人群，重力炸弹(黑光)迅速向左侧(西)跑出人群！",
-    hasRealMap = true,
-    mapTex = "Interface\\AddOns\\BGLite_Plus\\Media\\icon\\ULDtitan\\m4.png",
-    targets = {
-        { type = "boss", name = "XT-002 拆解者", iconTex = "Interface\\Icons\\achievement_boss_xt002deconstructor_01", relX = 0, relY = 90, size = 52, color = { 1, 0.25, 0.25 } },
-        { type = "npc",  name = "左废料出怪点", iconTex = "Interface\\TargetingFrame\\UI-RaidTargetingIcon_4", relX = -240, relY = 110, size = 36, color = { 0.2, 1, 0.3 } },
-        { type = "npc",  name = "右废料出怪点", iconTex = "Interface\\TargetingFrame\\UI-RaidTargetingIcon_6", relX = 240, relY = 110, size = 36, color = { 0.2, 0.8, 1 } },
-        { type = "npc",  name = "重力炸弹(黑光跑左)", iconTex = "Interface\\TargetingFrame\\UI-RaidTargetingIcon_3", relX = -200, relY = -110, size = 34, color = { 0.8, 0.3, 1 } },
-        { type = "npc",  name = "发光炸弹(白光跑右)", iconTex = "Interface\\TargetingFrame\\UI-RaidTargetingIcon_1", relX = 200, relY = -110, size = 34, color = { 1, 1, 0.2 } },
-    },
-    buildSpots = function(cx, cy, width, height, rosterData)
-        return RaidMap.GenerateDynamicTacticalSpots(cx, cy, {
-            tankY = 165,
-            meleeY = 40,
-            tankSpread = 40,
-            tankHealerLeft = { x = -70, y = 130 },
-            tankHealerRight = { x = 70, y = 130 },
-            rangedMode = "arc",
-        }, rosterData)
-    end,
-})
-
--- 2. 钢铁议会 (Boss ID = 5)
-RaidMap.RegisterBoss({
-    id = 5,
-    fb = FB_KEY,
-    fbName = FB_NAME,
-    name = "钢铁议会",
-    sub = "破钢拉北面 | 唤雷拉东侧防超载 | 蓝圈踩增伤 绿圈后撤",
-    tacticTip = "【钢铁议会站位要点】\n1. 主坦将破钢者定在北侧靠墙；\n2. 保坦奶在主坦侧后方 20 码，融化之拳第一时间给压制与大光；\n3. 副坦A拉住唤雷者在东侧远离人群（读条超载时全团20码规避）；\n4. 副坦B拉符文大师在中偏西，近战先集中集火，出蓝色增伤符文全团踩入增加50%伤害；\n5. 出绿色死亡符文全团迅速向后撤退风筝。",
-    hasRealMap = true,
-    mapTex = "Interface\\AddOns\\BGLite_Plus\\Media\\icon\\ULDtitan\\m5.png",
-    targets = {
-        { type = "boss", name = "破钢者 (大)", iconTex = "Interface\\Icons\\achievement_boss_ironcouncil_01", relX = 0, relY = 90, size = 50, color = { 1, 0.2, 0.2 } },
-        { type = "boss", name = "唤雷者 (中)", iconTex = "Interface\\Icons\\spell_nature_lightning", relX = 180, relY = 40, size = 42, color = { 1, 0.6, 0.2 } },
-        { type = "boss", name = "符文大师 (小)", iconTex = "Interface\\Icons\\spell_arcane_rune", relX = -130, relY = 50, size = 42, color = { 0.3, 0.8, 1 } },
-        { type = "npc",  name = "增伤蓝圈踩圈位", iconTex = "Interface\\TargetingFrame\\UI-RaidTargetingIcon_6", relX = -50, relY = 0, size = 32, color = { 0.2, 0.8, 1 } },
-        { type = "npc",  name = "超载规避警戒线", iconTex = "Interface\\TargetingFrame\\UI-RaidTargetingIcon_7", relX = 120, relY = -10, size = 30, color = { 1, 0.3, 0.3 } },
-    },
-    buildSpots = function(cx, cy, width, height, rosterData)
-        return RaidMap.GenerateDynamicTacticalSpots(cx, cy, {
-            tankY = 160,
-            meleeY = 35,
-            tankSpread = 140,
-            tankHealerLeft = { x = -75, y = 125 },
-            tankHealerRight = { x = 75, y = 125 },
-            rangedMode = "arc",
-        }, rosterData)
-    end,
-})
-
--- 3. 霍迪尔 (Boss ID = 8)
-RaidMap.RegisterBoss({
-    id = 8,
-    fb = FB_KEY,
-    fbName = FB_NAME,
-    name = "霍迪尔",
-    sub = "以暖炉火堆为轴心抱团 | 坦拉北侧怪背对 | 踩雪避落冰 雷云进堆传电",
-    tacticTip = "【霍迪尔站位要点】\n1. 场地中央暖炉火堆是全团生存与增伤核心，全团严密围拢在火堆 10 码内消除极度寒冷层数；\n2. 坦把霍迪尔定在火堆北面 10 码处，近战脚跟输出并蹭火堆 Buff；\n3. 获【风暴之力(雷云)】点名的玩家第一时间跳入火堆人群，为所有法系传导 100% 暴伤；\n4. 闪霜大落冰前迅速站上积雪，切勿贪打！",
-    hasRealMap = true,
-    mapTex = "Interface\\AddOns\\BGLite_Plus\\Media\\icon\\ULDtitan\\m8.png",
-    targets = {
-        { type = "boss", name = "霍迪尔 (冰霜之王)", iconTex = "Interface\\Icons\\achievement_boss_hodir_01", relX = 0, relY = 90, size = 52, color = { 0.4, 0.8, 1 } },
-        { type = "npc",  name = "暖炉火堆(全团抱团核心)", iconTex = "Interface\\Icons\\spell_fire_lavaspawn", relX = 0, relY = 0, size = 44, color = { 1, 0.5, 0.1 } },
-        { type = "npc",  name = "西侧解冻萨满法师", iconTex = "Interface\\TargetingFrame\\UI-RaidTargetingIcon_1", relX = -200, relY = 50, size = 32, color = { 0.3, 1, 0.4 } },
-        { type = "npc",  name = "东侧解冻德鲁伊牧师", iconTex = "Interface\\TargetingFrame\\UI-RaidTargetingIcon_2", relX = 200, relY = 50, size = 32, color = { 0.3, 1, 0.4 } },
-    },
-    buildSpots = function(cx, cy, width, height, rosterData)
-        return RaidMap.GenerateDynamicTacticalSpots(cx, cy, {
-            tankY = 150,
-            meleeY = 45,
-            tankHealerLeft = { x = -50, y = 110 },
-            tankHealerRight = { x = 50, y = 110 },
-            rangedMode = "campfire",
-            campfirePos = { x = 0, y = 0 },
-        }, rosterData)
-    end,
-})
-
--- 4. 托利姆 (Boss ID = 9)
-RaidMap.RegisterBoss({
-    id = 9,
-    fb = FB_KEY,
-    fbName = FB_NAME,
-    name = "托利姆",
-    sub = "内外场分兵 | 外场中圈规避暴风雪 | 内场破门冲锋 | P2闪电充能避让",
-    tacticTip = "【托利姆站位要点】\n1. 团队分为外场防守组与内场冲锋组；外场主坦中场拉怪，远程外圈分散避暴风雪；\n2. 内场副坦带领小队迅速沿通道破门斩杀符文巨灵；\n3. P2 托利姆跳入竞技场，全团分散站位，严禁站在闪电充能正对扇形区域。",
-    hasRealMap = true,
-    mapTex = "Interface\\AddOns\\BGLite_Plus\\Media\\icon\\ULDtitan\\m9.png",
-    targets = {
-        { type = "boss", name = "托利姆", iconTex = "Interface\\Icons\\achievement_boss_thorim", relX = 0, relY = 100, size = 50, color = { 0.5, 0.8, 1 } },
-        { type = "npc",  name = "外场竞技场中圈", iconTex = "Interface\\TargetingFrame\\UI-RaidTargetingIcon_3", relX = 0, relY = 0, size = 36, color = { 0.3, 1, 0.4 } },
-        { type = "npc",  name = "内场走廊入口", iconTex = "Interface\\TargetingFrame\\UI-RaidTargetingIcon_5", relX = -220, relY = 40, size = 34, color = { 1, 0.8, 0.2 } },
-    },
-    buildSpots = function(cx, cy, width, height, rosterData)
-        return RaidMap.GenerateDynamicTacticalSpots(cx, cy, {
-            tankY = 150,
-            meleeY = 35,
-            tankSpread = 60,
-            rangedMode = "arc",
-        }, rosterData)
-    end,
-})
-
--- 5. 弗蕾雅 (Boss ID = 10)
-RaidMap.RegisterBoss({
-    id = 10,
-    fb = FB_KEY,
-    fbName = FB_NAME,
-    name = "弗蕾雅",
-    sub = "大范围全团分散 | 坦拉北水池边 | 第一时间转火礼物树 | 元素小怪控血同杀",
-    tacticTip = "【弗蕾雅站位要点】\n1. 主坦把弗蕾雅拉在生命温室正北水池边，背对人群；\n2. 全体远程与治疗在南半场大范围分散开，每人间距保持 10 码以上，严禁扎堆；\n3. 刷新【艾欧娜尔的礼物】所有 DPS 第一时间秒掉，否则 BOSS 持续巨幅回血；\n4. 三元素小怪组（水灵、树人、风暴）必须控血同时 10 秒内击杀，否则互相复活。",
-    hasRealMap = true,
-    mapTex = "Interface\\AddOns\\BGLite_Plus\\Media\\icon\\ULDtitan\\m10.png",
-    targets = {
-        { type = "boss", name = "弗蕾雅", iconTex = "Interface\\Icons\\achievement_boss_freya", relX = 0, relY = 95, size = 52, color = { 0.3, 1, 0.4 } },
-        { type = "npc",  name = "艾欧娜尔的礼物(首要秒杀)", iconTex = "Interface\\Icons\\spell_nature_healingtouch", relX = 90, relY = 30, size = 38, color = { 1, 0.9, 0.2 } },
-        { type = "npc",  name = "健康蘑菇(沉默避难区)", iconTex = "Interface\\Icons\\inv_mushroom_11", relX = -100, relY = -30, size = 34, color = { 0.4, 0.8, 1 } },
-    },
-    buildSpots = function(cx, cy, width, height, rosterData)
-        return RaidMap.GenerateDynamicTacticalSpots(cx, cy, {
-            tankY = 160,
-            meleeY = 40,
-            tankSpread = 50,
-            rangedMode = "arc",
-        }, rosterData)
-    end,
-})
-
--- 6. 米米尔隆 (Boss ID = 11)
-RaidMap.RegisterBoss({
-    id = 11,
-    fb = FB_KEY,
-    fbName = FB_NAME,
-    name = "米米尔隆",
-    sub = "P1避地雷等离子 | P2顺时针转圈躲激光 | P3突击机器人远程转火 | P4修血同时杀",
-    tacticTip = "【米米尔隆站位要点】\n1. P1 战车主坦背拉，近战注意地雷，副坦随时准备凝固汽油抗伤；\n2. P2 VX-001 旋转扫射激光弹幕，全员看清面向顺时针全速跑动；\n3. P3 空中指挥单元，猎人术士远程主力击落，副坦拉好突击机器人；\n4. P4 合体形态，全团均分输出修血，底座、身躯、头部必须在 15 秒内同时打爆！",
-    hasRealMap = true,
-    mapTex = "Interface\\AddOns\\BGLite_Plus\\Media\\icon\\ULDtitan\\m11.png",
-    targets = {
-        { type = "boss", name = "米米尔隆座驾", iconTex = "Interface\\Icons\\achievement_boss_mimiron_01", relX = 0, relY = 85, size = 52, color = { 1, 0.5, 0.1 } },
-        { type = "npc",  name = "激光弹幕规避安全区", iconTex = "Interface\\TargetingFrame\\UI-RaidTargetingIcon_6", relX = -120, relY = -20, size = 34, color = { 0.2, 0.8, 1 } },
-        { type = "npc",  name = "近战地雷危险红区", iconTex = "Interface\\TargetingFrame\\UI-RaidTargetingIcon_7", relX = 40, relY = 40, size = 30, color = { 1, 0.2, 0.2 } },
-    },
-    buildSpots = function(cx, cy, width, height, rosterData)
-        return RaidMap.GenerateDynamicTacticalSpots(cx, cy, {
-            tankY = 150,
-            meleeY = 35,
-            tankSpread = 50,
-            rangedMode = "arc",
-        }, rosterData)
-    end,
-})
-
--- 7. 维扎克斯将军 (Boss ID = 12)
-RaidMap.RegisterBoss({
-    id = 12,
-    fb = FB_KEY,
-    fbName = FB_NAME,
-    name = "维扎克斯将军",
-    sub = "无自然回蓝 | A/B组踩黑水增伤 | 暗影印记立刻跑出人群 | 萨隆邪铁畸体转火",
-    tacticTip = "【将军站位要点】\n1. 本场战斗存在绝望光环，全员无法通过常规手段自然回蓝；\n2. 远程分为左右两组（A组在西南，B组在东南），轮流踩入蒸汽黑水获得急速与伤害加成；\n3. 点名【无面者的印记】的玩家必须在 1 秒内朝后方反向全速跑出大团，严禁传染抽血；\n4. 暗影冲击落点全员瞬间横向侧移规避；困难模式下击杀 6 块矿石合成的畸体。",
-    hasRealMap = true,
-    mapTex = "Interface\\AddOns\\BGLite_Plus\\Media\\icon\\ULDtitan\\m12.png",
-    targets = {
-        { type = "boss", name = "维扎克斯将军", iconTex = "Interface\\Icons\\achievement_boss_generalvezax_01", relX = 0, relY = 90, size = 52, color = { 0.8, 0.2, 1 } },
-        { type = "npc",  name = "左黑水集合点 (A组)", iconTex = "Interface\\TargetingFrame\\UI-RaidTargetingIcon_1", relX = -130, relY = -75, size = 38, color = { 0.2, 0.8, 1 } },
-        { type = "npc",  name = "右黑水集合点 (B组)", iconTex = "Interface\\TargetingFrame\\UI-RaidTargetingIcon_2", relX = 130, relY = -75, size = 38, color = { 0.2, 0.8, 1 } },
-        { type = "npc",  name = "印记向后逃逸路线", iconTex = "Interface\\TargetingFrame\\UI-RaidTargetingIcon_7", relX = 0, relY = -140, size = 32, color = { 1, 0.2, 0.2 } },
-    },
-    buildSpots = function(cx, cy, width, height, rosterData)
-        return RaidMap.GenerateDynamicTacticalSpots(cx, cy, {
-            tankY = 160,
-            meleeY = 35,
-            tankSpread = 45,
-            tankHealerLeft = { x = -60, y = 120 },
-            tankHealerRight = { x = 60, y = 120 },
-            rangedMode = "two_groups",
-            groupA = { x = -130, y = -75 },
-            groupB = { x = 130, y = -75 },
-        }, rosterData)
-    end,
-})
-
--- 8. 尤格萨隆 (Boss ID = 13)
-RaidMap.RegisterBoss({
-    id = 13,
-    fb = FB_KEY,
-    fbName = FB_NAME,
-    name = "尤格萨隆",
-    sub = "P1踩绿云出怪控血 | P2进门组打大脑 外场救缠绕 | P3背对疯狂诱视 斩杀信标",
-    tacticTip = "【尤格萨隆站位要点】\n1. P1 围绕萨拉中场站位，严禁踩踏扩散绿云，小怪拉在萨拉脚下拉爆炸伤萨拉；\n2. P2 刷新触须海，近战与进门组第一时间通过传送门进入脑房消灭诱视幻象，外场优先解救缠绕大触须；\n3. P3 尤格萨隆破壳，近战与远程严格背对 BOSS 读条【疯狂诱视】，信标怪由副坦拉开优先集火秒杀！",
-    hasRealMap = true,
-    mapTex = "Interface\\AddOns\\BGLite_Plus\\Media\\icon\\ULDtitan\\m13.png",
-    targets = {
-        { type = "boss", name = "尤格萨隆 (千喉之魔)", iconTex = "Interface\\Icons\\achievement_boss_yoggsaron_01", relX = 0, relY = 90, size = 54, color = { 0.9, 0.1, 0.9 } },
-        { type = "npc",  name = "传送门进脑房集合位", iconTex = "Interface\\TargetingFrame\\UI-RaidTargetingIcon_4", relX = -120, relY = 20, size = 36, color = { 0.2, 1, 0.4 } },
-        { type = "npc",  name = "信标小怪拉开击杀点", iconTex = "Interface\\TargetingFrame\\UI-RaidTargetingIcon_6", relX = 140, relY = -30, size = 36, color = { 1, 0.8, 0.2 } },
-    },
-    buildSpots = function(cx, cy, width, height, rosterData)
-        return RaidMap.GenerateDynamicTacticalSpots(cx, cy, {
-            tankY = 155,
-            meleeY = 35,
-            tankSpread = 60,
-            rangedMode = "arc",
-        }, rosterData)
-    end,
-})
-
--- 9. 观察者阿加隆 (Boss ID = 14)
-RaidMap.RegisterBoss({
-    id = 14,
-    fb = FB_KEY,
-    fbName = FB_NAME,
-    name = "观察者阿加隆",
-    sub = "双坦及时换嘲量子重击 | 副坦外围风筝活化星宿 | 大爆炸全团进黑洞躲避",
-    tacticTip = "【阿加隆站位要点】\n1. 主坦在场地正北拉住阿加隆背靠星空，两层相位冲孔后副坦立刻嘲讽换坦，量子重击覆盖大减伤；\n2. 副坦在外围顺时针大圈风筝活化星宿，严禁近战贪打近身引发自爆；\n3. 坍缩星按指挥标记单点轮流击杀，全团大减伤覆盖爆炸；\n4. 读条【大爆炸】时，全团（除留守防骑/惩戒骑开无敌外）全速走进黑洞逃生！",
-    hasRealMap = true,
-    mapTex = "Interface\\AddOns\\BGLite_Plus\\Media\\icon\\ULDtitan\\m14.png",
-    targets = {
-        { type = "boss", name = "观察者阿加隆", iconTex = "Interface\\Icons\\achievement_boss_algalon_01", relX = 0, relY = 90, size = 52, color = { 0.2, 0.8, 1 } },
-        { type = "npc",  name = "黑洞避难所(大爆炸进入)", iconTex = "Interface\\Icons\\spell_shadow_twilight", relX = 140, relY = 10, size = 42, color = { 0.7, 0.3, 1 } },
-        { type = "npc",  name = "副坦风筝星宿外环", iconTex = "Interface\\TargetingFrame\\UI-RaidTargetingIcon_3", relX = -180, relY = -30, size = 34, color = { 1, 0.8, 0.2 } },
-    },
-    buildSpots = function(cx, cy, width, height, rosterData)
-        return RaidMap.GenerateDynamicTacticalSpots(cx, cy, {
-            tankY = 160,
-            meleeY = 35,
-            tankSpread = 45,
-            tankHealerLeft = { x = -65, y = 125 },
-            tankHealerRight = { x = 65, y = 125 },
-            rangedMode = "arc",
-        }, rosterData)
-    end,
-})
 
 --------------------------------------------------------------------------------
 -- 6. 战术看板 UI 构建与布局
 --------------------------------------------------------------------------------
-local currentBossID = 5
+local currentBossID = 4
+local currentPhase = 1
 local mapFrame = nil
 local currentMapIndex = 1
 
@@ -845,19 +637,26 @@ end
 
 -- 优雅纯净的降级战术刻度网格 (仅当无真实地图时作为安全兜底，绝无任何怪异小地图边框与多余矩形)
 local function DrawProceduralTacticalGrid(parent, width, height, bossID)
-    if parent.tacticalGrid then
-        parent.tacticalGrid:Show()
+    local f = mapFrame or BG.RaidMapFrame
+    local canvas = (f and f.mapCanvas) or parent
+    parent = canvas or parent
+
+    local g = parent.tacticalGrid or (f and f.tacticalGrid)
+    if g then
+        g:Show()
         return
     end
 
-    local g = CreateFrame("Frame", nil, parent)
+    g = CreateFrame("Frame", nil, parent)
     g:SetAllPoints()
     g:SetFrameLevel(parent:GetFrameLevel() + 1)
     parent.tacticalGrid = g
+    if f then f.tacticalGrid = g end
+    if canvas then canvas.tacticalGrid = g end
 
     local bgTex = g:CreateTexture(nil, "BACKGROUND")
     bgTex:SetAllPoints()
-    bgTex:SetColorTexture(0.04, 0.05, 0.08, 0.96)
+    bgTex:SetColorTexture(0.04, 0.05, 0.08, 0.45)
 
     -- 十字与 8 向极简战术刻度标线
     local hLine = g:CreateLine(nil, "BORDER")
@@ -907,28 +706,39 @@ function RaidMap.CreateUI()
 
     local frameName = "BG.RaidMapFrame"
     local f = CreateFrame("Frame", frameName, UIParent, "BackdropTemplate")
-    f:SetSize(780, 560)
-    f.originalWidth = 780
-    f.originalHeight = 560
+
+    -- 动态自适应初始尺寸：默认高度设为游戏窗口高度的 75%，保持最佳视界比例
+    local screenH = UIParent and UIParent:GetHeight() or 768
+    local defaultH = math.max(660, math.floor(screenH * 0.75))
+    local defaultW = math.max(780, math.floor(defaultH * 1.18))
+
+    f:SetSize(defaultW, defaultH)
+    f.originalWidth = defaultW
+    f.originalHeight = defaultH
     f.minW = 180
     f.minH = 36
     f:SetClampedToScreen(true)
     f:SetFrameStrata("HIGH")
 
-    f.defaultPoint = { "CENTER", UIParent, "CENTER", 0, 40 }
+    -- 默认正中央居中
+    f.defaultPoint = { "CENTER", UIParent, "CENTER", 0, 0 }
     local saved = BiaoGe.point[frameName]
     if saved and type(saved) == "table" and #saved >= 1 then
         local p1 = saved[1] or "CENTER"
         local p2 = UIParent
         local p3 = saved[3] or "CENTER"
         local p4 = saved[4] or 0
-        local p5 = saved[5] or 40
+        local p5 = saved[5] or 0
         f:SetPoint(p1, p2, p3, p4, p5)
     else
         f:SetPoint(unpack(f.defaultPoint))
     end
 
-    local savedScale = BiaoGe.RaidMap and BiaoGe.RaidMap.mapScale or 0.85
+    -- 默认缩放设为 100% (1.0)，消除模糊提升清晰度；如果历史保存值为旧版 0.85 则平滑升级为 1.0
+    local savedScale = BiaoGe.RaidMap and BiaoGe.RaidMap.mapScale
+    if not savedScale or savedScale == 0.85 then
+        savedScale = 1.0
+    end
     f:SetScale(savedScale)
 
     f:SetBackdrop({
@@ -937,8 +747,8 @@ function RaidMap.CreateUI()
         edgeSize = 14,
         insets = { left = 3, right = 3, top = 3, bottom = 3 },
     })
-    f:SetBackdropColor(0.04, 0.05, 0.08, 0.95)
-    f:SetBackdropBorderColor(0.2, 0.6, 0.9, 0.8)
+    f:SetBackdropColor(0.04, 0.05, 0.08, 0.78)
+    f:SetBackdropBorderColor(0.2, 0.6, 0.9, 0.75)
 
     f.icons = {}
     f.isViewMode = false
@@ -974,10 +784,32 @@ function RaidMap.CreateUI()
         end
     end)
 
-    -- 场地贴图层 (全填充，支持 1024x1024 POT 标准贴图)
-    local mapTex = f:CreateTexture(nil, "BACKGROUND")
-    mapTex:SetAllPoints()
+    -- 场地地图画布 (Map Canvas - 半透明通透质感)
+    local mapCanvas = CreateFrame("Frame", nil, f, "BackdropTemplate")
+    mapCanvas:SetPoint("TOPLEFT", 16, -92)
+    mapCanvas:SetPoint("BOTTOMRIGHT", -16, 116)
+    mapCanvas:SetBackdrop({
+        bgFile = "Interface/ChatFrame/ChatFrameBackground",
+        edgeFile = "Interface/Tooltips/UI-Tooltip-Border",
+        edgeSize = 12,
+        insets = { left = 2, right = 2, top = 2, bottom = 2 },
+    })
+    mapCanvas:SetBackdropColor(0.01, 0.02, 0.04, 0.35)
+    mapCanvas:SetBackdropBorderColor(0.25, 0.55, 0.85, 0.8)
+    f.mapCanvas = mapCanvas
+
+    -- 场地贴图层 (全填充画布，sub-level 1 位于底色之上，高精度呈现 1024x1024 实景)
+    local mapTex = mapCanvas:CreateTexture(nil, "BACKGROUND", nil, 1)
+    mapTex:SetAllPoints(mapCanvas)
     f.mapTex = mapTex
+
+    -- 场地左上角战术一句话概括 (sub 说明：置于底图左上角，绿字高显)
+    local mapSubText = mapCanvas:CreateFontString(nil, "OVERLAY")
+    mapSubText:SetFont(BIAOGE_TEXT_FONT, 13, "OUTLINE")
+    mapSubText:SetPoint("TOPLEFT", mapCanvas, "TOPLEFT", 12, -10)
+    mapSubText:SetTextColor(0.2, 1, 0.4)
+    mapSubText:SetText("")
+    f.mapSubText = mapSubText
 
     -- 顶部标题
     local title = f:CreateFontString(nil, "OVERLAY")
@@ -1003,7 +835,7 @@ function RaidMap.CreateUI()
     minTitle:Hide()
     f.minTitle = minTitle
 
-    -- 右上角操作区：关闭与最小化
+    -- 右上角操作区：关闭、最小化与恢复默认大小
     local btnClose = CreateFrame("Button", nil, f, "UIPanelCloseButton")
     btnClose:SetSize(28, 28)
     btnClose:SetPoint("TOPRIGHT", -4, -4)
@@ -1020,17 +852,51 @@ function RaidMap.CreateUI()
     btnMin:SetHighlightTexture("Interface\\Buttons\\UI-Panel-MinimizeButton-Highlight")
     f.btnMin = btnMin
 
+    local btnResetSize = BG.CreateButton(f)
+    btnResetSize:SetSize(88, 20)
+    btnResetSize:SetPoint("RIGHT", btnMin, "LEFT", -6, 0)
+    btnResetSize:SetText(BG.STC_w1("恢复默认大小"))
+    btnResetSize:SetScript("OnClick", function()
+        local scrH = UIParent and UIParent:GetHeight() or 768
+        local defH = math.max(660, math.floor(scrH * 0.75))
+        local defW = math.max(780, math.floor(defH * 1.18))
+        f.originalWidth = defW
+        f.originalHeight = defH
+        f:SetScale(1.0)
+        f:SetSize(defW, defH)
+        f:ClearAllPoints()
+        f:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
+        BiaoGe.point[frameName] = { "CENTER", nil, "CENTER", 0, 0 }
+        if BiaoGe and BiaoGe.RaidMap then
+            BiaoGe.RaidMap.mapScale = 1.0
+        end
+        RaidMap.LoadBossTacticalPreset(currentBossID, currentPhase)
+        BG.PlaySound(1)
+        DEFAULT_CHAT_FRAME:AddMessage(string.format("|cff00ff00[BGLite 战术站位图]|r 已恢复屏幕正中心 (%dx%d，屏幕75%%高度) 与 100%% 缩放！", defW, defH))
+    end)
+    btnResetSize:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_TOP")
+        GameTooltip:AddLine("恢复默认大小与居中", 1, 1, 1)
+        GameTooltip:AddLine("一键恢复默认窗口尺寸 (屏幕75%高度自适应)、重置到屏幕正中心并恢复 100% 原生缩放比例。\n|cff888888(提示: 鼠标滚轮可在 50%~150% 间平滑微调)|r", 0.85, 0.85, 0.85, true)
+        GameTooltip:Show()
+    end)
+    btnResetSize:SetScript("OnLeave", GameTooltip_Hide)
+    f.btnResetSize = btnResetSize
+
     btnMin:SetScript("OnClick", function()
         f.isMinimized = not f.isMinimized
         if f.isMinimized then
             f.savedPoint = { f:GetPoint(1) }
             f:SetSize(f.minW, f.minH)
-            f.mapTex:Hide()
-            if f.tacticalGrid then f.tacticalGrid:Hide() end
+            f.mapCanvas:Hide()
+            local grid = f.tacticalGrid or (f.mapCanvas and f.mapCanvas.tacticalGrid)
+            if grid then grid:Hide() end
             f.title:Hide()
             f.selfNotice:Hide()
             f.topControls:Hide()
-            for _, icon in ipairs(f.icons) do icon:Hide() end
+            f.phaseTabBar:Hide()
+            if f.tipPanel then f.tipPanel:Hide() end
+            if f.btnResetSize then f.btnResetSize:Hide() end
             f.minTitle:Show()
             btnMin:SetNormalTexture("Interface\\Buttons\\UI-Panel-BiggerButton-Up")
         else
@@ -1039,12 +905,13 @@ function RaidMap.CreateUI()
             f.title:Show()
             f.selfNotice:Show()
             f.topControls:Show()
-            if not f.isUsingGrid then
-                f.mapTex:Show()
-            elseif f.tacticalGrid then
-                f.tacticalGrid:Show()
+            f.mapCanvas:Show()
+            if f.tipPanel then f.tipPanel:Show() end
+            if f.btnResetSize then f.btnResetSize:Show() end
+            local bossData = RaidMap.GetBoss(currentBossID)
+            if bossData and bossData.phases and #bossData.phases > 0 then
+                f.phaseTabBar:Show()
             end
-            for _, icon in ipairs(f.icons) do icon:Show() end
             btnMin:SetNormalTexture("Interface\\Buttons\\UI-Panel-SmallerButton-Up")
         end
         BG.PlaySound(1)
@@ -1067,11 +934,12 @@ function RaidMap.CreateUI()
         for _, b in ipairs(bosses) do
             local info = LibBG and LibBG:UIDropDownMenu_CreateInfo() or UIDropDownMenu_CreateInfo()
             info.text = b.name
+            info.value = b.id
             info.checked = (currentBossID == b.id)
             info.func = function()
                 currentBossID = b.id
                 if LibBG then LibBG:UIDropDownMenu_SetText(dropBoss, b.name) else UIDropDownMenu_SetText(dropBoss, b.name) end
-                RaidMap.LoadBossTacticalPreset(b.id)
+                RaidMap.LoadBossTacticalPreset(b.id, 1)
             end
             if LibBG then LibBG:UIDropDownMenu_AddButton(info, level) else UIDropDownMenu_AddButton(info, level) end
         end
@@ -1080,24 +948,22 @@ function RaidMap.CreateUI()
     if LibBG and LibBG.UIDropDownMenu_Initialize then
         LibBG:UIDropDownMenu_Initialize(dropBoss, InitBossMenu)
         LibBG:UIDropDownMenu_SetWidth(dropBoss, 135)
-        LibBG:UIDropDownMenu_SetText(dropBoss, "钢铁议会")
     else
         UIDropDownMenu_Initialize(dropBoss, InitBossMenu)
         UIDropDownMenu_SetWidth(dropBoss, 135)
-        UIDropDownMenu_SetText(dropBoss, "钢铁议会")
     end
 
-    local dropBossClick = CreateFrame("Button", nil, dropBoss)
-    dropBossClick:SetAllPoints()
-    dropBossClick:SetFrameLevel(dropBoss:GetFrameLevel() + 2)
-    dropBossClick:SetScript("OnClick", function()
-        if LibBG and LibBG.ToggleDropDownMenu then
-            LibBG:ToggleDropDownMenu(1, nil, dropBoss)
-        else
-            ToggleDropDownMenu(1, nil, dropBoss)
-        end
-        BG.PlaySound(1)
-    end)
+    if BG.dropDownToggle then
+        BG.dropDownToggle(dropBoss)
+    end
+
+    local curB = RaidMap.GetBoss(currentBossID)
+    local curName = curB and curB.name or "拆解者 XT-002"
+    if LibBG and LibBG.UIDropDownMenu_SetText then
+        LibBG:UIDropDownMenu_SetText(dropBoss, curName)
+    else
+        UIDropDownMenu_SetText(dropBoss, curName)
+    end
 
     -- 2. 查阅模式防误触状态条 (只读模式下显示，编辑模式下隐藏)
     local viewBadge = CreateFrame("Frame", nil, topControls)
@@ -1138,17 +1004,17 @@ function RaidMap.CreateUI()
 
     -- 3.1 同步团队按钮
     local btnAuto = BG.CreateButton(editControls)
-    btnAuto:SetSize(86, 24)
+    btnAuto:SetSize(92, 24)
     btnAuto:SetPoint("LEFT", 0, 0)
-    btnAuto:SetText(BG.STC_b1("同步团队..."))
+    btnAuto:SetText(BG.STC_b1("同步团队"))
     btnAuto:SetScript("OnClick", function()
-        RaidMap.AutoAssignRosterToMap()
+        RaidMap.AutoAssignRosterToMap(false)
         BG.PlaySound(1)
     end)
     btnAuto:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_TOP")
         GameTooltip:AddLine("一键同步团队人员并自动布阵", 1, 1, 1)
-        GameTooltip:AddLine("抓取当前团队实际成员，按照职责自动填入指定点位：\n• 坦克自动填入主副坦位；\n• 治疗自动填入核心保坦位与团补位；\n• 近战自动排布在 BOSS 正脚后跟；\n• 远程自动在南半场大扇形分散保持距离。", 0.85, 0.85, 0.85, true)
+        GameTooltip:AddLine("根据当前团队成员职责自动分配点位：\n- 坦克自动填入 1~2 号位；\n- 治疗自动填入 3~7 号位；\n- 远程自动填入 8~17 号大分散位；\n- 近战统一归入【近战集合组】标记！", 0.85, 0.85, 0.85, true)
         GameTooltip:Show()
     end)
     btnAuto:SetScript("OnLeave", GameTooltip_Hide)
@@ -1160,109 +1026,24 @@ function RaidMap.CreateUI()
     btnReset:SetPoint("LEFT", btnAuto, "RIGHT", 4, 0)
     btnReset:SetText(BG.STC_w1("恢复默认"))
     btnReset:SetScript("OnClick", function()
-        currentMeleeMode = "group"
-        currentRangedMode = "arc"
-        RaidMap.LoadBossTacticalPreset(currentBossID, nil)
+        wipe(RaidMap.assignedPlayers)
+        wipe(RaidMap.meleeRoster)
+        RaidMap.LoadBossTacticalPreset(currentBossID, currentPhase)
         BG.PlaySound(1)
-        DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00[BGLite 战术站位图]|r 已恢复当前 BOSS 的官方推荐标准 25 人示范战术阵型 (近战聚合+远程扇形)！")
+        DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00[BGLite 战术站位图]|r 已恢复当前阶段的标准预设点位！")
     end)
     btnReset:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_TOP")
         GameTooltip:AddLine("恢复默认站位阵型", 1, 1, 1)
-        GameTooltip:AddLine("一键重置当前 BOSS 的所有站位点，恢复官方推荐的标准战术点位阵型（消除所有手动拖动位移）。", 0.85, 0.85, 0.85, true)
+        GameTooltip:AddLine("一键重置当前 BOSS/阶段的所有点位，消除所有手动拖动位移并清空分配。", 0.85, 0.85, 0.85, true)
         GameTooltip:Show()
     end)
     btnReset:SetScript("OnLeave", GameTooltip_Hide)
-    -- 3.3 阵型布局与快速组织下拉菜单
-    local dropFormation = LibBG and LibBG:Create_UIDropDownMenu("BG_RaidMapFormationDropdown", editControls) or CreateFrame("Frame", "BG_RaidMapFormationDropdown", editControls, "UIDropDownMenuTemplate")
-    f.dropFormation = dropFormation
 
-    local function InitFormationMenu(self, level)
-        local infoM = LibBG and LibBG:UIDropDownMenu_CreateInfo() or UIDropDownMenu_CreateInfo()
-        infoM.text = "|cffffd100── 近战组队形编排 ──|r"
-        infoM.isTitle = true
-        infoM.notCheckable = true
-        if LibBG then LibBG:UIDropDownMenu_AddButton(infoM, level) else UIDropDownMenu_AddButton(infoM, level) end
-
-        local meleeList = {
-            { id = "group", name = "★ 聚合群组模式 (近战组 9人合一)" },
-            { id = "arc", name = "背后弧形展开 (个人独立散点)" },
-            { id = "double_row", name = "背后双排错位 (紧凑双层)" },
-            { id = "two_groups", name = "左右分翼站位 (左侧/右侧)" },
-            { id = "compact", name = "背后集中单点 (极度抱团)" },
-        }
-        for _, m in ipairs(meleeList) do
-            local mi = LibBG and LibBG:UIDropDownMenu_CreateInfo() or UIDropDownMenu_CreateInfo()
-            mi.text = m.name
-            mi.checked = (currentMeleeMode == m.id)
-            mi.func = function()
-                RaidMap.ApplyFormation(m.id, nil)
-            end
-            if LibBG then LibBG:UIDropDownMenu_AddButton(mi, level) else UIDropDownMenu_AddButton(mi, level) end
-        end
-
-        local infoR = LibBG and LibBG:UIDropDownMenu_CreateInfo() or UIDropDownMenu_CreateInfo()
-        infoR.text = "|cffffd100── 远程组队形编排 ──|r"
-        infoR.isTitle = true
-        infoR.notCheckable = true
-        if LibBG then LibBG:UIDropDownMenu_AddButton(infoR, level) else UIDropDownMenu_AddButton(infoR, level) end
-
-        local rangedList = {
-            { id = "arc", name = "南侧大扇形 (防点名大分散)" },
-            { id = "two_groups", name = "左右双堆站位 (左翼/右翼分群)" },
-            { id = "campfire", name = "中场环形抱团 (吃增益/集合)" },
-            { id = "matrix", name = "后方整齐方阵 (三行矩阵)" },
-        }
-        for _, r in ipairs(rangedList) do
-            local ri = LibBG and LibBG:UIDropDownMenu_CreateInfo() or UIDropDownMenu_CreateInfo()
-            ri.text = r.name
-            ri.checked = (currentRangedMode == r.id)
-            ri.func = function()
-                RaidMap.ApplyFormation(nil, r.id)
-            end
-            if LibBG then LibBG:UIDropDownMenu_AddButton(ri, level) else UIDropDownMenu_AddButton(ri, level) end
-        end
-
-        local infoOpt = LibBG and LibBG:UIDropDownMenu_CreateInfo() or UIDropDownMenu_CreateInfo()
-        infoOpt.text = "|cff00ff00★ 一键智能排布 (近战聚合+远程扇形)|r"
-        infoOpt.notCheckable = true
-        infoOpt.func = function()
-            RaidMap.ApplyFormation("group", "arc")
-        end
-        if LibBG then LibBG:UIDropDownMenu_AddButton(infoOpt, level) else UIDropDownMenu_AddButton(infoOpt, level) end
-    end
-
-    if LibBG and LibBG.UIDropDownMenu_Initialize then
-        LibBG:UIDropDownMenu_Initialize(dropFormation, InitFormationMenu)
-    else
-        UIDropDownMenu_Initialize(dropFormation, InitFormationMenu)
-    end
-
-    local btnFormation = BG.CreateButton(editControls)
-    btnFormation:SetSize(90, 24)
-    btnFormation:SetPoint("LEFT", btnReset, "RIGHT", 4, 0)
-    btnFormation:SetText(BG.STC_b1("阵型布局 ▾"))
-    btnFormation:SetScript("OnClick", function(self)
-        if LibBG and LibBG.ToggleDropDownMenu then
-            LibBG:ToggleDropDownMenu(1, nil, dropFormation, self, 0, 0)
-        else
-            ToggleDropDownMenu(1, nil, dropFormation, self, 0, 0)
-        end
-        BG.PlaySound(1)
-    end)
-    btnFormation:SetScript("OnEnter", function(self)
-        GameTooltip:SetOwner(self, "ANCHOR_TOP")
-        GameTooltip:AddLine("近战与远程组队形快速组织", 1, 1, 1)
-        GameTooltip:AddLine("一键快速重组当前地图上的近战组与远程组队形：\n• 近战组：背后弧形展开 (推荐/防重叠)、双排错位、左右分翼、集中单点；\n• 远程组：南侧大扇形 (防点名大分散)、左右双堆、环形抱团、三行矩阵。\n排列规则将写入广播协议，全团同步实时生效！", 0.85, 0.85, 0.85, true)
-        GameTooltip:Show()
-    end)
-    btnFormation:SetScript("OnLeave", GameTooltip_Hide)
-    f.btnFormation = btnFormation
-
-    -- 3.4 一键全团广播 (SendMap)
+    -- 3.3 一键全团广播 (SendMap)
     local btnSend = BG.CreateButton(editControls)
     btnSend:SetSize(86, 24)
-    btnSend:SetPoint("LEFT", btnFormation, "RIGHT", 4, 0)
+    btnSend:SetPoint("LEFT", btnReset, "RIGHT", 4, 0)
     btnSend:SetText(BG.STC_g1("广播全团"))
     btnSend:SetScript("OnClick", function()
         RaidMap.BroadcastCurrentMap()
@@ -1332,25 +1113,100 @@ function RaidMap.CreateUI()
         UIDropDownMenu_SetText(dropHistory, "历史站位图")
     end
 
-    local dropHistoryClick = CreateFrame("Button", nil, dropHistory)
-    dropHistoryClick:SetAllPoints()
-    dropHistoryClick:SetFrameLevel(dropHistory:GetFrameLevel() + 2)
-    dropHistoryClick:SetScript("OnClick", function()
-        if LibBG and LibBG.ToggleDropDownMenu then
-            LibBG:ToggleDropDownMenu(1, nil, dropHistory)
+    if BG.dropDownToggle then
+        BG.dropDownToggle(dropHistory)
+    end
+
+    -- 多阶段 Tab 切换栏 (Phase Tabs Bar)
+    local phaseTabBar = CreateFrame("Frame", nil, f)
+    phaseTabBar:SetPoint("TOPLEFT", 16, -64)
+    phaseTabBar:SetPoint("TOPRIGHT", -16, -64)
+    phaseTabBar:SetHeight(26)
+    phaseTabBar:Hide()
+    f.phaseTabBar = phaseTabBar
+    f.phaseButtons = {}
+
+    -- 底部战术攻略提示卡片面板 (Tactics Card Panel - 高度扩充至 96px，确保完整展示多行攻略)
+    local tipPanel = CreateFrame("Frame", nil, f, "BackdropTemplate")
+    tipPanel:SetPoint("BOTTOMLEFT", 16, 12)
+    tipPanel:SetPoint("BOTTOMRIGHT", -16, 12)
+    tipPanel:SetHeight(96)
+    tipPanel:SetBackdrop({
+        bgFile = "Interface/ChatFrame/ChatFrameBackground",
+        edgeFile = "Interface/Tooltips/UI-Tooltip-Border",
+        edgeSize = 12,
+        insets = { left = 2, right = 2, top = 2, bottom = 2 },
+    })
+    tipPanel:SetBackdropColor(0.015, 0.025, 0.045, 0.70)
+    tipPanel:SetBackdropBorderColor(0.25, 0.55, 0.85, 0.75)
+    f.tipPanel = tipPanel
+
+    -- 攻略详细文本 (顶部对齐，多行规整，行距 3 像素，高对比暖黄字)
+    local tacticTipText = tipPanel:CreateFontString(nil, "OVERLAY")
+    tacticTipText:SetFont(BIAOGE_TEXT_FONT, 12, "OUTLINE")
+    tacticTipText:SetPoint("TOPLEFT", tipPanel, "TOPLEFT", 10, -8)
+    tacticTipText:SetPoint("BOTTOMRIGHT", tipPanel, "BOTTOMRIGHT", -122, 6)
+    tacticTipText:SetJustifyH("LEFT")
+    tacticTipText:SetJustifyV("TOP")
+    tacticTipText:SetSpacing(3)
+    tacticTipText:SetTextColor(1, 0.88, 0.35)
+    f.tacticTipText = tacticTipText
+
+    -- 快捷通报本阶段按钮 (垂直居中于攻略卡片右侧)
+    local btnFastSend = BG.CreateButton(tipPanel)
+    btnFastSend:SetSize(100, 32)
+    btnFastSend:SetPoint("RIGHT", tipPanel, "RIGHT", -10, 0)
+    btnFastSend:SetText(BG.STC_g1("通报本阶段"))
+    btnFastSend:SetScript("OnClick", function()
+        local bossID = f.currentBossID or currentBossID
+        local phaseIdx = f.currentPhase or currentPhase or 1
+        local bossData = RaidMap.GetBoss(bossID)
+        local bossName = bossData and bossData.name or "当前BOSS"
+        local phaseName = ""
+        local tip = f.activeTacticTip or (bossData and bossData.tacticTip) or ""
+        if bossData and bossData.phases and #bossData.phases > 0 then
+            local curP = bossData.phases[phaseIdx] or bossData.phases[1]
+            if curP then
+                phaseName = " [" .. (curP.name or ("P" .. phaseIdx)) .. "]"
+                tip = curP.tacticTip or tip
+            end
+        end
+
+        -- 兜底保障：若 tip 仍为空，尝试从界面 tacticTipText 提取并剔除贴图与颜色转义符
+        if (not tip or tip == "") and f.tacticTipText and f.tacticTipText:GetText() then
+            tip = f.tacticTipText:GetText()
+            tip = tip:gsub("|T.-|t", ""):gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", "")
+        end
+
+        local channel = IsInRaid() and "RAID" or (IsInGroup() and "PARTY" or nil)
+        if channel then
+            SendChatMessage(string.format("【战术站位】<< %s%s >>", bossName, phaseName), channel)
+            for line in string.gmatch(tip, "([^\r\n]+)") do
+                line = line:gsub("^%s+", ""):gsub("%s+$", "")
+                if line ~= "" then
+                    SendChatMessage(line, channel)
+                end
+            end
+            DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00[BGLite 战术站位图]|r 已向团队频道通报本阶段战术！")
         else
-            ToggleDropDownMenu(1, nil, dropHistory)
+            DEFAULT_CHAT_FRAME:AddMessage("|cff00BFFF[战术站位预览]|r " .. bossName .. phaseName)
+            for line in string.gmatch(tip, "([^\r\n]+)") do
+                line = line:gsub("^%s+", ""):gsub("%s+$", "")
+                if line ~= "" then
+                    DEFAULT_CHAT_FRAME:AddMessage(line)
+                end
+            end
         end
         BG.PlaySound(1)
     end)
-
-    -- 底部操作与交互提示
-    local bottomTip = f:CreateFontString(nil, "OVERLAY")
-    bottomTip:SetFont(BIAOGE_TEXT_FONT, 12, "OUTLINE")
-    bottomTip:SetPoint("BOTTOMLEFT", 16, 8)
-    bottomTip:SetTextColor(0.55, 0.65, 0.75, 0.85)
-    bottomTip:SetText("交互提示: 鼠标拖拽头像可调换站位 | 滚轮微调缩放 | 空白处拖拽移动窗口 | Ctrl+右键重置窗口位置")
-    f.bottomTip = bottomTip
+    btnFastSend:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_TOP")
+        GameTooltip:AddLine("通报当前阶段战术要点", 1, 1, 1)
+        GameTooltip:AddLine("将当前选中的阶段（如 P2 激光跑位）核心机制与站位指南直接发送至团队频道聊天栏，方便全团即时查看！", 0.85, 0.85, 0.85, true)
+        GameTooltip:Show()
+    end)
+    btnFastSend:SetScript("OnLeave", GameTooltip_Hide)
+    f.btnFastSend = btnFastSend
 
     -- 模式切换器
     function RaidMap.SetViewMode(isView)
@@ -1358,13 +1214,17 @@ function RaidMap.CreateUI()
         if isView then
             f.editControls:Hide()
             f.viewBadge:Show()
-            f.bottomTip:SetText("当前为【团队查阅模式】: 点位已锁定以防误触 | 滚轮可微调缩放 | 点击上方 [解锁编辑] 可自由调位")
         else
             f.viewBadge:Hide()
             f.editControls:Show()
-            f.bottomTip:SetText("交互提示: 鼠标拖拽头像可调换站位 | 滚轮微调缩放 | 空白处拖拽移动窗口 | Ctrl+右键重置窗口位置")
         end
     end
+
+    f:SetScript("OnShow", function()
+        if RaidMap.AutoAssignRosterToMap then
+            RaidMap.AutoAssignRosterToMap(true)
+        end
+    end)
 
     mapFrame = f
     BG.RaidMapFrame = f
@@ -1373,70 +1233,69 @@ function RaidMap.CreateUI()
 end
 
 --------------------------------------------------------------------------------
--- 7. 纯净战术站位图标渲染器 (彻底移除突兀小圆圈，精致黑边裁剪，光晕高亮专属站位)
+-- 7. 纯正 TuanJian 体系站位图标渲染器 (圆形肖像蒙版 + broder.png 环形外框)
 --------------------------------------------------------------------------------
-local function CreateDraggablePointIcon(parent, level, x, y, width, height, iconType, iconTex, coord,
-                                       broderShow, broderColor,
-                                       numText, numColor,
-                                       playerText, playerColor, role, members)
-    local f = CreateFrame("Frame", nil, parent)
-    f:SetSize(width, height)
-    f:SetPoint("CENTER", parent, "TOPLEFT", x, y)
-    f:SetFrameLevel(parent:GetFrameLevel() + level)
-    f.x = x
-    f.y = y
-    f.role = role
-    f.playerText = playerText
-    f.members = members
+RaidMap.assignedPlayers = {} -- 玩家点位分配持久缓存: [slotIndex] = { name, class, specIcon, specName, role }
+RaidMap.meleeRoster = {}     -- 当前团队近战组人员名单 (服务于 [98] 战术标记)
 
-    local isBoss = (role == "boss")
-    local isNpc = (role == "npc")
-    local isMeleeGroup = (role == "melee_group")
+local function CreateDraggablePointIcon(mapCanvas, index, v)
+    local width = v.size or 30
+    local f = CreateFrame("Button", nil, mapCanvas)
+    f:SetSize(width, width)
+    f.index = index
+    f.v = v
+
+    -- 基于标准基准画布 (748x452) 动态等比映射坐标，保证拉伸或大屏下人员与底图相对位置 100% 严丝合缝
+    local baseW = 748
+    local baseH = 452
+    local curW = mapCanvas:GetWidth()
+    local curH = mapCanvas:GetHeight()
+    local scaleX = (curW and curW > 100) and (curW / baseW) or 1
+    local scaleY = (curH and curH > 100) and (curH / baseH) or 1
+
+    local origX = v.xy[1]
+    local origY = (v.xy[2] > 0) and -v.xy[2] or v.xy[2]
+    f.baseX = origX
+    f.baseY = origY
+    f.x = math.floor(origX * scaleX + 0.5)
+    f.y = math.floor(origY * scaleY + 0.5)
+    f:SetPoint("CENTER", mapCanvas, "TOPLEFT", f.x, f.y)
+    f:SetFrameLevel(mapCanvas:GetFrameLevel() + (v.isNPC and 10 or 15))
+
+    -- 暴雪原生圆形肖像透明遮罩
+    local mask = f:CreateMaskTexture()
+    mask:SetPoint("CENTER")
+    mask:SetSize(width - 4, width - 4)
+    mask:SetTexture([[Interface\CharacterFrame\TempPortraitAlphaMask]], "CLAMPTOBLACKADDITIVE", "CLAMPTOBLACKADDITIVE")
 
     local icon = f:CreateTexture(nil, "ARTWORK")
-    icon:SetAllPoints()
+    icon:SetPoint("CENTER")
+    icon:SetSize(width, width)
+    icon:AddMaskTexture(mask)
     f.icon = icon
 
-    if iconType == "boss" then
-        icon:SetTexture(iconTex or "Interface\\TargetingFrame\\UI-RaidTargetingIcon_8")
-    else
-        icon:SetTexture(iconTex or "Interface\\Icons\\INV_Misc_QuestionMark")
-    end
+    -- 官方外边框
+    local border = f:CreateTexture(nil, "OVERLAY")
+    border:SetAllPoints()
+    border:SetTexture([[Interface\AddOns\BGLite_Plus\Media\icon\broder.png]])
+    f.border = border
 
-    if coord and #coord == 4 then
-        icon:SetTexCoord(unpack(coord))
-    else
-        -- 裁剪暴雪原生图标自带的黑色硬边框，视觉更精致圆润
-        icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
-    end
+    -- 序号
+    local numText = f:CreateFontString(nil, "OVERLAY")
+    numText:SetFont(BIAOGE_TEXT_FONT, (v.isNPC and width > 40) and 14 or 12, "OUTLINE")
+    numText:SetPoint("CENTER", 0, 0)
+    f.numText = numText
 
-    -- 序号与名字
-    local numFS = f:CreateFontString(nil, "OVERLAY")
-    numFS:SetFont(BIAOGE_TEXT_FONT, isMeleeGroup and 14 or 13, "OUTLINE")
-    numFS:SetPoint("CENTER", 0, 0)
-    numFS:SetText(numText or "")
-    if numColor and #numColor >= 3 then
-        numFS:SetTextColor(unpack(numColor))
-    end
-    f.numFS = numFS
+    -- 玩家/首领名称
+    local playerText = f:CreateFontString(nil, "OVERLAY")
+    playerText:SetFont(BIAOGE_TEXT_FONT, 12, "OUTLINE")
+    playerText:SetPoint("TOP", f, "BOTTOM", 0, -2)
+    f.playerText = playerText
 
-    local nameFS = f:CreateFontString(nil, "OVERLAY")
-    nameFS:SetFont(BIAOGE_TEXT_FONT, (isBoss or isMeleeGroup) and 13 or 12, "OUTLINE")
-    nameFS:SetPoint("TOP", f, "BOTTOM", 0, -2)
-    nameFS:SetText(playerText or "")
-    if isBoss then
-        nameFS:SetTextColor(1, 0.35, 0.35)
-    elseif isMeleeGroup then
-        nameFS:SetTextColor(1, 0.85, 0.1)
-    elseif playerColor and #playerColor >= 3 then
-        nameFS:SetTextColor(unpack(playerColor))
-    end
-    f.nameFS = nameFS
-
-    -- 自己的专属站位高亮外框：纯净金色光晕
+    -- 玩家自身专属高亮光晕
     local glow = f:CreateTexture(nil, "OVERLAY")
     glow:SetPoint("CENTER")
-    glow:SetSize(width + 20, height + 20)
+    glow:SetSize(width + 18, width + 18)
     glow:SetTexture("Interface\\SpellActivationOverlay\\IconAlert")
     glow:SetTexCoord(0.00781250, 0.50781250, 0.27734375, 0.52734375)
     glow:SetBlendMode("ADD")
@@ -1444,34 +1303,123 @@ local function CreateDraggablePointIcon(parent, level, x, y, width, height, icon
     glow:Hide()
     f.glow = glow
 
-    -- 鼠标交互与自由拖拽调位 (查阅锁定模式下彻底阻断，防止误触)
+    -- 刷新图元展示状态
+    function f:UpdateDisplay()
+        if v.isNPC then
+            if v.isBoss then
+                f.border:SetVertexColor(1, 0.2, 0.2)
+                f.icon:SetTexture(v.isNPC_icon or "Interface\\Icons\\achievement_boss_algalon_01")
+                f.icon:SetAlpha(1.0)
+                f.playerText:SetText(v.isNPC_text or "")
+                f.playerText:SetTextColor(1, 0.35, 0.35)
+                f.numText:SetText("")
+            elseif v.isNPC_help then
+                f.border:SetVertexColor(0.7, 0.7, 0.7)
+                f.icon:SetTexture(v.isNPC_icon or "Interface\\Icons\\ability_steelmelee")
+                f.icon:SetAlpha(1.0)
+                f.playerText:SetText(v.isNPC_text or "")
+                f.playerText:SetTextColor(1, 0.85, 0.1)
+                f.numText:SetText("")
+            else
+                f.border:SetVertexColor(0.3, 0.8, 1)
+                f.icon:SetTexture(v.isNPC_icon or "Interface\\TargetingFrame\\UI-RaidTargetingIcon_8")
+                f.icon:SetAlpha(1.0)
+                f.playerText:SetText(v.isNPC_text or "")
+                f.playerText:SetTextColor(0.3, 0.9, 1)
+                f.numText:SetText("")
+            end
+        else
+            local p = RaidMap.assignedPlayers[index]
+            if p then
+                local r, g, b = 1, 1, 1
+                if RAID_CLASS_COLORS and p.class and RAID_CLASS_COLORS[p.class] then
+                    local c = RAID_CLASS_COLORS[p.class]; r, g, b = c.r, c.g, c.b
+                end
+                f.border:SetVertexColor(r, g, b)
+                f.icon:SetTexture(p.specIcon or (RaidMap.CLASS_ICONS and RaidMap.CLASS_ICONS[p.class]) or "Interface\\Icons\\INV_Misc_QuestionMark")
+                f.icon:SetAlpha(1.0)
+                f.playerText:SetText(p.name or "")
+                f.playerText:SetTextColor(r, g, b)
+                f.numText:SetText(tostring(index))
+                f.numText:SetTextColor(1, 1, 1)
+                f.name = p.name
+            else
+                f.border:SetVertexColor(0.45, 0.45, 0.45)
+                f.icon:SetTexture("Interface\\Icons\\INV_Misc_QuestionMark")
+                f.icon:SetAlpha(0.25)
+                f.playerText:SetText("")
+                f.numText:SetText(tostring(index))
+                f.numText:SetTextColor(0.65, 0.65, 0.65)
+                f.name = nil
+            end
+        end
+    end
+
+    f:UpdateDisplay()
+
+    -- 鼠标交互与自由拖拽调位
     f:SetMovable(true)
     f:EnableMouse(true)
     f:RegisterForDrag("LeftButton")
-    f:SetScript("OnMouseDown", function(self, button)
-    end)
+    f:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+
     f:SetScript("OnDragStart", function(self)
-        if parent.isViewMode then return end
-        self.isDragging = true
+        if mapFrame and mapFrame.isViewMode then return end
         self:StartMoving()
+        self.isDragging = true
     end)
     f:SetScript("OnDragStop", function(self)
         if self.isDragging then
             self.isDragging = false
             self:StopMovingOrSizing()
-            local s = parent:GetEffectiveScale() or 1
+            local s = mapCanvas:GetEffectiveScale() or 1
             local curX, curY = GetCursorPosition()
             curX = curX / s
             curY = curY / s
-            local pLeft = parent:GetLeft()
-            local pTop = parent:GetTop()
+            local pLeft = mapCanvas:GetLeft()
+            local pTop = mapCanvas:GetTop()
             if pLeft and pTop then
-                local relX = curX - pLeft
-                local relY = curY - pTop
+                local relX = math.floor(curX - pLeft + 0.5)
+                local relY = math.floor(curY - pTop + 0.5)
                 self.x = relX
                 self.y = relY
+                local curW = mapCanvas:GetWidth() or 748
+                local curH = mapCanvas:GetHeight() or 452
+                local scaleX = (curW and curW > 100) and (curW / 748) or 1
+                local scaleY = (curH and curH > 100) and (curH / 452) or 1
+                self.baseX = math.floor(relX / scaleX + 0.5)
+                self.baseY = math.floor(relY / scaleY + 0.5)
                 self:ClearAllPoints()
-                self:SetPoint("CENTER", parent, "TOPLEFT", relX, relY)
+                self:SetPoint("CENTER", mapCanvas, "TOPLEFT", relX, relY)
+            end
+        end
+    end)
+
+    f:SetScript("OnClick", function(self, button)
+        if button == "RightButton" then
+            if IsShiftKeyDown() then
+                local curW = mapCanvas:GetWidth() or 748
+                local curH = mapCanvas:GetHeight() or 452
+                local scaleX = (curW and curW > 100) and (curW / 748) or 1
+                local scaleY = (curH and curH > 100) and (curH / 452) or 1
+                self.baseX = v.xy[1]
+                self.baseY = (v.xy[2] > 0) and -v.xy[2] or v.xy[2]
+                self.x = math.floor(self.baseX * scaleX + 0.5)
+                self.y = math.floor(self.baseY * scaleY + 0.5)
+                self:ClearAllPoints()
+                self:SetPoint("CENTER", mapCanvas, "TOPLEFT", self.x, self.y)
+                DEFAULT_CHAT_FRAME:AddMessage(string.format("|cff00BFFF[站位图]|r %d 号位已重置回默认预设坐标。", index))
+            else
+                if not v.isNPC then
+                    RaidMap.assignedPlayers[index] = nil
+                    self:UpdateDisplay()
+                    RaidMap.RefreshSelfHighlight(mapFrame)
+                end
+            end
+            BG.PlaySound(1)
+        elseif button == "LeftButton" then
+            if not v.isNPC then
+                RaidMap.ShowPlayerPicker(self)
             end
         end
     end)
@@ -1479,103 +1427,125 @@ local function CreateDraggablePointIcon(parent, level, x, y, width, height, icon
     f:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
         GameTooltip:ClearLines()
-        if isBoss then
-            GameTooltip:AddLine("【首领 BOSS】 " .. (playerText ~= "" and playerText or "首领"), 1, 0.25, 0.25)
+        if v.isBoss then
+            GameTooltip:AddLine("【首领 BOSS】 " .. (v.isNPC_text or "首领"), 1, 0.25, 0.25)
             local bossData = RaidMap.GetBoss(currentBossID)
-            if bossData and bossData.sub and bossData.sub ~= "" then
-                GameTooltip:AddLine(bossData.sub, 0.8, 0.8, 0.8, true)
-            end
-            if bossData and bossData.tacticTip and bossData.tacticTip ~= "" then
-                GameTooltip:AddLine(" ")
-                GameTooltip:AddLine(bossData.tacticTip, 1, 0.85, 0.1, true)
-            end
-        elseif isMeleeGroup then
-            GameTooltip:AddLine("【⚔️ 战术群组】 " .. (playerText ~= "" and playerText or "近战组"), 1, 0.85, 0.1)
-            GameTooltip:AddLine("战术职责: BOSS 正背后脚后跟集中输出 (全员集合点)", 0.6, 0.85, 1)
-            if self.members and #self.members > 0 then
-                GameTooltip:AddLine(" ")
-                GameTooltip:AddLine(string.format("包含近战成员 (%d人):", #self.members), 1, 1, 1)
-                for _, m in ipairs(self.members) do
-                    local mName = m.name or "队员"
-                    local mCls = m.class
-                    local cCode = "|cffffffff"
-                    if mCls and RAID_CLASS_COLORS and RAID_CLASS_COLORS[mCls] then
-                        cCode = RAID_CLASS_COLORS[mCls].colorStr and ("|c" .. RAID_CLASS_COLORS[mCls].colorStr) or cCode
+            if bossData and bossData.sub then GameTooltip:AddLine(bossData.sub, 0.8, 0.8, 0.8, true) end
+        elseif v.isNPC then
+            if v.isNPC_icon == "Interface\\Icons\\ability_steelmelee" then
+                GameTooltip:AddLine("【⚔️ 近战集合组】 " .. (v.isNPC_text or "近战"), 1, 0.85, 0.1)
+                GameTooltip:AddLine("战术职责: BOSS 正背后脚后跟集中输出 (全员集合点)", 0.6, 0.85, 1)
+                if RaidMap.meleeRoster and #RaidMap.meleeRoster > 0 then
+                    GameTooltip:AddLine(" ")
+                    GameTooltip:AddLine(string.format("当前团队近战成员 (%d人):", #RaidMap.meleeRoster), 1, 1, 1)
+                    for _, m in ipairs(RaidMap.meleeRoster) do
+                        local cCode = RAID_CLASS_COLORS[m.class] and RAID_CLASS_COLORS[m.class].colorStr or "ffffffff"
+                        GameTooltip:AddLine("  • |c" .. cCode .. m.name .. "|r (" .. (m.specName or "近战") .. ")")
                     end
-                    local specText = m.specName and (" (" .. m.specName .. ")") or ""
-                    GameTooltip:AddLine("  • " .. cCode .. mName .. "|r" .. "|cffaaaaaa" .. specText .. "|r")
                 end
+            else
+                GameTooltip:AddLine("【战术标记】 " .. (v.isNPC_text or "地标"), 0.3, 0.9, 1)
             end
-            if not parent.isViewMode then
-                GameTooltip:AddLine(" ")
-                GameTooltip:AddLine("提示: 拖动此标记可整体调整近战集合点；点击顶部【阵型布局】可随时展开为个人散点", 0.3, 1, 0.5, true)
-            end
-            GameTooltip:Show()
-            return
-        elseif isNpc then
-            GameTooltip:AddLine("【战术标记】 " .. (playerText ~= "" and playerText or "核心地标"), 0.3, 0.9, 1)
         else
-            if playerText and playerText ~= "" then
-                GameTooltip:AddLine(playerText, playerColor[1] or 1, playerColor[2] or 1, playerColor[3] or 1)
+            local p = RaidMap.assignedPlayers[index]
+            if p then
+                local cCode = RAID_CLASS_COLORS[p.class] and RAID_CLASS_COLORS[p.class].colorStr or "ffffffff"
+                GameTooltip:AddLine(string.format("|c%s%s|r (%d 号位)", cCode, p.name, index), 1, 1, 1)
+                GameTooltip:AddLine("专精: " .. (p.specName or "未知") .. " | 职责: " .. (p.role or "队员"), 0.8, 0.8, 0.8)
+            else
+                GameTooltip:AddLine(string.format("未分配玩家 (%d 号位)", index), 0.7, 0.7, 0.7)
+                GameTooltip:AddLine("左键点击可手动指定队员，或点击上方 [同步团队] 自动入席", 0.3, 1, 0.5, true)
             end
-            if numText and numText ~= "" then
-                GameTooltip:AddLine("分配站位序号: " .. numText .. " 号位", 1, 0.82, 0)
+            local roleName = "未知"
+            if v.role == "tank" then
+                roleName = "坦克位"
+            elseif v.role == "healer" then
+                roleName = "治疗位"
+            elseif v.role == "ranged" then
+                roleName = "远程输出位"
+            else
+                roleName = (index <= 2) and "坦克位" or (index <= 7 and "治疗位" or "远程输出位")
             end
-            if role and role ~= "" then
-                local roleDesc
-                if role == "tank" then
-                    roleDesc = "坦克位 (背对团队/定怪面向正北)"
-                elseif role == "healer" then
-                    if self.isTankHealer then
-                        roleDesc = "核心保坦治疗 (紧贴坦克安全内圈，压制/牺牲/道标无死角覆盖)"
-                    else
-                        roleDesc = "团补大团治疗 (全团中内圈居中辐射，全方位覆盖近战与远程)"
-                    end
-                elseif role == "melee" then
-                    roleDesc = "近战输出位 (BOSS背后脚后跟集中输出)"
-                elseif role == "ranged" then
-                    roleDesc = "远程输出位 (外圈分散/保持10码防连线)"
-                else
-                    roleDesc = role
-                end
-                GameTooltip:AddLine("战术职责: " .. roleDesc, 0.6, 0.85, 1)
-            end
-        end
-
-        if parent.isViewMode then
+            local fullDesc = v.desc and (roleName .. " - " .. v.desc) or roleName
+            GameTooltip:AddLine("预设定位: " .. fullDesc, 0.6, 0.85, 1)
             GameTooltip:AddLine(" ")
-            GameTooltip:AddLine("|TInterface\\AddOns\\BGLite_Plus\\Media\\lock.png:13:13:0:0|t 当前为【团队查阅模式】(点位已锁定防误触，点击顶部可临时解锁)", 1, 0.8, 0)
-        else
-            GameTooltip:AddLine(" ")
-            GameTooltip:AddLine("提示: 鼠标按住左键可自由拖动调整站位", 0.3, 1, 0.5)
+            GameTooltip:AddLine("提示: 鼠标左键拖拽调整位置 | 右键清空 | Shift+右键恢复默认坐标", 0.5, 0.5, 0.5)
         end
         GameTooltip:Show()
     end)
     f:SetScript("OnLeave", GameTooltip_Hide)
 
-    f:Show()
-    tinsert(parent.icons, f)
+    tinsert(mapFrame.icons, f)
     return f
 end
 
--- 8. 阵型实时重组与排布执行器 (ApplyFormation)
-function RaidMap.ApplyFormation(newMeleeMode, newRangedMode)
-    if newMeleeMode then currentMeleeMode = newMeleeMode end
-    if newRangedMode then currentRangedMode = newRangedMode end
-    if BiaoGe and BiaoGe.RaidMap then
-        BiaoGe.RaidMap.meleeMode = currentMeleeMode
-        BiaoGe.RaidMap.rangedMode = currentRangedMode
+-- 玩家选择下拉菜单 (点击点位手动调位)
+function RaidMap.ShowPlayerPicker(icon)
+    if not icon or icon.v.isNPC then return end
+    local menu = {
+        {
+            text = "清除该槽位玩家",
+            func = function()
+                RaidMap.assignedPlayers[icon.index] = nil
+                icon:UpdateDisplay()
+                RaidMap.RefreshSelfHighlight(mapFrame)
+            end,
+            notCheckable = true,
+        },
+        {
+            text = "── 选择团队成员 ──",
+            isTitle = true,
+            notCheckable = true,
+        },
+    }
+
+    local rosterData = RaidMap.GetAutoRosterData()
+    if rosterData then
+        local all = {}
+        for _, t in ipairs(rosterData.tanks) do tinsert(all, t) end
+        for _, h in ipairs(rosterData.tankHealers) do tinsert(all, h) end
+        for _, h in ipairs(rosterData.raidHealers) do tinsert(all, h) end
+        for _, r in ipairs(rosterData.rangeds) do tinsert(all, r) end
+        for _, m in ipairs(rosterData.melees) do tinsert(all, m) end
+
+        for _, p in ipairs(all) do
+            local cCode = RAID_CLASS_COLORS[p.class] and RAID_CLASS_COLORS[p.class].colorStr or "ffffffff"
+            tinsert(menu, {
+                text = string.format("|c%s%s|r (%s)", cCode, p.name, p.specName or p.role or ""),
+                func = function()
+                    RaidMap.assignedPlayers[icon.index] = p
+                    icon:UpdateDisplay()
+                    RaidMap.RefreshSelfHighlight(mapFrame)
+                end,
+                notCheckable = true,
+            })
+        end
     end
 
-    local f = mapFrame
-    if not f or not f:IsShown() then return end
+    local drop = mapFrame.playerPickerDropdown
+    if not drop then
+        drop = LibBG and LibBG:Create_UIDropDownMenu("BG_RaidMapPlayerPicker", mapFrame) or CreateFrame("Frame", "BG_RaidMapPlayerPicker", mapFrame, "UIDropDownMenuTemplate")
+        mapFrame.playerPickerDropdown = drop
+    end
 
-    -- 重新加载当前 BOSS 站位，根据新的队形模式重新生成点位（支持群组与散点无缝切换）
-    RaidMap.LoadBossTacticalPreset(currentBossID, RaidMap.lastRosterData)
+    local function InitPicker(self, level)
+        for _, item in ipairs(menu) do
+            local info = LibBG and LibBG:UIDropDownMenu_CreateInfo() or UIDropDownMenu_CreateInfo()
+            info.text = item.text
+            info.func = item.func
+            info.isTitle = item.isTitle
+            info.notCheckable = item.notCheckable
+            if LibBG then LibBG:UIDropDownMenu_AddButton(info, level) else UIDropDownMenu_AddButton(info, level) end
+        end
+    end
 
-    local mName = RaidMap.MELEE_MODE_NAMES and RaidMap.MELEE_MODE_NAMES[currentMeleeMode] or currentMeleeMode
-    local rName = RaidMap.RANGED_MODE_NAMES and RaidMap.RANGED_MODE_NAMES[currentRangedMode] or currentRangedMode
-    DEFAULT_CHAT_FRAME:AddMessage(string.format("|cff00BFFF[战术站位图]|r 已应用队形布局：近战【%s】、远程【%s】。点击【广播全团】即可推送到全团！", mName, rName))
+    if LibBG and LibBG.UIDropDownMenu_Initialize then
+        LibBG:UIDropDownMenu_Initialize(drop, InitPicker)
+        LibBG:ToggleDropDownMenu(1, nil, drop, icon, 0, 0)
+    else
+        UIDropDownMenu_Initialize(drop, InitPicker)
+        ToggleDropDownMenu(1, nil, drop, icon, 0, 0)
+    end
 end
 
 function RaidMap.RefreshSelfHighlight(f)
@@ -1586,11 +1556,13 @@ function RaidMap.RefreshSelfHighlight(f)
 
     for _, icon in ipairs(f.icons) do
         local isMine = false
-        local pText = icon.playerText or (icon.nameFS and icon.nameFS:GetText())
-        if pText and pText ~= "" and myName and (pText == myName) then
-            isMine = true
-        elseif icon.role == "melee_group" and icon.members and myName then
-            for _, m in ipairs(icon.members) do
+        if not icon.v.isNPC then
+            local p = RaidMap.assignedPlayers[icon.index]
+            if p and p.name == myName then
+                isMine = true
+            end
+        elseif icon.v.isNPC_icon == "Interface\\Icons\\ability_steelmelee" and RaidMap.meleeRoster then
+            for _, m in ipairs(RaidMap.meleeRoster) do
                 if m.name == myName then
                     isMine = true
                     isMeleeGroupMember = true
@@ -1610,58 +1582,53 @@ function RaidMap.RefreshSelfHighlight(f)
     if mySpot then
         if f.selfNotice then
             if isMeleeGroupMember then
-                f.selfNotice:SetText("【您的专属站位: ⚔️ 近战集合组 (BOSS正背后输出)】")
+                f.selfNotice:SetText("【您的专属站位: 近战集合组 (BOSS背后输出)】")
             else
-                local numStr = (mySpot.numFS and mySpot.numFS:GetText() ~= "") and (mySpot.numFS:GetText() .. "号位") or "指定点"
-                f.selfNotice:SetText(string.format("【您的专属站位: %s (%s)】", mySpot.playerText or "", numStr))
+                f.selfNotice:SetText(string.format("【您的专属站位: %s (%d号位)】", myName or "", mySpot.index or 0))
             end
         end
     else
-        local bossData = RaidMap.GetBoss(currentBossID)
-        local subDesc = bossData and bossData.sub or ""
         if f.selfNotice then
-            f.selfNotice:SetText(subDesc ~= "" and ("(" .. subDesc .. ")") or "")
+            f.selfNotice:SetText("")
         end
     end
 end
 
 --------------------------------------------------------------------------------
--- 8. 核心 BOSS 专属预设构建与贴图加载器
+-- 8. 核心 BOSS 专属预设构建与多阶段加载器 (LoadBossTacticalPreset)
 --------------------------------------------------------------------------------
-function RaidMap.LoadBossTacticalPreset(bossID, rosterData)
+function RaidMap.LoadBossTacticalPreset(bossID, phaseIndex)
     local f = RaidMap.CreateUI()
     if not f then return end
+    local all = RaidMap.GetAllBosses()
+    bossID = bossID or currentBossID
+    if (not bossID or bossID == 0) and all and #all > 0 then
+        bossID = all[1].id
+    end
     bossID = bossID or 5
     currentBossID = bossID
 
-    local width, height = 780, 560
-    f.originalWidth = width
-    f.originalHeight = height
-    f:SetSize(width, height)
-
-    -- 若未指定阵容但当前处于队伍或团队中，自动提取真实成员
-    if not rosterData and RaidMap.GetAutoRosterData and GetNumGroupMembers() > 0 then
-        rosterData = RaidMap.GetAutoRosterData()
-    end
-    RaidMap.lastRosterData = rosterData
-
-    -- 从数据中心按需提取当前 BOSS 战术数据
     local bossData = RaidMap.GetBoss(bossID)
     if not bossData then
-        local all = RaidMap.GetAllBosses()
         for _, b in ipairs(all) do
             if b.id == bossID then bossData = b; break end
         end
     end
+    if not bossData and all and #all > 0 then
+        bossData = all[1]
+        bossID = bossData.id
+        currentBossID = bossID
+    end
 
-    local fbName = bossData and (bossData.fbName or "团本") or "奥杜尔"
-    local bossName = bossData and bossData.name or "钢铁议会"
-    local subDesc = bossData and bossData.sub or ""
+    if not bossData then
+        f:Show()
+        return
+    end
 
+    local fbName = bossData.fbName or "奥杜尔"
+    local bossName = bossData.name or "首领"
     f.title:SetText(string.format("【%s】 %s", fbName, bossName))
-    f.selfNotice:SetText(subDesc ~= "" and ("(" .. subDesc .. ")") or "")
 
-    -- 同步更新下拉菜单文本
     if f.dropBoss then
         if LibBG and LibBG.UIDropDownMenu_SetText then
             LibBG:UIDropDownMenu_SetText(f.dropBoss, bossName)
@@ -1670,62 +1637,106 @@ function RaidMap.LoadBossTacticalPreset(bossID, rosterData)
         end
     end
 
-    -- 背景底图渲染机制：优先加载 1024x1024 高清实景场地鸟瞰背景
-    local hasRealMap = bossData and bossData.hasRealMap and bossData.mapTex
-    if hasRealMap then
-        f.isUsingGrid = false
-        f.mapTex:SetTexture(bossData.mapTex)
-        f.mapTex:Show()
-        if f.tacticalGrid then f.tacticalGrid:Hide() end
+    local activeTbl = nil
+    local activeTip = nil
+    local activeTex = nil
+
+    -- 多阶段判定与 Tab 栏渲染
+    if bossData.phases and #bossData.phases > 0 then
+        currentPhase = phaseIndex or 1
+        if currentPhase > #bossData.phases then currentPhase = 1 end
+        f.phaseTabBar:Show()
+        f.mapCanvas:SetPoint("TOPLEFT", 16, -92)
+
+        for i, phase in ipairs(bossData.phases) do
+            local btn = f.phaseButtons[i]
+            if not btn then
+                btn = BG.CreateButton(f.phaseTabBar)
+                btn:SetSize(150, 26)
+                if i == 1 then
+                    btn:SetPoint("LEFT", 0, 0)
+                else
+                    btn:SetPoint("LEFT", f.phaseButtons[i - 1], "RIGHT", 6, 0)
+                end
+                f.phaseButtons[i] = btn
+            end
+            btn:SetSize(150, 26)
+            btn:SetText(phase.name)
+            btn:Show()
+            if i == currentPhase then
+                btn:SetBackdropBorderColor(0.2, 1, 0.4, 1)
+                btn:SetText(BG.STC_g1(phase.name))
+            else
+                btn:SetBackdropBorderColor(0.3, 0.3, 0.3, 0.8)
+                btn:SetText(BG.STC_w1(phase.name))
+            end
+            btn:SetScript("OnClick", function()
+                RaidMap.LoadBossTacticalPreset(bossID, i)
+                BG.PlaySound(1)
+            end)
+        end
+        for i = #bossData.phases + 1, #f.phaseButtons do
+            f.phaseButtons[i]:Hide()
+        end
+
+        local curP = bossData.phases[currentPhase]
+        activeTbl = curP.tbl
+        activeTip = curP.tacticTip or bossData.tacticTip
+        activeTex = curP.mapTex or bossData.mapTex
     else
-        f.isUsingGrid = true
-        f.mapTex:Hide()
-        DrawProceduralTacticalGrid(f, width, height, bossID)
+        currentPhase = 1
+        f.currentPhase = 1
+        RaidMap.currentPhase = 1
+        f.phaseTabBar:Hide()
+        for _, b in ipairs(f.phaseButtons) do b:Hide() end
+        f.mapCanvas:SetPoint("TOPLEFT", 16, -66)
+
+        activeTbl = bossData.tbl
+        activeTip = bossData.tacticTip
+        activeTex = bossData.mapTex
     end
 
+    f.currentBossID = bossID
+    f.currentPhase = currentPhase
+    f.activeTacticTip = activeTip
+    RaidMap.currentBossID = bossID
+    RaidMap.currentPhase = currentPhase
+
+    -- 场地左上角战术一句话核心概括 (绿字呈现)
+    local subDesc = bossData and bossData.sub or ""
+    if f.mapSubText then
+        f.mapSubText:SetText(subDesc ~= "" and ("【战术核心】 " .. subDesc) or "")
+    end
+
+    -- 攻略详细文本 (首排以盾牌图标引导直接接上【xxx站位要点】，不浪费多余行数)
+    local shieldIcon = "|TInterface\\AddOns\\BGLite_Plus\\Media\\shield.png:13:13:0:0|t "
+    f.tacticTipText:SetText(activeTip and (shieldIcon .. activeTip) or "")
+
+    -- 背景底图渲染与战术网格切换
+    local grid = f.tacticalGrid or (f.mapCanvas and f.mapCanvas.tacticalGrid)
+    if activeTex then
+        f.mapTex:SetTexture(activeTex)
+        f.mapTex:SetVertexColor(1, 1, 1, 0.95)
+        f.mapTex:Show()
+        if grid then grid:Hide() end
+    else
+        f.mapTex:Hide()
+        DrawProceduralTacticalGrid(f.mapCanvas, f.mapCanvas:GetWidth(), f.mapCanvas:GetHeight(), bossID)
+    end
+
+    -- 清理旧图标
     for _, icon in ipairs(f.icons) do icon:Hide() end
     wipe(f.icons)
 
-    local cx, cy = width / 2, -height / 2 + 10
-
-    -- 1. 数据驱动：动态渲染 BOSS 首领与战术特定目标标记
-    if bossData and bossData.targets and #bossData.targets > 0 then
-        for _, t in ipairs(bossData.targets) do
-            local tx = cx + (t.relX or 0)
-            local ty = cy + (t.relY or 0)
-            local sz = t.size or ((t.type == "boss") and 50 or 36)
-            local c = t.color or { 1, 1, 1 }
-            local iconTex = t.iconTex or "Interface\\TargetingFrame\\UI-RaidTargetingIcon_8"
-            CreateDraggablePointIcon(f, 2, tx, ty, sz, sz, (t.type == "boss" and "boss" or "tex"), iconTex, nil,
-                                    1, c, "", { 1, 1, 1 }, t.name or "", c, t.type or "npc")
-        end
-    else
-        CreateDraggablePointIcon(f, 2, cx, cy + 90, 50, 50, "boss", "Interface\\TargetingFrame\\UI-RaidTargetingIcon_8", nil,
-                                1, { 1, 0.2, 0.2 }, "", { 1, 1, 1 }, bossName, { 1, 0.3, 0.3 }, "boss")
+    -- 智能自动带入团队人员 (若处于队伍/团队或启用了拟真调试，选到Boss/阶段即自动分配入席)
+    if RaidMap.AutoAssignRosterToMap then
+        RaidMap.AutoAssignRosterToMap(true)
     end
 
-    -- 2. 数据驱动：构建推荐阵型点位 (支持根据实际阵容 rosterData 动态弹性生成)
-    local spots = nil
-    if bossData and bossData.buildSpots then
-        spots = bossData.buildSpots(cx, cy, width, height, rosterData)
-    else
-        spots = RaidMap.GenerateDynamicTacticalSpots(cx, cy, nil, rosterData)
-    end
-
-    if spots then
-        for _, s in ipairs(spots) do
-            local cr, cg, cb = 1, 1, 1
-            if RAID_CLASS_COLORS and s.cls and RAID_CLASS_COLORS[s.cls] then
-                local c = RAID_CLASS_COLORS[s.cls]; cr, cg, cb = c.r, c.g, c.b
-            end
-            local classIcons = RaidMap.CLASS_ICONS or {}
-            local iconTex = s.specIcon or (s.cls and classIcons[s.cls]) or "Interface\\Icons\\INV_Misc_QuestionMark"
-            local isMeleeGroup = (s.role == "melee_group")
-            local iconSz = (s.role == "tank") and 30 or (isMeleeGroup and 36 or 28)
-            local pointIcon = CreateDraggablePointIcon(f, 3, s.x, s.y, iconSz, iconSz, "tex", iconTex, nil,
-                                                      1, { cr, cg, cb }, s.num or "", { 1, 1, 1 }, s.name or "", { cr, cg, cb }, s.role or "player", s.members)
-            pointIcon.members = s.members
-            pointIcon.isTankHealer = s.isTankHealer
+    -- 渲染新图元点位 (静态坐标表 tbl 驱动)
+    if activeTbl then
+        for index, v in pairs(activeTbl) do
+            CreateDraggablePointIcon(f.mapCanvas, index, v)
         end
     end
 
@@ -1736,11 +1747,23 @@ function RaidMap.LoadBossTacticalPreset(bossID, rosterData)
 end
 
 RaidMap.ShowDemoTacticalBoard = function(bossID)
-    RaidMap.LoadBossTacticalPreset(bossID or 5)
+    RaidMap.LoadBossTacticalPreset(bossID or 5, 1)
+end
+
+function RaidMap.Toggle(bossID)
+    local f = mapFrame or BG.RaidMapFrame or _G["BG.RaidMapFrame"]
+    if f and f:IsShown() then
+        f:Hide()
+    else
+        RaidMap.LoadBossTacticalPreset(bossID or currentBossID or 5, currentPhase or 1)
+        if mapFrame and not mapFrame:IsShown() then
+            mapFrame:Show()
+        end
+    end
 end
 
 --------------------------------------------------------------------------------
--- 9. 智能同步团队职责与动态阵型重塑算法 (Dynamic Roster Reconstruction)
+-- 9. 智能团队职责提取与全自动布阵 (AutoAssignRosterToMap)
 --------------------------------------------------------------------------------
 function RaidMap.GetAutoRosterData()
     local numMembers = GetNumGroupMembers()
@@ -1835,22 +1858,146 @@ function RaidMap.GetAutoRosterData()
     }
 end
 
-function RaidMap.AutoAssignRosterToMap()
-    local f = mapFrame
-    if not f or not f:IsShown() then return end
+function RaidMap.AutoAssignRosterToMap(isSilent)
+    local f = mapFrame or BG.RaidMapFrame
+    if not f then return end
 
     local rosterData = RaidMap.GetAutoRosterData()
     if not rosterData then
-        DEFAULT_CHAT_FRAME:AddMessage("|cff00BFFF[BGLite 战术站位图]|r 当前未处于队伍或团队中，已恢复标准示范站位。")
-        RaidMap.LoadBossTacticalPreset(currentBossID, nil)
+        if not isSilent then
+            DEFAULT_CHAT_FRAME:AddMessage("|cff00BFFF[BGLite 战术站位图]|r 当前未处于队伍或团队中，请在组队后点击同步。")
+        end
         return
     end
 
-    RaidMap.LoadBossTacticalPreset(currentBossID, rosterData)
+    wipe(RaidMap.assignedPlayers)
+    wipe(RaidMap.meleeRoster)
 
-    local totalMembers = #rosterData.tanks + #rosterData.tankHealers + #rosterData.raidHealers + #rosterData.melees + #rosterData.rangeds
-    DEFAULT_CHAT_FRAME:AddMessage(string.format("|cff00ff00[BGLite 战术站位图]|r 已根据当前团队阵容智能重塑阵型：共 %d 名成员 (坦克 %d, 核心保坦奶 %d, 团补奶 %d, 近战 %d, 远程 %d)！",
-        totalMembers, #rosterData.tanks, #rosterData.tankHealers, #rosterData.raidHealers, #rosterData.melees, #rosterData.rangeds))
+    -- 动态分析当前首领/阶段 activeTbl 中的实际槽位职责类型
+    local bossData = RaidMap.GetBoss(currentBossID)
+    local curTbl = nil
+    if bossData then
+        if bossData.phases and #bossData.phases > 0 then
+            local cp = currentPhase or 1
+            curTbl = bossData.phases[cp] and bossData.phases[cp].tbl
+        else
+            curTbl = bossData.tbl
+        end
+    end
+
+    local tankSlots = {}
+    local healerSlots = {}
+    local rangedSlots = {}
+
+    if curTbl then
+        for idx = 1, 40 do
+            local spotInfo = curTbl[idx]
+            if spotInfo and not spotInfo.isNPC then
+                local r = spotInfo.role
+                if not r then
+                    r = (idx <= 2) and "tank" or (idx <= 7 and "healer" or "ranged")
+                end
+                if r == "tank" then
+                    tinsert(tankSlots, idx)
+                elseif r == "healer" then
+                    tinsert(healerSlots, idx)
+                else
+                    tinsert(rangedSlots, idx)
+                end
+            end
+        end
+    else
+        tankSlots = { 1, 2 }
+        healerSlots = { 3, 4, 5, 6, 7 }
+        for i = 8, 17 do tinsert(rangedSlots, i) end
+    end
+
+    -- 1. 坦克入席 (依次落座当前 Boss 的 tankSlots)
+    local overflowTanks = {}
+    for i, t in ipairs(rosterData.tanks) do
+        if i <= #tankSlots then
+            local slot = tankSlots[i]
+            RaidMap.assignedPlayers[slot] = t
+        else
+            tinsert(overflowTanks, t)
+        end
+    end
+
+    -- 2. 治疗入席 (优先保坦奶骑/戒律入席前排，团补入席后排)
+    local allHealers = {}
+    for _, h in ipairs(rosterData.tankHealers) do tinsert(allHealers, h) end
+    for _, h in ipairs(rosterData.raidHealers) do tinsert(allHealers, h) end
+
+    local overflowHealers = {}
+    for i, h in ipairs(allHealers) do
+        if i <= #healerSlots then
+            local slot = healerSlots[i]
+            RaidMap.assignedPlayers[slot] = h
+        else
+            tinsert(overflowHealers, h)
+        end
+    end
+
+    -- 3. 远程与溢出人员灵活自适应填补
+    local availableRangedSlots = {}
+    for _, s in ipairs(rangedSlots) do tinsert(availableRangedSlots, s) end
+
+    -- 3.1 溢出的治疗优先填入空闲的远程散点 (治疗同为远程，站远程位安全且不乱仇恨)
+    for _, oh in ipairs(overflowHealers) do
+        if #availableRangedSlots > 0 then
+            local slot = tremove(availableRangedSlots, 1)
+            RaidMap.assignedPlayers[slot] = oh
+        end
+    end
+
+    -- 3.2 正常远程入席剩余的远程槽位
+    local overflowRangeds = {}
+    for _, r in ipairs(rosterData.rangeds) do
+        if #availableRangedSlots > 0 then
+            local slot = tremove(availableRangedSlots, 1)
+            RaidMap.assignedPlayers[slot] = r
+        else
+            -- 远程预设槽位已满，检查是否有空闲的治疗槽位可以自适应借用
+            local freeHealerSlot = nil
+            for _, hs in ipairs(healerSlots) do
+                if not RaidMap.assignedPlayers[hs] then
+                    freeHealerSlot = hs
+                    break
+                end
+            end
+            if freeHealerSlot then
+                RaidMap.assignedPlayers[freeHealerSlot] = r
+            else
+                tinsert(overflowRangeds, r)
+            end
+        end
+    end
+
+    -- 4. 近战全员归集于近战组 [98]；多余的备用坦克也合并入近战组
+    for _, m in ipairs(rosterData.melees) do
+        tinsert(RaidMap.meleeRoster, m)
+    end
+    for _, ot in ipairs(overflowTanks) do
+        tinsert(RaidMap.meleeRoster, ot)
+    end
+
+    -- 刷新所有槽位显示 (若已有图标)
+    if f.icons then
+        for _, icon in ipairs(f.icons) do
+            if icon.UpdateDisplay then
+                icon:UpdateDisplay()
+            end
+        end
+    end
+
+    RaidMap.RefreshSelfHighlight(f)
+
+    if not isSilent then
+        local totalAssigned = 0
+        for _, _ in pairs(RaidMap.assignedPlayers) do totalAssigned = totalAssigned + 1 end
+        DEFAULT_CHAT_FRAME:AddMessage(string.format("|cff00ff00[BGLite 战术站位图]|r 自动分配完毕：%d 位成员已入席指定槽位；近战 %d 人归集于【近战集合组】！",
+            totalAssigned, #RaidMap.meleeRoster))
+    end
 end
 
 --------------------------------------------------------------------------------
@@ -1893,10 +2040,11 @@ function RaidMap.BroadcastCurrentMap()
         local x = math.floor(icon.x or 0)
         local y = math.floor(icon.y or 0)
         local w = math.floor(icon:GetWidth())
-        local iconType = (icon.role == "boss") and "boss" or "tex"
-        local iconTex = icon.icon:GetTexture() or ""
-        local numText = icon.numFS and icon.numFS:GetText() or ""
-        local playerText = icon.nameFS and icon.nameFS:GetText() or ""
+        local isBoss = (icon.v and icon.v.isBoss) or (icon.role == "boss")
+        local iconType = isBoss and "boss" or "tex"
+        local iconTex = (icon.icon and icon.icon:GetTexture()) or ""
+        local numText = (icon.numText and icon.numText:GetText()) or ""
+        local playerText = (icon.playerText and icon.playerText:GetText()) or ""
 
         iconStr = iconStr .. format("%d¦%d¦%d¦%d¦%d¦%s¦%s¦%s¦%s¦%s¦%s¦%d¦%.2f¦%.2f¦%.2f¦%s¦%.2f¦%.2f¦%.2f¦%s¦%.2f¦%.2f¦%.2f&&",
             level, x, y, w, w, iconType, iconTex,
@@ -2010,16 +2158,17 @@ function RaidMap.RenderByCode(code, notSave, sender)
 
     -- 接收端背景贴图渲染
     local bossData = RaidMap.GetBoss(bossIndex)
-    local hasRealMap = bossData and bossData.hasRealMap and bossData.mapTex
-    if hasRealMap then
+    local realTex = bossData and (bossData.mapTex or (bossData.phases and bossData.phases[1] and bossData.phases[1].mapTex))
+    local grid = f.tacticalGrid or (f.mapCanvas and f.mapCanvas.tacticalGrid)
+    if realTex then
         f.isUsingGrid = false
-        f.mapTex:SetTexture(bossData.mapTex)
+        f.mapTex:SetTexture(realTex)
         f.mapTex:Show()
-        if f.tacticalGrid then f.tacticalGrid:Hide() end
+        if grid then grid:Hide() end
     else
         f.isUsingGrid = true
         f.mapTex:Hide()
-        DrawProceduralTacticalGrid(f, mapWidth, mapHeight, bossIndex)
+        DrawProceduralTacticalGrid(f.mapCanvas or f, mapWidth, mapHeight, bossIndex)
     end
 
     for _, icon in ipairs(f.icons) do icon:Hide() end
@@ -2064,12 +2213,30 @@ function RaidMap.RenderByCode(code, notSave, sender)
                     end
                 end
 
-                local role = (iconType == "boss" and "boss") or (isMeleeGroup and "melee_group") or "player"
+                local isBoss = (iconType == "boss")
+                local isNPC = isBoss or isMeleeGroup or (numText == "")
+                local v = {
+                    xy = { x, y },
+                    size = width,
+                    isNPC = isNPC,
+                    isBoss = isBoss,
+                    isNPC_icon = iconTex ~= "" and iconTex or (isBoss and "Interface\\Icons\\achievement_boss_algalon_01" or (isMeleeGroup and "Interface\\Icons\\ability_steelmelee" or nil)),
+                    isNPC_text = playerText or "",
+                    isNPC_help = isMeleeGroup,
+                }
 
-                local pointIcon = CreateDraggablePointIcon(f, level, x, y, width, height, iconType, iconTex, coord,
-                                         tonumber(broderShow) or 1, broderColor,
-                                         numText, numColor, playerText, playerColor, role, members)
-                pointIcon.members = members
+                local idx = tonumber(numText) or (#f.icons + 1)
+                local pointIcon = CreateDraggablePointIcon(f.mapCanvas, idx, v)
+                if not isNPC and playerText and playerText ~= "" then
+                    pointIcon.playerText:SetText(playerText)
+                    pointIcon.playerText:SetTextColor(playerColor[1], playerColor[2], playerColor[3])
+                    pointIcon.border:SetVertexColor(broderColor[1], broderColor[2], broderColor[3])
+                    pointIcon.numText:SetText(numText ~= "" and numText or tostring(idx))
+                    pointIcon.name = playerText
+                end
+                if isMeleeGroup then
+                    pointIcon.members = members
+                end
             end
         end
     end
@@ -2167,104 +2334,15 @@ end)
 -- 13. 团队工具内专属控制卡片构建
 --------------------------------------------------------------------------------
 function RaidMap.CreateRaidToolPanel(parent)
-    if not parent then return end
-    RaidMap.InitDB()
-
-    local box = CreateFrame("Frame", "BG_RaidMapToolBox", parent, "BackdropTemplate")
-    box:SetSize(315, 68)
-    box:SetPoint("BOTTOMLEFT", parent, "BOTTOMLEFT", 14, 12)
-    box:SetBackdrop({
-        bgFile = "Interface/ChatFrame/ChatFrameBackground",
-        edgeFile = "Interface/Tooltips/UI-Tooltip-Border",
-        edgeSize = 12,
-        insets = { left = 2, right = 2, top = 2, bottom = 2 },
-    })
-    box:SetBackdropColor(0.06, 0.08, 0.12, 0.94)
-    box:SetBackdropBorderColor(0.25, 0.75, 1.0, 0.85)
-
-    local title = box:CreateFontString(nil, "OVERLAY")
-    title:SetFont(BIAOGE_TEXT_FONT, 14, "OUTLINE")
-    title:SetPoint("TOPLEFT", 10, -6)
-    title:SetText(BG.STC_b1("【战术站位图 (奥杜尔/通用)】"))
-
-    local cbAuto = CreateFrame("CheckButton", nil, box, "UICheckButtonTemplate")
-    cbAuto:SetSize(18, 18)
-    cbAuto:SetPoint("TOPRIGHT", -8, -4)
-    cbAuto.text = cbAuto:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
-    cbAuto.text:SetPoint("RIGHT", cbAuto, "LEFT", -2, 0)
-    cbAuto.text:SetFont(BIAOGE_TEXT_FONT, 12, "OUTLINE")
-    cbAuto.text:SetText("自动弹出")
-    cbAuto:SetChecked(BiaoGe.RaidMap.enableAutoPopup)
-    cbAuto:SetScript("OnClick", function(self)
-        BiaoGe.RaidMap.enableAutoPopup = self:GetChecked()
-        BG.PlaySound(1)
-    end)
-    cbAuto:SetScript("OnEnter", function(self)
-        GameTooltip:SetOwner(self, "ANCHOR_TOP")
-        GameTooltip:AddLine("站位图自动接收弹出", 1, 1, 1)
-        GameTooltip:AddLine("勾选(默认)：当团长或助理广播站位图时，屏幕上自动弹出站位图看板并高亮您的站位。\n反选：仅静默存入历史记录，不打扰屏幕。", 0.85, 0.85, 0.85, true)
-        GameTooltip:Show()
-    end)
-    cbAuto:SetScript("OnLeave", GameTooltip_Hide)
-
-    local btnOpen = BG.CreateButton(box)
-    btnOpen:SetSize(90, 24)
-    btnOpen:SetPoint("BOTTOMLEFT", 10, 8)
-    btnOpen:SetText("打开站位图")
-    btnOpen:SetScript("OnClick", function()
-        if mapFrame and mapFrame:IsShown() then
-            mapFrame:Hide()
-        else
-            if BiaoGe.maps and #BiaoGe.maps > 0 and BiaoGe.maps[1].code then
-                RaidMap.RenderByCode(BiaoGe.maps[1].code, true)
-            else
-                RaidMap.LoadBossTacticalPreset(5)
-            end
-        end
-        BG.PlaySound(1)
-    end)
-
-    local btnPreset = BG.CreateButton(box)
-    btnPreset:SetSize(100, 24)
-    btnPreset:SetPoint("LEFT", btnOpen, "RIGHT", 6, 0)
-    btnPreset:SetText("奥杜尔预设")
-    btnPreset:SetScript("OnClick", function()
-        RaidMap.LoadBossTacticalPreset(currentBossID or 5)
-        BG.PlaySound(1)
-    end)
-
-    local btnReset = BG.CreateButton(box)
-    btnReset:SetSize(86, 24)
-    btnReset:SetPoint("LEFT", btnPreset, "RIGHT", 6, 0)
-    btnReset:SetText("重置位置")
-    btnReset:SetScript("OnClick", function()
-        local f = RaidMap.CreateUI()
-        f:ClearAllPoints()
-        f:SetPoint(unpack(f.defaultPoint))
-        local point, relativeTo, relativePoint, xOfs, yOfs = f:GetPoint(1)
-        BiaoGe.point["BG.RaidMapFrame"] = { point, nil, relativePoint, xOfs, yOfs }
-        BiaoGe.RaidMap.mapScale = 0.85
-        DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00[BGLite 战术站位图] 看板位置与缩放已重置为屏幕中央默认值！|r")
-        BG.PlaySound(1)
-    end)
-
-    return box
+    -- 团队工具左侧面板已按规范彻底移除，入口已统一移至团队工具右侧面板顶部【战术站位图】按钮
 end
 
 --------------------------------------------------------------------------------
--- 14. 命令行支持
+-- 14. 命令行支持 (/bgmap, /tjmap, /bglitemap)
 --------------------------------------------------------------------------------
 SLASH_BGLITEMAP1 = "/bgmap"
 SLASH_BGLITEMAP2 = "/tjmap"
 SLASH_BGLITEMAP3 = "/bglitemap"
-SlashCmdList["BGLITEMAP"] = function()
-    if mapFrame and mapFrame:IsShown() then
-        mapFrame:Hide()
-    else
-        if BiaoGe and BiaoGe.maps and #BiaoGe.maps > 0 and BiaoGe.maps[1].code then
-            RaidMap.RenderByCode(BiaoGe.maps[1].code, true)
-        else
-            RaidMap.LoadBossTacticalPreset(currentBossID or 5)
-        end
-    end
+SlashCmdList["BGLITEMAP"] = function(msg)
+    RaidMap.Toggle()
 end

@@ -30,6 +30,7 @@ Core\RaidTool\RaidMap_Data\Registry.lua
 Core\RaidTool\RaidMap_Data\General.lua
 Core\RaidTool\RaidMap_Data\ULD.lua
 Core\RaidTool\RaidMap.lua
+Core\RaidTool\RaidMock.lua
 Core\WhoHistory.lua
 Core\TeamInfo.lua
 Core\TradeHistory.lua
