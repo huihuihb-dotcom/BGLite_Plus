@@ -909,7 +909,7 @@ function RaidMap.CreateUI()
             if f.tipPanel then f.tipPanel:Show() end
             if f.btnResetSize then f.btnResetSize:Show() end
             local bossData = RaidMap.GetBoss(currentBossID)
-            if bossData and bossData.phases and #bossData.phases > 0 then
+            if not f.isReceiverMode and bossData and bossData.phases and #bossData.phases > 0 then
                 f.phaseTabBar:Show()
             end
             btnMin:SetNormalTexture("Interface\\Buttons\\UI-Panel-SmallerButton-Up")
@@ -965,7 +965,42 @@ function RaidMap.CreateUI()
         UIDropDownMenu_SetText(dropBoss, curName)
     end
 
-    -- 2. 查阅模式防误触状态条 (只读模式下显示，编辑模式下隐藏)
+    -- 2. 接收受令模式专属状态栏 (纯净接收端展示：零广播、零通报、零解锁锁定、零修改)
+    local receiverBadge = CreateFrame("Frame", nil, topControls)
+    receiverBadge:SetPoint("LEFT", dropBoss, "RIGHT", 8, 0)
+    receiverBadge:SetPoint("RIGHT", 0, 0)
+    receiverBadge:SetHeight(28)
+    receiverBadge:Hide()
+    f.receiverBadge = receiverBadge
+
+    local receiverBadgeText = receiverBadge:CreateFontString(nil, "OVERLAY")
+    receiverBadgeText:SetFont(BIAOGE_TEXT_FONT, 13, "OUTLINE")
+    receiverBadgeText:SetPoint("LEFT", 0, 0)
+    receiverBadgeText:SetTextColor(0.2, 0.9, 1)
+    receiverBadgeText:SetText("|TInterface\\AddOns\\BGLite_Plus\\Media\\lock.png:14:14:0:0|t 战术受令看板")
+    f.receiverBadgeText = receiverBadgeText
+
+    local btnBackToEditor = BG.CreateButton(receiverBadge)
+    btnBackToEditor:SetSize(100, 22)
+    btnBackToEditor:SetPoint("LEFT", receiverBadgeText, "RIGHT", 12, 0)
+    btnBackToEditor:SetText(BG.STC_w1("返回本地设计"))
+    btnBackToEditor:SetScript("OnClick", function()
+        RaidMap.SetDisplayMode("EDITOR")
+        RaidMap.LoadBossTacticalPreset(currentBossID, currentPhase)
+        BG.PlaySound(1)
+        DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00[BGLite 战术站位图]|r 已切回本地团长战术设计器。")
+    end)
+    btnBackToEditor:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_TOP")
+        GameTooltip:AddLine("切回本地团长战术设计器", 1, 1, 1)
+        GameTooltip:AddLine("退出当前的接收受令看板，返回您本地的 BOSS 战术预设与排兵布阵工具。", 0.85, 0.85, 0.85, true)
+        GameTooltip:Show()
+    end)
+    btnBackToEditor:SetScript("OnLeave", GameTooltip_Hide)
+    btnBackToEditor:Hide()
+    f.btnBackToEditor = btnBackToEditor
+
+    -- 3. 本地查阅模式防误触状态条 (仅在团长主动点击【锁定】时使用)
     local viewBadge = CreateFrame("Frame", nil, topControls)
     viewBadge:SetPoint("LEFT", dropBoss, "RIGHT", 8, 0)
     viewBadge:SetSize(360, 26)
@@ -976,7 +1011,7 @@ function RaidMap.CreateUI()
     viewBadgeText:SetFont(BIAOGE_TEXT_FONT, 13, "OUTLINE")
     viewBadgeText:SetPoint("LEFT", 0, 0)
     viewBadgeText:SetTextColor(1, 0.85, 0.1)
-    viewBadgeText:SetText("|TInterface\\AddOns\\BGLite_Plus\\Media\\lock.png:14:14:0:0|t 团队查阅模式 (点位已锁定)")
+    viewBadgeText:SetText("|TInterface\\AddOns\\BGLite_Plus\\Media\\lock.png:14:14:0:0|t 战术设计已锁定")
 
     local btnUnlock = BG.CreateButton(viewBadge)
     btnUnlock:SetSize(88, 22)
@@ -989,7 +1024,7 @@ function RaidMap.CreateUI()
     end)
     btnUnlock:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_TOP")
-        GameTooltip:AddLine("临时解锁编辑权限", 1, 1, 1)
+        GameTooltip:AddLine("解除锁定", 1, 1, 1)
         GameTooltip:AddLine("解除点位锁定状态，允许您在本地自由拖拽图标调整站位，或重新同步/广播。", 0.85, 0.85, 0.85, true)
         GameTooltip:Show()
     end)
@@ -1122,7 +1157,7 @@ function RaidMap.CreateUI()
             info.text = string.format("%s - %s (%s)", item.bossName or "未知", item.sender or "团长", timeStr)
             info.func = function()
                 currentMapIndex = i
-                RaidMap.RenderByCode(item.code, true)
+                RaidMap.RenderByCode(item.code, true, item.sender)
             end
             if LibBG then LibBG:UIDropDownMenu_AddButton(info, level) else UIDropDownMenu_AddButton(info, level) end
         end
@@ -1233,8 +1268,57 @@ function RaidMap.CreateUI()
     btnFastSend:SetScript("OnLeave", GameTooltip_Hide)
     f.btnFastSend = btnFastSend
 
-    -- 模式切换器
+    -- 统一模式调度引擎 ("EDITOR" 团长设计模式 | "RECEIVER" 接收受令模式)
+    function RaidMap.SetDisplayMode(mode, sender)
+        f.displayMode = mode
+        if mode == "RECEIVER" then
+            f.isReceiverMode = true
+            f.isViewMode = true
+            f.editControls:Hide()
+            f.viewBadge:Hide()
+            if f.drawToolbar then f.drawToolbar:Hide() end
+            if f.btnFastSend then f.btnFastSend:Hide() end
+
+            -- 接收模式下攻略卡片横向全展宽 (右侧边距由 -122 紧凑至 -12，释放空间给文字)
+            if f.tacticTipText and f.tipPanel then
+                f.tacticTipText:ClearAllPoints()
+                f.tacticTipText:SetPoint("TOPLEFT", f.tipPanel, "TOPLEFT", 10, -8)
+                f.tacticTipText:SetPoint("BOTTOMRIGHT", f.tipPanel, "BOTTOMRIGHT", -12, 6)
+            end
+
+            if f.receiverBadge then
+                local sText = (sender and sender ~= "") and (string.format("(来自: %s)", sender)) or "(团长推送)"
+                f.receiverBadgeText:SetText(string.format("|TInterface\\AddOns\\BGLite_Plus\\Media\\lock.png:14:14:0:0|t 战术受令看板 |cff00e5ff%s|r", sText))
+
+                -- 仅允许真正拥有团队领袖/助理权限的玩家在受令状态下按需切回本地设计器
+                local canEdit = not IsInRaid() or UnitIsGroupLeader("player") or UnitIsGroupAssistant("player")
+                if canEdit and f.btnBackToEditor then
+                    f.btnBackToEditor:Show()
+                elseif f.btnBackToEditor then
+                    f.btnBackToEditor:Hide()
+                end
+                f.receiverBadge:Show()
+            end
+        else -- "EDITOR"
+            f.isReceiverMode = false
+            f.isViewMode = false
+            if f.receiverBadge then f.receiverBadge:Hide() end
+            f.viewBadge:Hide()
+            f.editControls:Show()
+            if f.btnFastSend then f.btnFastSend:Show() end
+
+            -- 编辑模式下给右侧【通报本阶段】按钮留出 122px 边距
+            if f.tacticTipText and f.tipPanel then
+                f.tacticTipText:ClearAllPoints()
+                f.tacticTipText:SetPoint("TOPLEFT", f.tipPanel, "TOPLEFT", 10, -8)
+                f.tacticTipText:SetPoint("BOTTOMRIGHT", f.tipPanel, "BOTTOMRIGHT", -122, 6)
+            end
+        end
+    end
+
+    -- 本地编辑锁定切换器 (仅服务于编辑模式下的临时防误触)
     function RaidMap.SetViewMode(isView)
+        if f.isReceiverMode then return end
         f.isViewMode = isView
         if isView then
             f.editControls:Hide()
@@ -1247,7 +1331,8 @@ function RaidMap.CreateUI()
     end
 
     f:SetScript("OnShow", function()
-        if RaidMap.AutoAssignRosterToMap then
+        -- 仅在编辑模式下呼出时才自动同步团队，接收受令模式绝不自动覆盖团长分配
+        if not f.isReceiverMode and RaidMap.AutoAssignRosterToMap then
             RaidMap.AutoAssignRosterToMap(true)
         end
     end)
@@ -1390,7 +1475,7 @@ local function CreateDraggablePointIcon(mapCanvas, index, v)
     f:RegisterForClicks("LeftButtonUp", "RightButtonUp")
 
     f:SetScript("OnDragStart", function(self)
-        if mapFrame and mapFrame.isViewMode then return end
+        if mapFrame and (mapFrame.isReceiverMode or mapFrame.isViewMode) then return end
         self:StartMoving()
         self.isDragging = true
     end)
@@ -1422,6 +1507,9 @@ local function CreateDraggablePointIcon(mapCanvas, index, v)
     end)
 
     f:SetScript("OnClick", function(self, button)
+        -- 接收受令模式或锁定模式下，彻底拦截一切点击修改交互
+        if mapFrame and (mapFrame.isReceiverMode or mapFrame.isViewMode) then return end
+
         if button == "RightButton" then
             if IsShiftKeyDown() then
                 local curW = mapCanvas:GetWidth() or 748
@@ -1453,6 +1541,8 @@ local function CreateDraggablePointIcon(mapCanvas, index, v)
     f:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
         GameTooltip:ClearLines()
+        local isReadonly = mapFrame and (mapFrame.isReceiverMode or mapFrame.isViewMode)
+
         if v.isBoss then
             GameTooltip:AddLine("【首领 BOSS】 " .. (v.isNPC_text or "首领"), 1, 0.25, 0.25)
             local bossData = RaidMap.GetBoss(currentBossID)
@@ -1474,13 +1564,19 @@ local function CreateDraggablePointIcon(mapCanvas, index, v)
             end
         else
             local p = RaidMap.assignedPlayers[index]
+            local myName = UnitName("player")
+            local isMySlot = p and p.name and (p.name == myName)
+
             if p then
                 local cCode = RAID_CLASS_COLORS[p.class] and RAID_CLASS_COLORS[p.class].colorStr or "ffffffff"
-                GameTooltip:AddLine(string.format("|c%s%s|r (%d 号位)", cCode, p.name, index), 1, 1, 1)
+                local prefix = isMySlot and "|cffffd700★ [您在此处]|r " or ""
+                GameTooltip:AddLine(string.format("%s|c%s%s|r (%d 号位)", prefix, cCode, p.name, index), 1, 1, 1)
                 GameTooltip:AddLine("专精: " .. (p.specName or "未知") .. " | 职责: " .. (p.role or "队员"), 0.8, 0.8, 0.8)
             else
                 GameTooltip:AddLine(string.format("未分配玩家 (%d 号位)", index), 0.7, 0.7, 0.7)
-                GameTooltip:AddLine("左键点击可手动指定队员，或点击上方 [同步团队] 自动入席", 0.3, 1, 0.5, true)
+                if not isReadonly then
+                    GameTooltip:AddLine("左键点击可手动指定队员，或点击上方 [同步团队] 自动入席", 0.3, 1, 0.5, true)
+                end
             end
             local roleName = "未知"
             if v.role == "tank" then
@@ -1494,8 +1590,12 @@ local function CreateDraggablePointIcon(mapCanvas, index, v)
             end
             local fullDesc = v.desc and (roleName .. " - " .. v.desc) or roleName
             GameTooltip:AddLine("预设定位: " .. fullDesc, 0.6, 0.85, 1)
-            GameTooltip:AddLine(" ")
-            GameTooltip:AddLine("提示: 鼠标左键拖拽调整位置 | 右键清空 | Shift+右键恢复默认坐标", 0.5, 0.5, 0.5)
+
+            -- 仅在编辑模式下输出操作提示；受令查阅模式保持极致清爽
+            if not isReadonly then
+                GameTooltip:AddLine(" ")
+                GameTooltip:AddLine("提示: 鼠标左键拖拽调整位置 | 右键清空 | Shift+右键恢复默认坐标", 0.5, 0.5, 0.5)
+            end
         end
         GameTooltip:Show()
     end)
@@ -1880,7 +1980,7 @@ function RaidMap.CreateCustomMarker(mapCanvas, markerType, data)
     marker:RegisterForClicks("LeftButtonUp", "RightButtonUp")
 
     marker:SetScript("OnDragStart", function(self)
-        if mapFrame and mapFrame.isViewMode then return end
+        if mapFrame and (mapFrame.isReceiverMode or mapFrame.isViewMode) then return end
         self:StartMoving()
         self.isDragging = true
         self.wasDragged = true
@@ -1914,6 +2014,9 @@ function RaidMap.CreateCustomMarker(mapCanvas, markerType, data)
     end)
 
     marker:SetScript("OnClick", function(self, button)
+        -- 接收受令模式或锁定模式下，彻底拦截右键删除与左键编辑便签
+        if mapFrame and (mapFrame.isReceiverMode or mapFrame.isViewMode) then return end
+
         if button == "RightButton" then
             self:Hide()
             for i, m in ipairs(f.customMarkers) do
@@ -1938,6 +2041,8 @@ function RaidMap.CreateCustomMarker(mapCanvas, markerType, data)
     marker:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
         GameTooltip:ClearLines()
+        local isReadonly = mapFrame and (mapFrame.isReceiverMode or mapFrame.isViewMode)
+
         if self.markerType == "raidIcon" then
             local raidIconNames = {
                 [1] = "星星 (Star)", [2] = "大饼 (Circle)", [3] = "菱形 (Diamond)", [4] = "三角 (Triangle)",
@@ -1945,23 +2050,29 @@ function RaidMap.CreateCustomMarker(mapCanvas, markerType, data)
             }
             local name = raidIconNames[self.iconID or 8] or "团队标记"
             GameTooltip:AddLine("【战术标记】 " .. name, 1, 0.85, 0.1)
-            GameTooltip:AddLine("|cff00ff00左键按住:|r 自由拖拽摆放位置", 0.9, 0.9, 0.9)
-            GameTooltip:AddLine("|cffff4444右键单击:|r 快速删除此标记", 0.9, 0.9, 0.9)
+            if not isReadonly then
+                GameTooltip:AddLine("|cff00ff00左键按住:|r 自由拖拽摆放位置", 0.9, 0.9, 0.9)
+                GameTooltip:AddLine("|cffff4444右键单击:|r 快速删除此标记", 0.9, 0.9, 0.9)
+            end
         elseif self.markerType == "text" then
             GameTooltip:AddLine("【战术便签】", 1, 0.85, 0.1)
             GameTooltip:AddLine(self.text or "", 1, 1, 1, true)
-            GameTooltip:AddLine(" ")
-            GameTooltip:AddLine("|cff00e5ff左键单击:|r 修改便签文字", 0.9, 0.9, 0.9)
-            GameTooltip:AddLine("|cff00ff00左键按住:|r 自由拖拽摆放位置", 0.9, 0.9, 0.9)
-            GameTooltip:AddLine("|cffff4444右键单击:|r 快速删除此便签", 0.9, 0.9, 0.9)
+            if not isReadonly then
+                GameTooltip:AddLine(" ")
+                GameTooltip:AddLine("|cff00e5ff左键单击:|r 修改便签文字", 0.9, 0.9, 0.9)
+                GameTooltip:AddLine("|cff00ff00左键按住:|r 自由拖拽摆放位置", 0.9, 0.9, 0.9)
+                GameTooltip:AddLine("|cffff4444右键单击:|r 快速删除此便签", 0.9, 0.9, 0.9)
+            end
         elseif self.markerType == "player" then
             GameTooltip:AddLine("【单兵玩家标记】 " .. (self.text or ""), 0.2, 0.8, 1)
             if self.playerData and self.playerData.class then
                 local cName = LOCALIZED_CLASS_NAMES_MALE and LOCALIZED_CLASS_NAMES_MALE[self.playerData.class] or self.playerData.class
                 GameTooltip:AddLine("职业专精: " .. (self.playerData.specName or cName), 0.85, 0.85, 0.85)
             end
-            GameTooltip:AddLine("|cff00ff00左键按住:|r 自由拖拽摆放位置", 0.9, 0.9, 0.9)
-            GameTooltip:AddLine("|cffff4444右键单击:|r 快速删除此标记", 0.9, 0.9, 0.9)
+            if not isReadonly then
+                GameTooltip:AddLine("|cff00ff00左键按住:|r 自由拖拽摆放位置", 0.9, 0.9, 0.9)
+                GameTooltip:AddLine("|cffff4444右键单击:|r 快速删除此标记", 0.9, 0.9, 0.9)
+            end
         end
         GameTooltip:Show()
     end)
@@ -2152,7 +2263,7 @@ end
 --------------------------------------------------------------------------------
 -- 8. 核心 BOSS 专属预设构建与多阶段加载器 (LoadBossTacticalPreset)
 --------------------------------------------------------------------------------
-function RaidMap.LoadBossTacticalPreset(bossID, phaseIndex)
+function RaidMap.LoadBossTacticalPreset(bossID, phaseIndex, forceMode)
     local f = RaidMap.CreateUI()
     if not f then return end
     local all = RaidMap.GetAllBosses()
@@ -2299,13 +2410,15 @@ function RaidMap.LoadBossTacticalPreset(bossID, phaseIndex)
     end
 
     RaidMap.RefreshSelfHighlight(f)
-    RaidMap.SetViewMode(false)
+    local isLeaderRole = not IsInRaid() or UnitIsGroupLeader("player") or UnitIsGroupAssistant("player")
+    local targetMode = forceMode or (isLeaderRole and "EDITOR" or "RECEIVER")
+    RaidMap.SetDisplayMode(targetMode)
     f:Show()
     f:Raise()
 end
 
 RaidMap.ShowDemoTacticalBoard = function(bossID)
-    RaidMap.LoadBossTacticalPreset(bossID or 5, 1)
+    RaidMap.LoadBossTacticalPreset(bossID or 5, 1, "EDITOR")
 end
 
 function RaidMap.Toggle(bossID)
@@ -2313,7 +2426,20 @@ function RaidMap.Toggle(bossID)
     if f and f:IsShown() then
         f:Hide()
     else
-        RaidMap.LoadBossTacticalPreset(bossID or currentBossID or 5, currentPhase or 1)
+        local inRaid = IsInRaid and IsInRaid()
+        local isLeaderRole = (not inRaid) or UnitIsGroupLeader("player") or UnitIsGroupAssistant("player")
+
+        -- 普通团员若在团队中主动打开，且此前收到过团长广播推送，优先打开最新的受令战术
+        if inRaid and not isLeaderRole and BiaoGe and BiaoGe.maps and #BiaoGe.maps > 0 then
+            local latest = BiaoGe.maps[1]
+            if latest and latest.code then
+                RaidMap.RenderByCode(latest.code, true, latest.sender)
+                return
+            end
+        end
+
+        local targetMode = isLeaderRole and "EDITOR" or "RECEIVER"
+        RaidMap.LoadBossTacticalPreset(bossID or currentBossID or 5, currentPhase or 1, targetMode)
         if mapFrame and not mapFrame:IsShown() then
             mapFrame:Show()
         end
@@ -2832,8 +2958,11 @@ function RaidMap.RenderByCode(code, notSave, sender)
         end
     end
 
+    if f.phaseTabBar then f.phaseTabBar:Hide() end
+    f.mapCanvas:SetPoint("TOPLEFT", 16, -66)
+
     RaidMap.RefreshSelfHighlight(f)
-    RaidMap.SetViewMode(true)
+    RaidMap.SetDisplayMode("RECEIVER", sender)
     f:Show()
     return true
 end
@@ -2888,9 +3017,8 @@ local function OnReceiveComplete(sender, codes)
 
     local ok = RaidMap.RenderByCode(code, false, cleanSender)
     if ok then
-        RaidMap.SetViewMode(true)
         if autoPopup then
-            DEFAULT_CHAT_FRAME:AddMessage(string.format("|cff00BFFF[BGLite 战术站位图]|r 收到来自 |cff00ff00%s|r 的战术站位图推送 (已进入安全查阅模式)！", cleanSender))
+            DEFAULT_CHAT_FRAME:AddMessage(string.format("|cff00BFFF[BGLite 战术站位图]|r 收到来自 |cff00ff00%s|r 的战术站位图推送 (已进入战术受令看板)！", cleanSender))
             BG.PlaySound(1)
         else
             DEFAULT_CHAT_FRAME:AddMessage(string.format("|cff00BFFF[BGLite 战术站位图]|r 收到来自 |cff00ff00%s|r 的站位图推送 (已静默收录至历史记录，输入 /bgmap 随时查看)。", cleanSender))
