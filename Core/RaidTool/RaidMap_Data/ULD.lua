@@ -9,89 +9,160 @@ local FB_NAME = "奥杜尔"
 
 --------------------------------------------------------------------------------
 -- 1. 拆解者 XT-002 (Boss ID = 4)
--- 战术逻辑：单阶段。主坦在正北背靠北墙（使BOSS背对全团），近战在BOSS正背后脚跟集中输出；
--- 治疗靠近坦克与中场；远程在南半场大扇形宽幅分散（保持 10 码间距），白光跑右(东)，黑光跑左(西)。
+-- 顶级开荒教科书战术布局：
+-- 1. 主坦在正北背靠墙拉Boss面向北，Boss背朝全团防招架提速；近战在正背后脚跟输出；
+-- 2. 副坦位于中后场机动位，专职第一时间接住并调头废料践踏者(大机器人)；
+-- 3. 核心治疗与远程大团在中后场集中抱团(15~20码紧凑扇面)，确保【震耳咆哮】吃满全团大减伤与范围群疗；
+-- 4. 极左外场与极右外场彻底腾空：点名黑光大步向左外桥排污，点名白光大步向右外桥排火，排完速回大团！
+-- 5. 南侧与两侧设立小怪减速带(冰霜陷阱/地缚图腾)，全团集火点杀暴躁机器人。
 --------------------------------------------------------------------------------
 RaidMap.RegisterBoss({
     id = 4,
     fb = FB_KEY,
     fbName = FB_NAME,
     name = "拆解者 XT-002",
-    sub = "主坦背墙拉北面防招架 | 咆哮全团开减伤抬血 | 灼热白光向右 重力黑水向左",
+    sub = "主坦背墙拉北面 | 副坦中场接大怪 | 大团中圈抱团吃咆哮减伤 | 左黑右白大步跑",
     mapTex = "Interface\\AddOns\\BGLite_Plus\\Media\\icon\\ULDtitan\\m4.png",
-    tacticTip = "【拆解者站位要点】\n1. 主坦在正北背靠废品堆拉怪，使 BOSS 背对全团防招架提速，近战脚后跟输出；\n2. 【震耳咆哮】为全场巨量百分比掉血(与面向无关)，读条时治疗预读、全团开大减伤覆盖；\n3. 远程与治疗大扇形严格分散 10 码以上，严禁扎堆；\n4. 点名【灼热之光】(白光)迅速向右(东)单跑，【重力炸弹】(黑水)迅速向左(西)跑出人群！",
+    tacticTip = "【拆解者 XT-002 开荒要点】\n1. 【主坦拉位】主坦在正北背靠墙拉住 BOSS，面向北、背对全团，防普攻招架提速，近战背后脚跟输出；\n2. 【副坦接怪】副坦在中后场机动位，第一时间拦截废料践踏者(大机器人)拉背对人群，切忌让大怪冲进远程堆；\n3. 【中场抱团】远程与治疗在中后场相对集中抱团，确保【震耳咆哮】读条时吃满团队大减伤与范围群疗；\n4. 【左黑右白】点名【重力炸弹】(黑水)大步向左(西)外桥排污，点名【灼热之光】(白光)向右(东)外桥排火，排完速回大团！\n5. 【减速拦截】南侧铺设冰霜陷阱与地缚图腾，全团优先减速点杀【暴躁机器人】引爆小怪，严防【废料机器人】靠近回血！",
+    notes = {
+          {
+            xy = { 610, -305 },
+            title = "【距离提示】",
+            text = "← 远程/治疗\n(站位图展开仅为方便团长拖拉细节，实际请遵循团长指示)",
+            color = "GREEN",
+            desc = "【为什么站位图上看起来稍有间隔？】\n站位图上微留间隙，纯粹是为了清晰展示全团远程队员的职业头像与姓名，方便团长点选。\n\n【实战真实走位要求】\n开打后，除被点名黑白光的队员大步向外桥跑出外，其余所有远程与治疗请直接在此区域【极度密集扎堆重合】！",
+        },
+    },
     tbl = {
-        -- 坦克 (1~2号位)
-        [1] = { xy = { 374, -70 } },  -- 主坦 MT (正北靠墙)
-        [2] = { xy = { 340, -80 } },  -- 副坦 ST
+        -- 坦克 (1~2号位 - 主坦定北面，副坦中后场接大怪)
+        [1] = { xy = { 374, -65 },  role = "tank", desc = "主坦 MT (正北靠墙拉Boss背对大团)" },
+        [2] = { xy = { 374, -185 }, role = "tank", desc = "副坦 ST (中后场机动拦截废料践踏者大怪)" },
 
-        -- 治疗 (3~7号位)
-        [3] = { xy = { 300, -115 } }, -- 核心保坦奶骑 (主坦左翼)
-        [4] = { xy = { 448, -115 } }, -- 核心保坦戒律 (主坦右翼)
-        [5] = { xy = { 260, -230 } }, -- 团补 A
-        [6] = { xy = { 374, -245 } }, -- 团补 B
-        [7] = { xy = { 488, -230 } }, -- 团补 C
+        -- 治疗 (3~7号位 - 居中紧凑布局，覆盖全团减伤与群疗)
+        [3] = { xy = { 344, -232 }, role = "healer", desc = "核心保坦治疗 A (主坦与大团抬血)" },
+        [4] = { xy = { 404, -232 }, role = "healer", desc = "核心保坦治疗 B (主坦与大团抬血)" },
+        [5] = { xy = { 314, -260 }, role = "healer", desc = "团补 A (左翼群疗与大减伤)" },
+        [6] = { xy = { 374, -260 }, role = "healer", desc = "团补 B (中轴大减伤覆盖与群抬)" },
+        [7] = { xy = { 434, -260 }, role = "healer", desc = "团补 C (右翼群疗与大减伤)" },
 
-        -- 远程 DPS (8~17号位 - 南半场大扇形保持10码)
-        [8]  = { xy = { 160, -280 } },
-        [9]  = { xy = { 220, -305 } },
-        [10] = { xy = { 280, -325 } },
-        [11] = { xy = { 340, -340 } },
-        [12] = { xy = { 408, -340 } },
-        [13] = { xy = { 468, -325 } },
-        [14] = { xy = { 528, -305 } },
-        [15] = { xy = { 588, -280 } },
-        [16] = { xy = { 250, -370 } }, -- 二排分散
-        [17] = { xy = { 498, -370 } }, -- 二排分散
+        -- 远程 DPS (8~17号位 - 中后场紧致集结阵型，跨度仅160px，极度聚拢不叠字)
+        [8]  = { xy = { 314, -290 }, role = "ranged", desc = "远程输出 (前排左)" },
+        [9]  = { xy = { 354, -290 }, role = "ranged", desc = "远程输出 (前排中左)" },
+        [10] = { xy = { 394, -290 }, role = "ranged", desc = "远程输出 (前排中右)" },
+        [11] = { xy = { 434, -290 }, role = "ranged", desc = "远程输出 (前排右)" },
+        [12] = { xy = { 294, -320 }, role = "ranged", desc = "远程输出 (中排左翼)" },
+        [13] = { xy = { 344, -320 }, role = "ranged", desc = "远程输出 (中排中左)" },
+        [14] = { xy = { 404, -320 }, role = "ranged", desc = "远程输出 (中排中右)" },
+        [15] = { xy = { 454, -320 }, role = "ranged", desc = "远程输出 (中排右翼)" },
+        [16] = { xy = { 344, -350 }, role = "ranged", desc = "远程输出 (后排左压阵)" },
+        [17] = { xy = { 404, -350 }, role = "ranged", desc = "远程输出 (后排右压阵)" },
 
         -- 战术图元与首领标记
         [98] = {
-            xy = { 374, -165 },
+            xy = { 374, -145 },
             isNPC = true,
             isNPC_help = true,
-            isNPC_text = "近战",
+            isNPC_text = "近战集合",
             isNPC_icon = "Interface\\Icons\\ability_steelmelee",
             size = 38,
         },
         [100] = {
-            xy = { 374, -115 },
+            xy = { 374, -105 },
             isNPC = true,
             isBoss = true,
             isNPC_text = "XT-002",
             isNPC_icon = "Interface\\Icons\\achievement_boss_xt002deconstructor_01",
             size = 54,
         },
-        [90] = {
-            xy = { 100, -115 },
+        -- 核心排光安全区 (极左9点外桥 / 极右3点外桥，大步跑出人群25+码)
+        [91] = {
+            xy = { 95, -230 },
             isNPC = true,
             isNPC_help = true,
-            isNPC_text = "左出怪",
+            isNPC_text = "黑光向左(大步跑)",
+            isNPC_icon = "Interface\\TargetingFrame\\UI-RaidTargetingIcon_3",
+            size = 36,
+        },
+        [92] = {
+            xy = { 653, -230 },
+            isNPC = true,
+            isNPC_help = true,
+            isNPC_text = "白光向右(大步跑)",
+            isNPC_icon = "Interface\\TargetingFrame\\UI-RaidTargetingIcon_1",
+            size = 36,
+        },
+        -- 小怪减速拦截防线 (南侧与外围减速带)
+        [93] = {
+            xy = { 374, -390 },
+            isNPC = true,
+            isNPC_help = true,
+            isNPC_text = "南侧减速拦截线",
             isNPC_icon = "Interface\\TargetingFrame\\UI-RaidTargetingIcon_4",
             size = 34,
         },
-        [91] = {
-            xy = { 648, -115 },
+        [94] = {
+            xy = { 210, -185 },
             isNPC = true,
             isNPC_help = true,
-            isNPC_text = "右出怪",
-            isNPC_icon = "Interface\\TargetingFrame\\UI-RaidTargetingIcon_6",
-            size = 34,
+            isNPC_text = "西侧减速点",
+            isNPC_icon = "Interface\\TargetingFrame\\UI-RaidTargetingIcon_7",
+            size = 30,
         },
-        [92] = {
-            xy = { 180, -220 },
+        [95] = {
+            xy = { 538, -185 },
             isNPC = true,
             isNPC_help = true,
-            isNPC_text = "黑光跑左",
-            isNPC_icon = "Interface\\TargetingFrame\\UI-RaidTargetingIcon_3",
-            size = 32,
+            isNPC_text = "东侧减速点",
+            isNPC_icon = "Interface\\TargetingFrame\\UI-RaidTargetingIcon_2",
+            size = 30,
         },
-        [93] = {
-            xy = { 568, -220 },
-            isNPC = true,
-            isNPC_help = true,
-            isNPC_text = "白光跑右",
-            isNPC_icon = "Interface\\TargetingFrame\\UI-RaidTargetingIcon_1",
-            size = 32,
+    },
+    -- 专属动态推演剧本数据 (由通用引擎驱动解析与播放)
+    simulation = {
+        name = "拆解者 XT-002 开荒跑位推演",
+        duration = 6.8,
+        steps = {
+            {
+                t = 0.0,
+                text = "|cff00e5ff[XT-002 战术推演]|r 正常开怪：主坦背墙拉北面，大团中后场紧凑抱团输出",
+            },
+            {
+                t = 0.8,
+                duration = 1.8,
+                actor = 8,
+                target = 91,
+                tag = "|cffbf00ff【黑光】|r",
+                glowColor = { 0.85, 0.2, 1, 1 },
+                text = "|cffbf00ff● [黑光·重力炸弹]|r 8号被点名！大步流星向左(西)外桥狂奔排污，严禁炸大团！",
+            },
+            {
+                t = 2.6,
+                duration = 1.8,
+                actions = {
+                    {
+                        actor = 7,
+                        target = 92,
+                        tag = "|cffffd700【白光】|r",
+                        glowColor = { 1, 0.85, 0.1, 1 },
+                    },
+                    {
+                        actor = 8,
+                        target = "origin",
+                    },
+                },
+                text = "|cffffd700● [白光·灼热之光]|r 7号被点名！迅速向右(东)外桥疾跑排火，黑光排完归位！",
+            },
+            {
+                t = 4.4,
+                duration = 1.4,
+                actor = 7,
+                target = "origin",
+                text = "|cff00ff00● [全团归位吃咆哮]|r 两人排完速回大团！治疗预读群疗，全员吃大减伤！",
+            },
+            {
+                t = 6.0,
+                text = "|cff00ff00●【推演完成】|r 牢记口诀：左黑右白，排完回人群！",
+            },
         },
     },
 })

@@ -103,6 +103,10 @@ end
 local LibDeflate = LibStub and LibStub:GetLibrary("LibDeflate", true)
 
 local function SafeCompress(text)
+    if C_EncodingUtil and C_EncodingUtil.CompressString then
+        local comp = C_EncodingUtil.CompressString(text)
+        if comp then return comp end
+    end
     if LibDeflate and LibDeflate.CompressDeflate and LibDeflate.EncodeForPrint then
         local comp = LibDeflate:CompressDeflate(text)
         if comp then
@@ -113,6 +117,10 @@ local function SafeCompress(text)
 end
 
 local function SafeDecompress(text)
+    if C_EncodingUtil and C_EncodingUtil.DecompressString then
+        local decomp = C_EncodingUtil.DecompressString(text)
+        if decomp then return decomp end
+    end
     if LibDeflate and LibDeflate.DecodeForPrint and LibDeflate.DecompressDeflate then
         local raw = LibDeflate:DecodeForPrint(text)
         if raw then
@@ -123,12 +131,29 @@ local function SafeDecompress(text)
     return text
 end
 
-local function SafeSplit(sep, text)
-    if not text then return nil end
-    local fields = {}
-    local pattern = string.format("([^%s]+)", sep)
-    string.gsub(text, pattern, function(c) fields[#fields + 1] = c end)
-    return unpack(fields)
+local function SafeSplitList(delimiter, str)
+    if not str then return {} end
+    local result = {}
+    local delimiterLen = string.len(delimiter)
+    local startPos = 1
+    while true do
+        local findPos = string.find(str, delimiter, startPos, true)
+        if not findPos then
+            local part = string.sub(str, startPos)
+            table.insert(result, part)
+            break
+        end
+        local part = string.sub(str, startPos, findPos - 1)
+        table.insert(result, part)
+        startPos = findPos + delimiterLen
+    end
+    return result
+end
+
+local function SafeSplit(delimiter, str)
+    if not str then return nil end
+    local list = SafeSplitList(delimiter, str)
+    return unpack(list)
 end
 
 --------------------------------------------------------------------------------
@@ -619,13 +644,20 @@ local currentMapIndex = 1
 function RaidMap.InitDB()
     if not BiaoGe then BiaoGe = {} end
     if not BiaoGe.point then BiaoGe.point = {} end
-    if not BiaoGe.maps then BiaoGe.maps = {} end
+    if not BiaoGe.maps then
+        BiaoGe.maps = {}
+    else
+        while #BiaoGe.maps > 5 do
+            table.remove(BiaoGe.maps, #BiaoGe.maps)
+        end
+    end
     if not BiaoGe.RaidMap then
         BiaoGe.RaidMap = {
             enableAutoPopup = true,
             mapScale = 0.85,
             meleeMode = "group",
             rangedMode = "arc",
+            showFloating = false,
         }
     else
         if not BiaoGe.RaidMap.meleeMode then BiaoGe.RaidMap.meleeMode = "group" end
@@ -633,7 +665,195 @@ function RaidMap.InitDB()
     end
     currentMeleeMode = BiaoGe.RaidMap.meleeMode
     currentRangedMode = BiaoGe.RaidMap.rangedMode
+
+    -- 如果勾选了屏幕悬浮，默认展示悬浮按钮
+    if BiaoGe.RaidMap.showFloating then
+        RaidMap.SetFloatingShown(true)
+    end
 end
+
+--------------------------------------------------------------------------------
+-- 6.1 战术站位图屏幕悬浮按钮 (Floating Quick Entry)
+--------------------------------------------------------------------------------
+local floatingBtn = nil
+
+function RaidMap.CreateFloatingButton()
+    if floatingBtn then return floatingBtn end
+
+    floatingBtn = CreateFrame("Button", "BG.RaidMapFloatingBtn", UIParent, "BackdropTemplate")
+    floatingBtn:SetSize(142, 30)
+    floatingBtn:SetFrameStrata("MEDIUM")
+    floatingBtn:SetClampedToScreen(true)
+    floatingBtn:SetBackdrop({
+        bgFile = "Interface/ChatFrame/ChatFrameBackground",
+        edgeFile = "Interface/Tooltips/UI-Tooltip-Border",
+        edgeSize = 12,
+        insets = { left = 2, right = 2, top = 2, bottom = 2 },
+    })
+    floatingBtn:SetBackdropColor(0.04, 0.05, 0.08, 0.90)
+    floatingBtn:SetBackdropBorderColor(0.2, 0.6, 0.9, 0.85)
+
+    -- 战术小图标 (官方地图图标)
+    local icon = floatingBtn:CreateTexture(nil, "ARTWORK")
+    icon:SetSize(16, 16)
+    icon:SetPoint("LEFT", 8, 0)
+    icon:SetTexture("Interface\\Icons\\inv_misc_map02")
+    icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+
+    -- 标题文字 (青色高亮，对齐最小化质感)
+    local title = floatingBtn:CreateFontString(nil, "OVERLAY")
+    title:SetFont(BIAOGE_TEXT_FONT, 13, "OUTLINE")
+    title:SetPoint("LEFT", icon, "RIGHT", 6, 0)
+    title:SetTextColor(0.2, 0.8, 1)
+    title:SetText("战术站位图")
+
+    -- 坐标记忆与默认位置
+    local saved = BiaoGe.point and BiaoGe.point["BG.RaidMapFloatingBtn"]
+    if saved and type(saved) == "table" and #saved >= 5 then
+        floatingBtn:SetPoint(saved[1], UIParent, saved[3], saved[4], saved[5])
+    else
+        floatingBtn:SetPoint("TOPRIGHT", UIParent, "TOPRIGHT", -180, -220)
+    end
+
+    -- 拖拽与点击交互 (绝无 X 按钮)
+    floatingBtn:SetMovable(true)
+    floatingBtn:EnableMouse(true)
+    floatingBtn:RegisterForDrag("LeftButton")
+    floatingBtn:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+
+    floatingBtn:SetScript("OnDragStart", function(self)
+        self:StartMoving()
+        self.isDragging = true
+    end)
+    floatingBtn:SetScript("OnDragStop", function(self)
+        self:StopMovingOrSizing()
+        self.isDragging = false
+        local point, relativeTo, relativePoint, xOfs, yOfs = self:GetPoint(1)
+        if not BiaoGe.point then BiaoGe.point = {} end
+        BiaoGe.point["BG.RaidMapFloatingBtn"] = { point, nil, relativePoint, xOfs, yOfs }
+    end)
+
+    floatingBtn:SetScript("OnClick", function(self, button)
+        if button == "RightButton" and IsControlKeyDown() then
+            self:ClearAllPoints()
+            self:SetPoint("TOPRIGHT", UIParent, "TOPRIGHT", -180, -220)
+            if not BiaoGe.point then BiaoGe.point = {} end
+            BiaoGe.point["BG.RaidMapFloatingBtn"] = { "TOPRIGHT", nil, "TOPRIGHT", -180, -220 }
+            BG.PlaySound(1)
+            DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00[BGLite 战术站位图]|r 悬浮按钮已恢复默认屏幕位置！")
+            return
+        end
+        if button == "LeftButton" then
+            if RaidMap.Toggle then
+                RaidMap.Toggle()
+            end
+            BG.PlaySound(1)
+        end
+    end)
+
+    floatingBtn:SetScript("OnEnter", function(self)
+        self:SetBackdropBorderColor(0.4, 0.85, 1, 1)
+        GameTooltip:SetOwner(self, "ANCHOR_TOP")
+        GameTooltip:AddLine(BG.STC_b1("战术站位图 (屏幕悬浮)"), 1, 1, 1)
+        GameTooltip:AddLine("- 左键点击: 快速呼出 / 关闭站位图看板\n- 按住左键: 自由拖拽屏幕位置\n- Ctrl + 右键: 恢复默认位置", 0.85, 0.85, 0.85, true)
+        GameTooltip:Show()
+    end)
+    floatingBtn:SetScript("OnLeave", function(self)
+        self:SetBackdropBorderColor(0.2, 0.6, 0.9, 0.85)
+        GameTooltip:Hide()
+    end)
+
+    floatingBtn:Hide()
+    RaidMap.floatingBtn = floatingBtn
+    return floatingBtn
+end
+
+function RaidMap.SetFloatingShown(show)
+    local btn = RaidMap.CreateFloatingButton()
+    if show then
+        btn:Show()
+    else
+        btn:Hide()
+    end
+end
+
+--------------------------------------------------------------------------------
+-- 6.2 团队工具内专属入口与悬浮配置 (挂载在【团队阵容与专精分析】下方)
+--------------------------------------------------------------------------------
+function RaidMap.CreateToolEntry(parent)
+    if RaidMap.toolEntry then return RaidMap.toolEntry end
+    parent = parent or (BG and BG.RaidToolMainFrame)
+    if not parent then return end
+
+    local bottomBar = (ns.RaidCompUI and ns.RaidCompUI.bottomBar) or _G["BG_RaidCompBottomBar"]
+    local entry = CreateFrame("Frame", "BG_RaidMapToolEntry", parent)
+    entry:SetSize(965, 30)
+    if bottomBar then
+        entry:SetPoint("TOPLEFT", bottomBar, "BOTTOMLEFT", 0, -8)
+    else
+        entry:SetPoint("TOPLEFT", parent, "TOPLEFT", 12, -590)
+    end
+    RaidMap.toolEntry = entry
+
+    -- 战术站位图入口按钮
+    local btnOpen = BG.CreateButton(entry)
+    btnOpen:SetSize(110, 26)
+    btnOpen:SetPoint("LEFT", entry, "LEFT", 2, 0)
+    btnOpen:SetText(BG.STC_b1("战术站位图"))
+    btnOpen:SetScript("OnClick", function()
+        if RaidMap.Toggle then
+            RaidMap.Toggle()
+        end
+        BG.PlaySound(1)
+    end)
+    btnOpen:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_TOP")
+        GameTooltip:AddLine(BG.STC_b1("打开战术站位图看板"), 1, 1, 1)
+        GameTooltip:AddLine("即时呼出或关闭奥杜尔战术站位看板，展示团长最新排布站位。", 0.85, 0.85, 0.85, true)
+        GameTooltip:AddLine("快捷命令: /bgmap 或 /tjmap", 0.2, 1, 0.4, true)
+        GameTooltip:Show()
+    end)
+    btnOpen:SetScript("OnLeave", GameTooltip_Hide)
+
+    -- 显示屏幕悬浮复选框 (勾选默认展示悬浮效果，且悬浮条不需要X)
+    local cbFloating = CreateFrame("CheckButton", nil, entry, "UICheckButtonTemplate")
+    cbFloating:SetSize(20, 20)
+    cbFloating:SetPoint("LEFT", btnOpen, "RIGHT", 14, 0)
+    cbFloating.text = cbFloating:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
+    cbFloating.text:SetPoint("LEFT", cbFloating, "RIGHT", 4, 0)
+    cbFloating.text:SetFont(BIAOGE_TEXT_FONT, 13, "OUTLINE")
+    cbFloating.text:SetText("显示屏幕悬浮")
+    cbFloating:SetHitRectInsets(-2, -cbFloating.text:GetStringWidth() - 4, -2, -2)
+
+    cbFloating:SetScript("OnClick", function(self)
+        local checked = self:GetChecked()
+        if not BiaoGe.RaidMap then BiaoGe.RaidMap = {} end
+        BiaoGe.RaidMap.showFloating = checked
+        if RaidMap.SetFloatingShown then
+            RaidMap.SetFloatingShown(checked)
+        end
+        BG.PlaySound(1)
+    end)
+    cbFloating:SetScript("OnShow", function(self)
+        self:SetChecked(BiaoGe and BiaoGe.RaidMap and BiaoGe.RaidMap.showFloating)
+    end)
+    cbFloating:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_TOP")
+        GameTooltip:AddLine("显示屏幕悬浮", 1, 1, 1)
+        GameTooltip:AddLine("勾选后，在屏幕上默认展示【战术站位图】悬浮胶囊按钮，可自由拖拽位置；随时点击即可快速打开或关闭站位看板。", 0.85, 0.85, 0.85, true)
+        GameTooltip:Show()
+    end)
+    cbFloating:SetScript("OnLeave", GameTooltip_Hide)
+
+    -- 辅助说明提示文本
+    local tipText = entry:CreateFontString(nil, "OVERLAY")
+    tipText:SetFont(BIAOGE_TEXT_FONT, 12, "OUTLINE")
+    tipText:SetPoint("LEFT", cbFloating.text, "RIGHT", 12, 0)
+    tipText:SetText(BG.STC_dis("(勾选后屏幕常驻悬浮按钮，可按住拖拽移动，点击随时呼出站位图)"))
+
+    return entry
+end
+
 
 -- 优雅纯净的降级战术刻度网格 (仅当无真实地图时作为安全兜底，绝无任何怪异小地图边框与多余矩形)
 local function DrawProceduralTacticalGrid(parent, width, height, bossID)
@@ -715,8 +935,6 @@ function RaidMap.CreateUI()
     f:SetSize(defaultW, defaultH)
     f.originalWidth = defaultW
     f.originalHeight = defaultH
-    f.minW = 180
-    f.minH = 36
     f:SetClampedToScreen(true)
     f:SetFrameStrata("HIGH")
 
@@ -753,7 +971,6 @@ function RaidMap.CreateUI()
     f.icons = {}
     f.isViewMode = false
     f.isLocked = false
-    f.isMinimized = false
 
     f:SetMovable(true)
     f:EnableMouse(true)
@@ -772,6 +989,9 @@ function RaidMap.CreateUI()
         end
         local point, relativeTo, relativePoint, xOfs, yOfs = self:GetPoint(1)
         BiaoGe.point[frameName] = { point, nil, relativePoint, xOfs, yOfs }
+    end)
+    f:HookScript("OnHide", function(self)
+        if RaidMap.StopSimulation then RaidMap.StopSimulation(self) end
     end)
 
     f:EnableMouseWheel(true)
@@ -826,16 +1046,7 @@ function RaidMap.CreateUI()
     selfNotice:SetText("")
     f.selfNotice = selfNotice
 
-    -- 最小化胶囊标题
-    local minTitle = f:CreateFontString(nil, "OVERLAY")
-    minTitle:SetFont(BIAOGE_TEXT_FONT, 14, "OUTLINE")
-    minTitle:SetPoint("LEFT", 12, 0)
-    minTitle:SetTextColor(0.2, 0.8, 1)
-    minTitle:SetText("战术站位图 ▾")
-    minTitle:Hide()
-    f.minTitle = minTitle
-
-    -- 右上角操作区：关闭、最小化与恢复默认大小
+    -- 右上角操作区：直接关闭与恢复默认大小 (已按规范删除左侧最小化按钮，点击 X 直接关闭)
     local btnClose = CreateFrame("Button", nil, f, "UIPanelCloseButton")
     btnClose:SetSize(28, 28)
     btnClose:SetPoint("TOPRIGHT", -4, -4)
@@ -844,17 +1055,9 @@ function RaidMap.CreateUI()
         BG.PlaySound(1)
     end)
 
-    local btnMin = CreateFrame("Button", nil, f)
-    btnMin:SetSize(20, 20)
-    btnMin:SetPoint("RIGHT", btnClose, "LEFT", -2, 0)
-    btnMin:SetNormalTexture("Interface\\Buttons\\UI-Panel-SmallerButton-Up")
-    btnMin:SetPushedTexture("Interface\\Buttons\\UI-Panel-SmallerButton-Down")
-    btnMin:SetHighlightTexture("Interface\\Buttons\\UI-Panel-MinimizeButton-Highlight")
-    f.btnMin = btnMin
-
     local btnResetSize = BG.CreateButton(f)
     btnResetSize:SetSize(88, 20)
-    btnResetSize:SetPoint("RIGHT", btnMin, "LEFT", -6, 0)
+    btnResetSize:SetPoint("RIGHT", btnClose, "LEFT", -6, 0)
     btnResetSize:SetText(BG.STC_w1("恢复默认大小"))
     btnResetSize:SetScript("OnClick", function()
         local scrH = UIParent and UIParent:GetHeight() or 768
@@ -882,40 +1085,6 @@ function RaidMap.CreateUI()
     end)
     btnResetSize:SetScript("OnLeave", GameTooltip_Hide)
     f.btnResetSize = btnResetSize
-
-    btnMin:SetScript("OnClick", function()
-        f.isMinimized = not f.isMinimized
-        if f.isMinimized then
-            f.savedPoint = { f:GetPoint(1) }
-            f:SetSize(f.minW, f.minH)
-            f.mapCanvas:Hide()
-            local grid = f.tacticalGrid or (f.mapCanvas and f.mapCanvas.tacticalGrid)
-            if grid then grid:Hide() end
-            f.title:Hide()
-            f.selfNotice:Hide()
-            f.topControls:Hide()
-            f.phaseTabBar:Hide()
-            if f.tipPanel then f.tipPanel:Hide() end
-            if f.btnResetSize then f.btnResetSize:Hide() end
-            f.minTitle:Show()
-            btnMin:SetNormalTexture("Interface\\Buttons\\UI-Panel-BiggerButton-Up")
-        else
-            f:SetSize(f.originalWidth, f.originalHeight)
-            f.minTitle:Hide()
-            f.title:Show()
-            f.selfNotice:Show()
-            f.topControls:Show()
-            f.mapCanvas:Show()
-            if f.tipPanel then f.tipPanel:Show() end
-            if f.btnResetSize then f.btnResetSize:Show() end
-            local bossData = RaidMap.GetBoss(currentBossID)
-            if not f.isReceiverMode and bossData and bossData.phases and #bossData.phases > 0 then
-                f.phaseTabBar:Show()
-            end
-            btnMin:SetNormalTexture("Interface\\Buttons\\UI-Panel-SmallerButton-Up")
-        end
-        BG.PlaySound(1)
-    end)
 
     -- 顶部控制栏 (Top Controls)
     local topControls = CreateFrame("Frame", nil, f)
@@ -1033,7 +1202,7 @@ function RaidMap.CreateUI()
     -- 3. 编辑工具栏 (编辑模式下显示)
     local editControls = CreateFrame("Frame", nil, topControls)
     editControls:SetPoint("LEFT", dropBoss, "RIGHT", 8, 0)
-    editControls:SetPoint("RIGHT", 0, 0)
+    editControls:SetPoint("RIGHT", -230, 0)
     editControls:SetHeight(28)
     f.editControls = editControls
 
@@ -1137,9 +1306,20 @@ function RaidMap.CreateUI()
     btnDraw:SetScript("OnLeave", GameTooltip_Hide)
     f.btnDraw = btnDraw
 
-    -- 4. 历史战术预设下拉菜单
+    -- 4. 战术动态推演 (Simulation) 播放/复位按钮 (常驻顶部，受令与编辑双模态皆可用)
+    local btnSim = BG.CreateButton(topControls)
+    btnSim:SetSize(82, 24)
+    btnSim:SetPoint("RIGHT", -152, 0)
+    btnSim:SetText(BG.STC_b1("战术推演"))
+    btnSim:SetScript("OnClick", function()
+        RaidMap.StartSimulation(f)
+        BG.PlaySound(1)
+    end)
+    f.btnSim = btnSim
+
+    -- 5. 历史战术预设下拉菜单 (宽度微调至100，右边距对齐，彻底消除与推演按钮压盖)
     local dropHistory = LibBG and LibBG:Create_UIDropDownMenu("BG_RaidMapHistoryDropdown", topControls) or CreateFrame("Frame", "BG_RaidMapHistoryDropdown", topControls, "UIDropDownMenuTemplate")
-    dropHistory:SetPoint("RIGHT", 14, 0)
+    dropHistory:SetPoint("RIGHT", 10, 0)
     f.dropHistory = dropHistory
 
     local function InitHistoryMenu(self, level)
@@ -1165,11 +1345,11 @@ function RaidMap.CreateUI()
 
     if LibBG and LibBG.UIDropDownMenu_Initialize then
         LibBG:UIDropDownMenu_Initialize(dropHistory, InitHistoryMenu)
-        LibBG:UIDropDownMenu_SetWidth(dropHistory, 115)
+        LibBG:UIDropDownMenu_SetWidth(dropHistory, 100)
         LibBG:UIDropDownMenu_SetText(dropHistory, "历史站位图")
     else
         UIDropDownMenu_Initialize(dropHistory, InitHistoryMenu)
-        UIDropDownMenu_SetWidth(dropHistory, 115)
+        UIDropDownMenu_SetWidth(dropHistory, 100)
         UIDropDownMenu_SetText(dropHistory, "历史站位图")
     end
 
@@ -2261,11 +2441,181 @@ function RaidMap.RefreshSelfHighlight(f)
 end
 
 --------------------------------------------------------------------------------
+-- 7.5 首领战术特殊信息标注渲染引擎 (Static Tactical Notes / Annotations)
+--------------------------------------------------------------------------------
+function RaidMap.ClearStaticNotes(f)
+    f = f or mapFrame or BG.RaidMapFrame
+    if not f or not f.staticNotes then return end
+    for _, noteFrame in ipairs(f.staticNotes) do
+        noteFrame:Hide()
+    end
+    wipe(f.staticNotes)
+end
+
+function RaidMap.RenderStaticNotes(mapCanvas, notesList, overrideCoords)
+    local f = mapFrame or BG.RaidMapFrame
+    if not f or not mapCanvas then return end
+    f.staticNotes = f.staticNotes or {}
+    RaidMap.ClearStaticNotes(f)
+
+    if not notesList then return end
+    if notesList.xy or notesList.text then
+        notesList = { notesList }
+    end
+    if #notesList == 0 then return end
+
+    local baseW = 748
+    local baseH = 452
+    local curW = mapCanvas:GetWidth() or baseW
+    local curH = mapCanvas:GetHeight() or baseH
+    local scaleX = (curW and curW > 100) and (curW / baseW) or 1
+    local scaleY = (curH and curH > 100) and (curH / baseH) or 1
+
+    for i, data in ipairs(notesList) do
+        local coord = (overrideCoords and overrideCoords[i]) or data.xy
+        if data and coord and (data.text or data.title) then
+            local baseX = coord[1]
+            local rawY = coord[2]
+            local baseY = (rawY > 0) and -rawY or rawY
+            local curX = math.floor(baseX * scaleX + 0.5)
+            local curY = math.floor(baseY * scaleY + 0.5)
+
+            local noteFrame = CreateFrame("Button", nil, mapCanvas, "BackdropTemplate")
+            noteFrame.baseX = baseX
+            noteFrame.baseY = baseY
+            noteFrame.x = curX
+            noteFrame.y = curY
+            noteFrame.data = data
+            noteFrame:SetFrameLevel(mapCanvas:GetFrameLevel() + 18)
+            noteFrame:SetPoint("CENTER", mapCanvas, "TOPLEFT", curX, curY)
+
+            local borderR, borderG, borderB, borderA = 0.2, 0.9, 0.4, 0.85
+            if data.color == "YELLOW" or data.color == "gold" then
+                borderR, borderG, borderB = 1, 0.85, 0.2
+            elseif data.color == "CYAN" or data.color == "blue" then
+                borderR, borderG, borderB = 0.3, 0.85, 1
+            elseif data.color == "ORANGE" then
+                borderR, borderG, borderB = 1, 0.55, 0.1
+            elseif type(data.color) == "table" then
+                borderR, borderG, borderB = data.color[1] or 1, data.color[2] or 1, data.color[3] or 1
+            end
+
+            if noteFrame.SetBackdrop then
+                noteFrame:SetBackdrop({
+                    bgFile = "Interface\\ChatFrame\\ChatFrameBackground",
+                    edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+                    tile = true, tileSize = 16, edgeSize = 12,
+                    insets = { left = 3, right = 3, top = 3, bottom = 3 },
+                })
+                local bg = data.bgColor or { 0.02, 0.04, 0.08, 0.88 }
+                noteFrame:SetBackdropColor(bg[1], bg[2], bg[3], bg[4] or 0.88)
+                noteFrame:SetBackdropBorderColor(borderR, borderG, borderB, borderA)
+            end
+
+            local fontStr = noteFrame:CreateFontString(nil, "OVERLAY")
+            fontStr:SetFont(BIAOGE_TEXT_FONT, data.fontSize or 12, "OUTLINE")
+            fontStr:SetPoint("CENTER", 0, 0)
+            if data.align then
+                fontStr:SetJustifyH(data.align)
+            else
+                fontStr:SetJustifyH("CENTER")
+            end
+            fontStr:SetTextColor(borderR, borderG, borderB)
+
+            local displayText = data.text or ""
+            if data.title and data.title ~= "" then
+                displayText = BG.STC_y1(data.title) .. "\n" .. displayText
+            end
+            fontStr:SetText(displayText)
+
+            local strW = fontStr:GetStringWidth()
+            local strH = fontStr:GetStringHeight()
+            local padX = data.padX or 18
+            local padY = data.padY or 12
+            noteFrame:SetSize(math.max(70, strW + padX), math.max(24, strH + padY))
+
+            -- 自由拖动引擎 (团长编辑模式下生效，受令与锁定模式保护)
+            noteFrame:EnableMouse(true)
+            noteFrame:SetMovable(true)
+            noteFrame:RegisterForDrag("LeftButton")
+
+            noteFrame:SetScript("OnDragStart", function(self)
+                local inRaid = IsInRaid and IsInRaid()
+                local isLeaderRole = (not inRaid) or UnitIsGroupLeader("player") or UnitIsGroupAssistant("player")
+                if not isLeaderRole or RaidMap.isLocked or (f and f.isLocked) or (f and f.displayMode == "RECEIVER") then
+                    return
+                end
+                self:StartMoving()
+                self.isDragging = true
+            end)
+
+            noteFrame:SetScript("OnDragStop", function(self)
+                if self.isDragging then
+                    self:StopMovingOrSizing()
+                    self.isDragging = nil
+                    local curW = mapCanvas:GetWidth() or 748
+                    local curH = mapCanvas:GetHeight() or 452
+                    local sX = (curW and curW > 100) and (curW / 748) or 1
+                    local sY = (curH and curH > 100) and (curH / 452) or 1
+                    local cL, cT = mapCanvas:GetLeft(), mapCanvas:GetTop()
+                    local sL, sT, sW, sH = self:GetLeft(), self:GetTop(), self:GetWidth(), self:GetHeight()
+                    if cL and cT and sL and sT then
+                        local centerX = (sL + sW / 2) - cL
+                        local centerY = (sT - sH / 2) - cT
+                        self.baseX = math.floor(centerX / sX + 0.5)
+                        self.baseY = math.floor(centerY / sY + 0.5)
+                        self.x = math.floor(self.baseX * sX + 0.5)
+                        self.y = math.floor(self.baseY * sY + 0.5)
+                        self:ClearAllPoints()
+                        self:SetPoint("CENTER", mapCanvas, "TOPLEFT", self.x, self.y)
+                        if self.data then
+                            self.data.xy = { self.baseX, self.baseY }
+                        end
+                    end
+                end
+            end)
+
+            noteFrame:SetScript("OnEnter", function(self)
+                if self.SetBackdropBorderColor then
+                    self:SetBackdropBorderColor(1, 1, 1, 1)
+                end
+                GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+                GameTooltip:ClearLines()
+                GameTooltip:AddLine(data.title or "战术细节注解", 1, 0.85, 0)
+                if data.desc then
+                    GameTooltip:AddLine(data.desc, 1, 1, 1, true)
+                else
+                    GameTooltip:AddLine(data.text or "", 0.9, 0.9, 0.9, true)
+                end
+                local inRaid = IsInRaid and IsInRaid()
+                local isLeaderRole = (not inRaid) or UnitIsGroupLeader("player") or UnitIsGroupAssistant("player")
+                if isLeaderRole and not (RaidMap.isLocked or (f and f.isLocked) or (f and f.displayMode == "RECEIVER")) then
+                    GameTooltip:AddLine(" ")
+                    GameTooltip:AddLine("|cff00ff00[鼠标左键按住可自由拖动位置]|r", 0.2, 1, 0.4)
+                end
+                GameTooltip:Show()
+            end)
+
+            noteFrame:SetScript("OnLeave", function(self)
+                if self.SetBackdropBorderColor then
+                    self:SetBackdropBorderColor(borderR, borderG, borderB, borderA)
+                end
+                GameTooltip:Hide()
+            end)
+
+            noteFrame:Show()
+            table.insert(f.staticNotes, noteFrame)
+        end
+    end
+end
+
+--------------------------------------------------------------------------------
 -- 8. 核心 BOSS 专属预设构建与多阶段加载器 (LoadBossTacticalPreset)
 --------------------------------------------------------------------------------
 function RaidMap.LoadBossTacticalPreset(bossID, phaseIndex, forceMode)
     local f = RaidMap.CreateUI()
     if not f then return end
+    if RaidMap.StopSimulation then RaidMap.StopSimulation(f) end
     local all = RaidMap.GetAllBosses()
     bossID = bossID or currentBossID
     if (not bossID or bossID == 0) and all and #all > 0 then
@@ -2309,6 +2659,7 @@ function RaidMap.LoadBossTacticalPreset(bossID, phaseIndex, forceMode)
     local activeTbl = nil
     local activeTip = nil
     local activeTex = nil
+    local activeNotes = nil
 
     -- 多阶段判定与 Tab 栏渲染
     if bossData.phases and #bossData.phases > 0 then
@@ -2352,6 +2703,7 @@ function RaidMap.LoadBossTacticalPreset(bossID, phaseIndex, forceMode)
         activeTbl = curP.tbl
         activeTip = curP.tacticTip or bossData.tacticTip
         activeTex = curP.mapTex or bossData.mapTex
+        activeNotes = curP.notes or curP.tacticalNotes or bossData.notes or bossData.tacticalNotes
     else
         currentPhase = 1
         f.currentPhase = 1
@@ -2363,6 +2715,7 @@ function RaidMap.LoadBossTacticalPreset(bossID, phaseIndex, forceMode)
         activeTbl = bossData.tbl
         activeTip = bossData.tacticTip
         activeTex = bossData.mapTex
+        activeNotes = bossData.notes or bossData.tacticalNotes
     end
 
     f.currentBossID = bossID
@@ -2407,6 +2760,11 @@ function RaidMap.LoadBossTacticalPreset(bossID, phaseIndex, forceMode)
         for index, v in pairs(activeTbl) do
             CreateDraggablePointIcon(f.mapCanvas, index, v)
         end
+    end
+
+    -- 渲染首领专属战术特殊信息标注 (notes / tacticalNotes 驱动)
+    if RaidMap.RenderStaticNotes then
+        RaidMap.RenderStaticNotes(f.mapCanvas, activeNotes)
     end
 
     RaidMap.RefreshSelfHighlight(f)
@@ -2715,14 +3073,28 @@ function RaidMap.BroadcastCurrentMap()
     local bossName = bossData and bossData.name or "奥杜尔战术"
     local FB = bossData and bossData.fb or "ULDtitan"
 
-    local fmtTag = string.format("FMT:m=%s,r=%s", currentMeleeMode or "arc", currentRangedMode or "arc")
+    local sendPhase = f.currentPhase or currentPhase or 1
+    local notesCoordStr = ""
+    if f.staticNotes and #f.staticNotes > 0 then
+        local list = {}
+        for _, nFrame in ipairs(f.staticNotes) do
+            if nFrame:IsShown() and nFrame.baseX and nFrame.baseY then
+                table.insert(list, string.format("%d:%d", math.floor(nFrame.baseX), math.floor(nFrame.baseY)))
+            end
+        end
+        if #list > 0 then
+            notesCoordStr = ",nt=" .. table.concat(list, "~")
+        end
+    end
+    local fmtTag = string.format("FMT:p=%d,m=%s,r=%s%s", sendPhase, currentMeleeMode or "arc", currentRangedMode or "arc", notesCoordStr)
     local str = format("%s&&%d&&%d&&%d&&%s&&%s^^", FB, currentBossID, mapWidth, mapHeight, fmtTag, bossName)
 
     local iconStr = ""
     for _, icon in ipairs(f.icons) do
         local level = icon:GetFrameLevel() or 3
-        local x = math.floor(icon.x or 0)
-        local y = math.floor(icon.y or 0)
+        -- 核心修复：广播时必须发送未经画布二次拉伸的基准坐标 (baseX, baseY)，彻底杜绝接收端二次等比缩放导致的位置膨胀错位
+        local x = math.floor(icon.baseX or icon.x or 0)
+        local y = math.floor(icon.baseY or icon.y or 0)
         local w = math.floor(icon:GetWidth())
         local isBoss = (icon.v and icon.v.isBoss) or (icon.role == "boss")
         local iconType = isBoss and "boss" or "tex"
@@ -2730,12 +3102,24 @@ function RaidMap.BroadcastCurrentMap()
         local numText = (icon.numText and icon.numText:GetText()) or ""
         local playerText = (icon.playerText and icon.playerText:GetText()) or ""
 
+        local br, bg, bb = 1.0, 1.0, 1.0
+        if icon.border and icon.border.GetVertexColor then
+            local r, g, b = icon.border:GetVertexColor()
+            if r and g and b then br, bg, bb = r, g, b end
+        end
+
+        local pr, pg, pb = 0.2, 0.8, 1.0
+        if icon.playerText and icon.playerText.GetTextColor then
+            local r, g, b = icon.playerText:GetTextColor()
+            if r and g and b then pr, pg, pb = r, g, b end
+        end
+
         iconStr = iconStr .. format("%d¦%d¦%d¦%d¦%d¦%s¦%s¦%s¦%s¦%s¦%s¦%d¦%.2f¦%.2f¦%.2f¦%s¦%.2f¦%.2f¦%.2f¦%s¦%.2f¦%.2f¦%.2f&&",
             level, x, y, w, w, iconType, iconTex,
             "", "", "", "",
-            1, 1.0, 1.0, 1.0,
+            1, br, bg, bb,
             numText, 1.0, 1.0, 1.0,
-            playerText, 0.2, 0.8, 1.0
+            playerText, pr, pg, pb
         )
     end
 
@@ -2743,8 +3127,8 @@ function RaidMap.BroadcastCurrentMap()
         for _, marker in ipairs(f.customMarkers) do
             if marker:IsShown() then
                 local level = marker:GetFrameLevel() or 22
-                local x = math.floor(marker.x or 0)
-                local y = math.floor(marker.y or 0)
+                local x = math.floor(marker.baseX or marker.x or 0)
+                local y = math.floor(marker.baseY or marker.y or 0)
                 local w = math.floor(marker:GetWidth() or 32)
                 local iconTex = ""
                 local playerText = ""
@@ -2816,6 +3200,7 @@ end
 function RaidMap.RenderByCode(code, notSave, sender)
     if not code or code == "" then return false end
     local f = RaidMap.CreateUI()
+    if RaidMap.StopSimulation then RaidMap.StopSimulation(f) end
 
     local decoded = Base64Decode(code)
     local str = SafeDecompress(decoded)
@@ -2842,7 +3227,7 @@ function RaidMap.RenderByCode(code, notSave, sender)
             bossName = bossName,
             formation = childIndex,
         })
-        while #BiaoGe.maps > 10 do table.remove(BiaoGe.maps, #BiaoGe.maps) end
+        while #BiaoGe.maps > 5 do table.remove(BiaoGe.maps, #BiaoGe.maps) end
     end
 
     f.originalWidth = mapWidth
@@ -2857,25 +3242,89 @@ function RaidMap.RenderByCode(code, notSave, sender)
         end
     end
 
+    local targetPhase = 1
     local fmtNotice = ""
-    if childIndex and type(childIndex) == "string" and string.find(childIndex, "^FMT:") then
-        local mMode = string.match(childIndex, "m=([%a_]+)")
-        local rMode = string.match(childIndex, "r=([%a_]+)")
-        if mMode then currentMeleeMode = mMode end
-        if rMode then currentRangedMode = rMode end
-        local mName = RaidMap.MELEE_MODE_NAMES and RaidMap.MELEE_MODE_NAMES[currentMeleeMode]
-        local rName = RaidMap.RANGED_MODE_NAMES and RaidMap.RANGED_MODE_NAMES[currentRangedMode]
-        if mName or rName then
-            fmtNotice = string.format(" [%s | %s]", mName or "近战", rName or "远程")
+    local customNoteCoords = nil
+    if childIndex and type(childIndex) == "string" then
+        if string.find(childIndex, "^FMT:") then
+            local pMatch = string.match(childIndex, "p=(%d+)")
+            if pMatch then targetPhase = tonumber(pMatch) or 1 end
+            local mMode = string.match(childIndex, "m=([%a_]+)")
+            local rMode = string.match(childIndex, "r=([%a_]+)")
+            if mMode then currentMeleeMode = mMode end
+            if rMode then currentRangedMode = rMode end
+            local mName = RaidMap.MELEE_MODE_NAMES and RaidMap.MELEE_MODE_NAMES[currentMeleeMode]
+            local rName = RaidMap.RANGED_MODE_NAMES and RaidMap.RANGED_MODE_NAMES[currentRangedMode]
+            if mName or rName then
+                fmtNotice = string.format(" [%s | %s]", mName or "近战", rName or "远程")
+            end
+            local ntMatch = string.match(childIndex, "nt=([%d%-%:~]+)")
+            if ntMatch and ntMatch ~= "" then
+                customNoteCoords = {}
+                for pair in string.gmatch(ntMatch, "([^~]+)") do
+                    local nx, ny = string.match(pair, "^(%-?%d+):(%-?%d+)$")
+                    if nx and ny then
+                        table.insert(customNoteCoords, { tonumber(nx), tonumber(ny) })
+                    end
+                end
+            end
+        else
+            local numPhase = tonumber(childIndex)
+            if numPhase then targetPhase = numPhase end
         end
     end
 
-    f.title:SetText(string.format("【%s】 %s%s", FB or "团本", bossName or "战术站位", fmtNotice))
+    local bossData = RaidMap.GetBoss(bossIndex)
+    local activeTip = ""
+    local activeTex = nil
+    local phaseNameSuffix = ""
+    if bossData then
+        if bossData.phases and #bossData.phases > 0 then
+            targetPhase = math.min(targetPhase, #bossData.phases)
+            local pData = bossData.phases[targetPhase]
+            if pData then
+                activeTip = pData.tacticTip or bossData.tacticTip or ""
+                activeTex = pData.mapTex or bossData.mapTex
+                if pData.name then
+                    phaseNameSuffix = " [" .. pData.name .. "]"
+                end
+            end
+        else
+            targetPhase = 1
+            activeTip = bossData.tacticTip or ""
+            activeTex = bossData.mapTex
+        end
+    end
+
+    f.currentBossID = bossIndex
+    f.currentPhase = targetPhase
+    f.activeTacticTip = activeTip
+    currentBossID = bossIndex
+    currentPhase = targetPhase
+    RaidMap.currentBossID = bossIndex
+    RaidMap.currentPhase = targetPhase
+
+    f.title:SetText(string.format("【%s】 %s%s%s", FB or "团本", bossName or "战术站位", phaseNameSuffix, fmtNotice))
     f.selfNotice:SetText(string.format("(推送者: %s)", sender or "团长"))
 
+    -- 场地左上角战术一句话核心概括 (绿字呈现)
+    local subDesc = bossData and bossData.sub or ""
+    if f.mapSubText then
+        f.mapSubText:SetText(subDesc ~= "" and ("【战术核心】 " .. subDesc) or "")
+    end
+
+    -- 接收端底部攻略详细文本 (保证用户可以清晰阅读攻略，通报按钮由 SetDisplayMode 保持隐藏)
+    local shieldIcon = "|TInterface\\AddOns\\BGLite_Plus\\Media\\shield.png:13:13:0:0|t "
+    if f.tacticTipText then
+        f.tacticTipText:SetText(activeTip ~= "" and (shieldIcon .. activeTip) or "")
+        f.tacticTipText:Show()
+    end
+    if f.tipPanel then
+        f.tipPanel:Show()
+    end
+
     -- 接收端背景贴图渲染
-    local bossData = RaidMap.GetBoss(bossIndex)
-    local realTex = bossData and (bossData.mapTex or (bossData.phases and bossData.phases[1] and bossData.phases[1].mapTex))
+    local realTex = activeTex or (bossData and bossData.mapTex)
     local grid = f.tacticalGrid or (f.mapCanvas and f.mapCanvas.tacticalGrid)
     if realTex then
         f.isUsingGrid = false
@@ -2888,11 +3337,17 @@ function RaidMap.RenderByCode(code, notSave, sender)
         DrawProceduralTacticalGrid(f.mapCanvas or f, mapWidth, mapHeight, bossIndex)
     end
 
+    if f.customMarkers then
+        for _, m in ipairs(f.customMarkers) do m:Hide() end
+        wipe(f.customMarkers)
+    end
+    wipe(RaidMap.assignedPlayers)
+
     for _, icon in ipairs(f.icons) do icon:Hide() end
     wipe(f.icons)
 
     if icons and icons ~= "" then
-        local iconList = { SafeSplit("&&", icons) }
+        local iconList = SafeSplitList("&&", icons)
         for _, iconStr in ipairs(iconList) do
             if iconStr and iconStr ~= "" then
                 local level, x, y, width, height, iconType, iconTex,
@@ -2944,18 +3399,60 @@ function RaidMap.RenderByCode(code, notSave, sender)
 
                 local idx = tonumber(numText) or (#f.icons + 1)
                 local pointIcon = CreateDraggablePointIcon(f.mapCanvas, idx, v)
-                if not isNPC and playerText and playerText ~= "" then
-                    pointIcon.playerText:SetText(playerText)
-                    pointIcon.playerText:SetTextColor(playerColor[1], playerColor[2], playerColor[3])
-                    pointIcon.border:SetVertexColor(broderColor[1], broderColor[2], broderColor[3])
-                    pointIcon.numText:SetText(numText ~= "" and numText or tostring(idx))
-                    pointIcon.name = playerText
-                end
-                if isMeleeGroup then
+
+                if not isNPC then
+                    if playerText and playerText ~= "" then
+                        pointIcon.playerText:SetText(playerText)
+                        pointIcon.playerText:SetTextColor(playerColor[1], playerColor[2], playerColor[3])
+                        pointIcon.border:SetVertexColor(broderColor[1], broderColor[2], broderColor[3])
+                        pointIcon.numText:SetText(numText ~= "" and numText or tostring(idx))
+                        pointIcon.numText:SetTextColor(1, 1, 1)
+                        pointIcon.name = playerText
+
+                        if iconTex and iconTex ~= "" then
+                            pointIcon.icon:SetTexture(iconTex)
+                            pointIcon.icon:SetAlpha(1.0)
+                        end
+
+                        RaidMap.assignedPlayers[idx] = {
+                            name = playerText,
+                            specIcon = (iconTex ~= "" and iconTex) or nil,
+                        }
+                    else
+                        pointIcon.playerText:SetText("")
+                        pointIcon.border:SetVertexColor(0.45, 0.45, 0.45)
+                        pointIcon.icon:SetTexture("Interface\\Icons\\INV_Misc_QuestionMark")
+                        pointIcon.icon:SetAlpha(0.25)
+                        pointIcon.numText:SetText(numText ~= "" and numText or tostring(idx))
+                        pointIcon.numText:SetTextColor(0.65, 0.65, 0.65)
+                        pointIcon.name = nil
+                        RaidMap.assignedPlayers[idx] = nil
+                    end
+                elseif isMeleeGroup then
                     pointIcon.members = members
+                    if iconTex and iconTex ~= "" then
+                        pointIcon.icon:SetTexture(iconTex)
+                    else
+                        pointIcon.icon:SetTexture("Interface\\Icons\\ability_steelmelee")
+                    end
+                    pointIcon.icon:SetAlpha(1.0)
                 end
             end
         end
+    end
+
+    -- 渲染首领专属战术特殊信息标注 (接收端受令看板同步呈现)
+    local activeNotes = nil
+    if bossData then
+        if bossData.phases and #bossData.phases > 0 and bossData.phases[targetPhase] then
+            local pData = bossData.phases[targetPhase]
+            activeNotes = pData.notes or pData.tacticalNotes or bossData.notes or bossData.tacticalNotes
+        else
+            activeNotes = bossData.notes or bossData.tacticalNotes
+        end
+    end
+    if RaidMap.RenderStaticNotes then
+        RaidMap.RenderStaticNotes(f.mapCanvas, activeNotes, customNoteCoords)
     end
 
     if f.phaseTabBar then f.phaseTabBar:Hide() end
@@ -2978,7 +3475,7 @@ local function IsAuthorizedSender(sender, distType)
     if distType == "PARTY" then return true end
     local cleanSender = string.match(sender, "^([^-]+)") or sender
     local myName = UnitName("player")
-    if cleanSender == myName then return true end
+    if cleanSender == myName then return false end
 
     if IsInRaid and IsInRaid() then
         local num = GetNumGroupMembers()
@@ -3031,6 +3528,14 @@ addonListener:RegisterEvent("CHAT_MSG_ADDON")
 addonListener:SetScript("OnEvent", function(self, event, prefix, msg, distType, sender)
     if not MAP_PREFIXES[prefix] then return end
     if distType ~= "RAID" and distType ~= "PARTY" then return end
+
+    local cleanSender = string.match(sender or "", "^([^-]+)") or sender
+    local myName = UnitName("player")
+    if cleanSender == myName then
+        -- 核心防御：彻底过滤自己发出的广播切片数据，防止团长/队长本地设计界面被反向冲掉
+        return
+    end
+
     if not IsAuthorizedSender(sender, distType) then return end
 
     if msg:match("^!AIMAP!") then
@@ -3060,8 +3565,282 @@ end
 -- 14. 命令行支持 (/bgmap, /tjmap, /bglitemap)
 --------------------------------------------------------------------------------
 SLASH_BGLITEMAP1 = "/bgmap"
-SLASH_BGLITEMAP2 = "/tjmap"
 SLASH_BGLITEMAP3 = "/bglitemap"
 SlashCmdList["BGLITEMAP"] = function(msg)
     RaidMap.Toggle()
+end
+
+--------------------------------------------------------------------------------
+-- 15. 战术动态推演通用引擎 (Generic Tactical Simulation Engine)
+-- 彻底遵循引擎与业务解耦架构：
+-- 主程序中仅维护一套抽象通用的调度、插值动效驱动与生命周期复位逻辑；
+-- 具体的推演剧本、时序步骤、动效角色、目标坐标与文案全部由各首领数据表 (simulation) 配置驱动。
+--------------------------------------------------------------------------------
+local activeSimTimer = nil
+
+local function Lerp(a, b, t)
+    return a + (b - a) * t
+end
+
+-- 获取指定 actor 对应的图标对象 (支持数字编号如 8，或按职责查询)
+local function FindActorIcon(f, actor)
+    if not f or not f.icons then return nil end
+    if type(actor) == "number" then
+        for _, icon in ipairs(f.icons) do
+            if icon.index == actor then return icon end
+        end
+        return f.icons[actor]
+    elseif type(actor) == "string" then
+        for _, icon in ipairs(f.icons) do
+            if not icon.v.isNPC and icon.role == actor then return icon end
+        end
+    end
+    return nil
+end
+
+-- 解析目标点实际坐标 (支持 "origin" 归位、地标数字如 91、绝对坐标表 {x, y})
+local function ResolveTargetPosition(f, actorIcon, target, activeTbl, scaleX, scaleY)
+    if target == "origin" then
+        if actorIcon and actorIcon.simOrigX and actorIcon.simOrigY then
+            return actorIcon.simOrigX, actorIcon.simOrigY
+        end
+        return actorIcon and actorIcon.x or 0, actorIcon and actorIcon.y or 0
+    elseif type(target) == "number" then
+        -- 优先在当前界面图标中查找该序号的点位坐标
+        for _, icon in ipairs(f.icons) do
+            if icon.index == target then
+                return icon.x, icon.y
+            end
+        end
+        -- 其次从首领原始 tbl 中提取基准坐标并换算
+        if activeTbl and activeTbl[target] and activeTbl[target].xy then
+            local raw = activeTbl[target].xy
+            local tx = math.floor(raw[1] * scaleX + 0.5)
+            local ty = math.floor(((raw[2] > 0) and -raw[2] or raw[2]) * scaleY + 0.5)
+            return tx, ty
+        end
+    elseif type(target) == "table" and target[1] and target[2] then
+        local tx = math.floor(target[1] * scaleX + 0.5)
+        local ty = math.floor(((target[2] > 0) and -target[2] or target[2]) * scaleY + 0.5)
+        return tx, ty
+    end
+    return actorIcon and actorIcon.x or 0, actorIcon and actorIcon.y or 0
+end
+
+function RaidMap.StopSimulation(f)
+    f = f or mapFrame
+    if not f then return end
+
+    if activeSimTimer then
+        activeSimTimer:Cancel()
+        activeSimTimer = nil
+    end
+
+    f.isSimulating = false
+    if f.btnSim then
+        f.btnSim:SetText(BG.STC_b1("战术推演"))
+    end
+
+    if f.simBanner then
+        f.simBanner:Hide()
+    end
+
+    -- 优雅复位所有动效涉及的图标
+    if f.icons then
+        for _, icon in ipairs(f.icons) do
+            if icon.simOrigX and icon.simOrigY then
+                icon.x = icon.simOrigX
+                icon.y = icon.simOrigY
+                icon:ClearAllPoints()
+                icon:SetPoint("CENTER", f.mapCanvas, "TOPLEFT", icon.x, icon.y)
+                icon.simOrigX = nil
+                icon.simOrigY = nil
+                icon.simStartX = nil
+                icon.simStartY = nil
+                icon.activeStep = nil
+            end
+            if icon.simGlowShow ~= nil then
+                if icon.glow then
+                    if icon.simGlowShow then
+                        icon.glow:Show()
+                    else
+                        icon.glow:Hide()
+                    end
+                    icon.glow:SetVertexColor(1, 0.9, 0.2, 0.95)
+                end
+                icon.simGlowShow = nil
+            end
+            if icon.simTextTag then
+                if icon.playerText and icon.simOrigPlayerText then
+                    icon.playerText:SetText(icon.simOrigPlayerText)
+                end
+                icon.simTextTag = nil
+                icon.simOrigPlayerText = nil
+            end
+        end
+    end
+end
+
+function RaidMap.StartSimulation(f)
+    f = f or mapFrame
+    if not f or not f:IsShown() then return end
+
+    -- 若已在播放中，点击则为复位停止
+    if f.isSimulating then
+        RaidMap.StopSimulation(f)
+        DEFAULT_CHAT_FRAME:AddMessage("|cff00BFFF[战术推演]|r 已停止演示并复位至初始站位。")
+        return
+    end
+
+    -- 动态获取当前首领/阶段配置的推演剧本
+    local bossID = f.currentBossID or currentBossID
+    local phaseIdx = f.currentPhase or currentPhase or 1
+    local bossData = RaidMap.GetBoss(bossID)
+    if not bossData then return end
+
+    local curP = bossData.phases and bossData.phases[phaseIdx]
+    local simData = (curP and curP.simulation) or bossData.simulation
+
+    if not simData or not simData.steps or #simData.steps == 0 then
+        DEFAULT_CHAT_FRAME:AddMessage(string.format("|cffffaa00[战术推演]|r 当前首领【%s】暂未配置专属动态推演剧本。", bossData.name or "当前BOSS"))
+        return
+    end
+
+    -- 构建底图浮动走马灯战术字幕条 (simBanner)
+    if not f.simBanner then
+        local banner = CreateFrame("Frame", nil, f.mapCanvas, "BackdropTemplate")
+        banner:SetPoint("BOTTOM", f.mapCanvas, "BOTTOM", 0, 14)
+        banner:SetSize(540, 30)
+        banner:SetFrameLevel(f.mapCanvas:GetFrameLevel() + 28)
+        banner:SetBackdrop({
+            bgFile = "Interface/ChatFrame/ChatFrameBackground",
+            edgeFile = "Interface/Tooltips/UI-Tooltip-Border",
+            edgeSize = 12,
+            insets = { left = 2, right = 2, top = 2, bottom = 2 },
+        })
+        banner:SetBackdropColor(0.02, 0.04, 0.08, 0.92)
+        banner:SetBackdropBorderColor(0.2, 0.8, 1, 0.85)
+
+        local txt = banner:CreateFontString(nil, "OVERLAY")
+        txt:SetFont(BIAOGE_TEXT_FONT, 13, "OUTLINE")
+        txt:SetPoint("CENTER", 0, 0)
+        banner.text = txt
+        f.simBanner = banner
+    end
+
+    f.isSimulating = true
+    if f.btnSim then
+        f.btnSim:SetText("|cffff4444⏹ 复位|r")
+    end
+    f.simBanner:Show()
+
+    local mapCanvas = f.mapCanvas
+    local curW = mapCanvas:GetWidth() or 748
+    local curH = mapCanvas:GetHeight() or 452
+    local scaleX = (curW and curW > 100) and (curW / 748) or 1
+    local scaleY = (curH and curH > 100) and (curH / 452) or 1
+    local activeTbl = (curP and curP.tbl) or bossData.tbl
+
+    -- 预扫描并预存初始位置
+    local registeredIcons = {}
+    local function RegisterActor(actorId)
+        local icon = FindActorIcon(f, actorId)
+        if icon and not registeredIcons[icon] then
+            registeredIcons[icon] = true
+            icon.simOrigX = icon.x
+            icon.simOrigY = icon.y
+            icon.simGlowShow = icon.glow and icon.glow:IsShown()
+            icon.simOrigPlayerText = icon.playerText and icon.playerText:GetText()
+        end
+        return icon
+    end
+
+    -- 预处理每个 step 中的 actor
+    for _, step in ipairs(simData.steps) do
+        if step.actor then
+            RegisterActor(step.actor)
+        elseif step.actions then
+            for _, act in ipairs(step.actions) do
+                if act.actor then RegisterActor(act.actor) end
+            end
+        end
+    end
+
+    local totalDuration = simData.duration or 6.0
+    local startTime = GetTime()
+
+    -- 驱动通用计时器
+    activeSimTimer = C_Timer.NewTicker(0.025, function()
+        local now = GetTime()
+        local elapsed = now - startTime
+
+        if elapsed >= totalDuration then
+            RaidMap.StopSimulation(f)
+            DEFAULT_CHAT_FRAME:AddMessage(string.format("|cff00ff00[战术推演]|r 【%s】机制跑位推演完成！", bossData.name or ""))
+            return
+        end
+
+        -- 寻找当前最新的生效文本
+        local currentText = nil
+        for _, step in ipairs(simData.steps) do
+            if elapsed >= step.t and step.text then
+                currentText = step.text
+            end
+        end
+        if currentText and f.simBanner and f.simBanner.text then
+            f.simBanner.text:SetText(currentText)
+        end
+
+        -- 执行当前时间区间内的所有移动动作 (Actions Runner)
+        for _, step in ipairs(simData.steps) do
+            local stepDuration = step.duration or 1.5
+            if elapsed >= step.t and elapsed < (step.t + stepDuration) then
+                local p = (elapsed - step.t) / stepDuration
+                p = math.min(1, math.max(0, p))
+                local smoothP = p * p * (3 - 2 * p)
+
+                local actions = step.actions or (step.actor and { step })
+                if actions then
+                    for _, act in ipairs(actions) do
+                        local icon = FindActorIcon(f, act.actor)
+                        if icon and act.target then
+                            local fromX = icon.simStartX or icon.simOrigX or icon.x
+                            local fromY = icon.simStartY or icon.simOrigY or icon.y
+                            local toX, toY = ResolveTargetPosition(f, icon, act.target, activeTbl, scaleX, scaleY)
+
+                            -- 若刚进入当前 step，锁定起点坐标
+                            if not icon.activeStep or icon.activeStep ~= step then
+                                icon.activeStep = step
+                                icon.simStartX = icon.x
+                                icon.simStartY = icon.y
+                                fromX = icon.x
+                                fromY = icon.y
+                            end
+
+                            local curX = Lerp(fromX, toX, smoothP)
+                            local curY = Lerp(fromY, toY, smoothP)
+                            icon.x = curX
+                            icon.y = curY
+                            icon:ClearAllPoints()
+                            icon:SetPoint("CENTER", mapCanvas, "TOPLEFT", curX, curY)
+
+                            if act.glowColor and icon.glow then
+                                icon.glow:SetVertexColor(unpack(act.glowColor))
+                                icon.glow:Show()
+                            elseif act.target == "origin" and p >= 0.95 and icon.glow and not icon.simGlowShow then
+                                icon.glow:Hide()
+                            end
+
+                            if act.tag and icon.playerText then
+                                icon.simTextTag = true
+                                icon.playerText:SetText(act.tag)
+                            elseif act.target == "origin" and p >= 0.95 and icon.playerText and icon.simOrigPlayerText then
+                                icon.playerText:SetText(icon.simOrigPlayerText)
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end)
 end

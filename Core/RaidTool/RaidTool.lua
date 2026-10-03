@@ -1363,30 +1363,6 @@ function RaidTool.CreateUI(parent)
     cbLockHUD:SetScript("OnLeave", GameTooltip_Hide)
     if ns.RaidCD then ns.RaidCD.cbLockHUD = cbLockHUD end
 
-    -- 战术站位图入口按钮 (右侧面板顶部)
-    local btnOpenRaidMap = BG.CreateButton(rightPanel)
-    btnOpenRaidMap:SetSize(86, 26)
-    btnOpenRaidMap:SetPoint("LEFT", cbLockHUD.text, "RIGHT", 10, 0)
-    btnOpenRaidMap:SetText(BG.STC_b1("战术站位图"))
-    btnOpenRaidMap:SetScript("OnClick", function()
-        local rMap = ns.RaidMap or _G.RaidMap or (BG and BG.RaidMap)
-        if not rMap then return end
-
-        if rMap.Toggle then
-            rMap.Toggle()
-        elseif rMap.LoadBossTacticalPreset then
-            rMap.LoadBossTacticalPreset(5)
-        end
-        BG.PlaySound(1)
-    end)
-    btnOpenRaidMap:SetScript("OnEnter", function(self)
-        GameTooltip:SetOwner(self, "ANCHOR_TOP")
-        GameTooltip:AddLine(BG.STC_b1("打开战术站位图看板"), 1, 1, 1)
-        GameTooltip:AddLine("即时呼出或关闭奥杜尔战术站位看板，展示团长最新排布站位。", 0.85, 0.85, 0.85, true)
-        GameTooltip:AddLine("快捷命令: /bgmap 或 /tjmap", 0.2, 1, 0.4, true)
-        GameTooltip:Show()
-    end)
-    btnOpenRaidMap:SetScript("OnLeave", GameTooltip_Hide)
 
     -- 8 个小队网格 (加大单格尺寸至 142x145, 队员槽位高度 23px, 文字 14px)
     local slotButtons = {}
