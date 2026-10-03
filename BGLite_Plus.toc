@@ -8,19 +8,27 @@
 ## RequiredDeps: BGLite
 ## SavedVariables: BiaoGe
 
+# --- 本地化语言包 ---
 Locales\zhCN.lua
 Locales\zhTW.lua
 Locales\enUS.lua
 
+# --- 核心支持库 ---
 Core\Lib.lua
-Core\DB_FilterClassItem.lua
-Core\RoleOverview_core.lua
-Core\RoleOverviewSort.lua
-Core\RoleOverview.lua
-Core\FilterClassItem.lua
-Core\ItemLib.lua
-Core\Hope.lua
-Core\RoleOverviewOptions.lua
+
+# --- 数据层 (DB) ---
+Core\DB\DB_FilterClassItem.lua
+Core\DB\DB_ItemName.lua
+Core\DB\DB_Loot_ULDtitan.lua
+Core\DB\DB_Loot_SWtitan.lua
+
+# --- 角色总览模块 (RoleOverview) ---
+Core\RoleOverview\RoleOverview_core.lua
+Core\RoleOverview\RoleOverviewSort.lua
+Core\RoleOverview\RoleOverview.lua
+Core\RoleOverview\RoleOverviewOptions.lua
+
+# --- 团队工具模块 (RaidTool & TacticalMap) ---
 Core\RaidTool\RaidCD.lua
 Core\RaidTool\RaidCD_PlayerModal.lua
 Core\RaidTool\RaidTool.lua
@@ -31,20 +39,25 @@ Core\RaidTool\RaidMap_Data\General.lua
 Core\RaidTool\RaidMap_Data\ULD.lua
 Core\RaidTool\RaidMap.lua
 Core\RaidTool\RaidMock.lua
-Core\WhoHistory.lua
-Core\TeamInfo.lua
-Core\TradeHistory.lua
-Core\TradeFix.lua
-Core\MailFix.lua
-Core\Reputation.lua
-Core\BestPrice.lua
-Core\ItemNameDB.lua
-Core\Loot_ULDtitan.lua
-Core\AuctionPreset.lua
-Core\AutoAuctionOnLoot.lua
-Core\LootHistory.lua
-Core\History.lua
-Core\WorkerReport.lua
+
+# --- 业务功能模块 (Module) ---
+Core\Module\FilterClassItem.lua
+Core\Module\ItemLib.lua
+Core\Module\Hope.lua
+Core\Module\TeamInfo.lua
+Core\Module\WhoHistory.lua
+Core\Module\TradeHistory.lua
+Core\Module\TradeFix.lua
+Core\Module\MailFix.lua
+Core\Module\Reputation.lua
+Core\Module\BestPrice.lua
+Core\Module\AuctionPreset.lua
+Core\Module\AutoAuctionOnLoot.lua
+Core\Module\LootHistory.lua
+Core\Module\History.lua
+Core\Module\WorkerReport.lua
+
+# --- 插件总初始化入口 ---
 Core\Init.lua
 
 ## Title-zhCN: |cff880303[增强]|r BGLite 增强功能包 (|cff00BFFF心愿单+装备库+角色总览+团本报表+团队工具|r)

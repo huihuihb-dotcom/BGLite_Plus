@@ -24,12 +24,13 @@
 | 模块类别 | 核心文件 | 核心职责与业务范围 |
 | :--- | :--- | :--- |
 | **入口与基础库** | `BGLite_Plus.toc`<br>`Core/Init.lua`<br>`Core/Lib.lua` | 插件加载清单、生命周期自启动管理、底部 Tab 栏调度、子框架居中与显隐自愈、暴雪原生 ObjectAPI 安全防护代理。 |
-| **掉落与自动拍卖** | `Core/AutoAuctionOnLoot.lua`<br>`Core/AuctionPreset.lua` | 掉落监听（`CHAT_MSG_LOOT`）、表格对账、动态槽位锁、多阶梯异步重试、防抖倒计时悬浮条、预设起拍价面板与双阵营掉落池合并。 |
-| **团队工具与运营** | `Core/RaidTool.lua`<br>`Core/TeamInfo.lua`<br>`Core/WhoHistory.lua` | 进组自动通知（仅团长/助理）、YY/DD 语音安全超链接（防第三方插件乱码破坏）、40人阵容预设网格；团队信息留存抽屉（集结号解码、合规中性化、历史联合存储）；O键查询历史记录。 |
-| **角色资产与总览** | `Core/RoleOverview*.lua`<br>`Core/Reputation.lua` | 跨角色全景看板（CD、日常、专业、货币）、+N 装备展开收纳、节日 CD 治理、排序持久化；极轻量超低频声望采集工具类。 |
-| **交易与历史账单** | `Core/TradeHistory.lua`<br>`Core/TradeFix.lua`<br>`Core/History.lua` | 玩家交易历史记录与明细对账、交易防漏单安全拦截；历史账单多快照保存/应用/查看、装备历史价格走势图与原生 Tooltip 协同。 |
-| **阵容专精与战斗监控** | `Core/RaidTalents.lua`<br>`Core/RaidComp.lua`<br>`Core/RaidCompUI.lua`<br>`Core/RaidCD*.lua` | 全局专精嗅探中枢（全图超视距）、全口径花名册、双天赋感应、Buff/Debuff 缺口雷达；团队关键技能/大减伤冷却监控与频道智能降级。 |
-| **战术与打工看板** | `Core/RaidMap*.lua`<br>`Core/WorkerReport.lua` | 战术站位图（引擎与数据解耦、1024x1024 规范贴图、BOSS 头像、防误触、坦奶协同标记）；打工人跨角色收益统计看板、合体副本拆分折叠、周四结算提醒。 |
+| **数据层 (DB)** | `Core/DB/DB_FilterClassItem.lua`<br>`Core/DB/DB_ItemName.lua`<br>`Core/DB/DB_Loot_ULDtitan.lua`<br>`Core/DB/DB_Loot_SWtitan.lua` | 数据库层：职业装备过滤字典、时光服物品中文名本地缓存、奥杜尔/SWtitan 官方遗漏掉落的运行时安全修补（零侵入上游）。 |
+| **掉落与自动拍卖** | `Core/Module/AutoAuctionOnLoot.lua`<br>`Core/Module/AuctionPreset.lua`<br>`Core/Module/LootHistory.lua` | 掉落监听（`CHAT_MSG_LOOT`）、表格对账、动态槽位锁、多阶梯异步重试、防抖倒计时悬浮条、预设起拍价面板与双阵营掉落池合并。 |
+| **团队工具与运营** | `Core/RaidTool/RaidTool.lua`<br>`Core/Module/TeamInfo.lua`<br>`Core/Module/WhoHistory.lua` | 进组自动通知（仅团长/助理）、YY/DD 语音安全超链接（防第三方插件乱码破坏）、40人阵容预设网格；团队信息留存抽屉（集结号解码、合规中性化、历史联合存储）；O键查询历史记录。 |
+| **角色资产与总览** | `Core/RoleOverview/RoleOverview*.lua`<br>`Core/Module/Reputation.lua` | 跨角色全景看板（CD、日常、专业、货币）、+N 装备展开收纳、节日 CD 治理、排序持久化；极轻量超低频声望采集工具类。 |
+| **交易与历史账单** | `Core/Module/TradeHistory.lua`<br>`Core/Module/TradeFix.lua`<br>`Core/Module/History.lua`<br>`Core/Module/BestPrice.lua` | 玩家交易历史记录与明细对账、交易防漏单安全拦截；历史账单多快照保存/应用/查看、装备历史价格走势图与原生 Tooltip 协同。 |
+| **阵容专精与战斗监控** | `Core/RaidTool/RaidComp.lua`<br>`Core/RaidTool/RaidCompUI.lua`<br>`Core/RaidTool/RaidCD*.lua` | 全局专精嗅探中枢（全图超视距）、全口径花名册、双天赋感应、Buff/Debuff 缺口雷达；团队关键技能/大减伤冷却监控与频道智能降级。 |
+| **战术与打工看板** | `Core/RaidTool/RaidMap*.lua`<br>`Core/Module/WorkerReport.lua` | 战术站位图（引擎与数据解耦、1024x1024 规范贴图、BOSS 头像、防误触、坦奶协同标记）；打工人跨角色收益统计看板、合体副本拆分折叠、周四结算提醒。 |
 
 ---
 
@@ -44,6 +45,14 @@
    - 注册 `ENCOUNTER_START` 事件：Boss 开打瞬间自动清空该 Boss 全部槽位锁；进出副本（`PLAYER_ENTERING_WORLD`）自动清理，消除跨周假死。
 3. **多阶梯异步对账与防抖**:
    - 针对 BGLite 写入表格的 0.10s 延迟，首期查表延迟设为 0.20s，并扩展 4 级重试阶梯（`0.20s -> 0.45s -> 0.85s -> 1.50s`），消除高频连续摸尸体掉落脱节；防抖合并时间放宽至 1.8s。
+7. **【已排查并修复 2026-10-03】ZA 老一掉落只发起一个自动拍卖的真实根因与修复**:
+   - **排查经过**：原先怀疑为同名装备去重逻辑误杀，经用户提供实机截图核实，掉落的为两件不同装备（`[上古魔法徽记]` 与 `[巫毒纹路腰带]`），撤回原去重修改；
+   - **真实根因**：比对苗影数据（`data-wrath.lua` ZulAman80）与 BGLite 官方掉落库（`DB_Loot_Titan.lua` SWtitan），发现 BGLite 官方掉落库严重遗漏了 `boss1` 的核心装备 `33291`（巫毒纹路腰带）以及全 Boss 斩杀图纸 `33307`；导致预设底价面板根本无法渲染该装备，团长无法配置底价，进而被 `IsItemAutoEnabled` 的安全保护机制（无底价拦截）静默跳过，最终只拍了有底价的一件；
+   - **修复方案（严格遵守“零侵入”原则，绝不修改 BGLite 官方源码，由 BGLite_Plus 独立 DB 模块运行时动态增量注入）**：
+     - 官方掉落库（`DB_Loot_Titan.lua`）保持 100% 纯净，严禁修改上游官方文件；
+     - 在 `BGLite_Plus` 下建立类似官方规范的 `Core/DB/` 目录，新建独立修补模块 [`Core/DB/DB_Loot_SWtitan.lua`](file:///e:/World of Warcraft/_classic_titan_/Interface/AddOns/BGLite_Plus/Core/DB/DB_Loot_SWtitan.lua)，不与奥杜尔模块混杂；
+     - 在 `PLAYER_LOGIN` 与 `PLAYER_ENTERING_WORLD` 时，利用 `SafeAppend` 机制在内存中动态将 `33291`（巫毒纹路腰带）与 `33307`（附魔斩杀图纸）增量追加到 `BG.Loot["SWtitan"]["N"]` 的 `boss1~boss6` 中；
+     - 在 `BGLite_Plus.toc` 中注册该文件；既能让预设面板正常渲染腰带并配置底价、打通自动拍卖，又完全不破坏官方文件，更不怕官方版本更新覆盖。
 4. **副本白名单与跨版本脏数据拦截**:
    - 待查副本必须满足 `BG.Maxb[FB] and type(BG.Maxb[FB]) == "number" and BG.Maxb[FB] > 0`，杜绝时光服环境下因历史旧本（如 `"RS"`）导致 `nil + 1` 算术异常，切断执行栈；全量对账调用均加 `pcall` 保护。
 5. **暴雪原生 ObjectAPI 异步加载避坑 (铁律)**:

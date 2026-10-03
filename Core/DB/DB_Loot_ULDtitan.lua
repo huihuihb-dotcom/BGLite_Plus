@@ -133,3 +133,4 @@ f:RegisterEvent("PLAYER_ENTERING_WORLD")
 f:SetScript("OnEvent", function(self, event)
     FixAndPatchUlduarLoot()
 end)
+
