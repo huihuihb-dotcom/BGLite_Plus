@@ -1154,15 +1154,27 @@ function RaidMap.CreateUI()
     btnBackToEditor:SetPoint("LEFT", receiverBadgeText, "RIGHT", 12, 0)
     btnBackToEditor:SetText(BG.STC_w1("返回本地设计"))
     btnBackToEditor:SetScript("OnClick", function()
-        RaidMap.SetDisplayMode("EDITOR")
-        RaidMap.LoadBossTacticalPreset(currentBossID, currentPhase)
+        local isLeaderRole = not IsInRaid() or UnitIsGroupLeader("player") or UnitIsGroupAssistant("player")
+        local nextMode = isLeaderRole and "EDITOR" or "MEMBER_LOCAL"
+        RaidMap.SetDisplayMode(nextMode)
+        RaidMap.LoadBossTacticalPreset(currentBossID, currentPhase, nextMode)
         BG.PlaySound(1)
-        DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00[BGLite 战术站位图]|r 已切回本地团长战术设计器。")
+        if isLeaderRole then
+            DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00[BGLite 战术站位图]|r 已切回本地团长战术设计器。")
+        else
+            DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00[BGLite 战术站位图]|r 已切回个人本地战术沙盘。")
+        end
     end)
     btnBackToEditor:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_TOP")
-        GameTooltip:AddLine("切回本地团长战术设计器", 1, 1, 1)
-        GameTooltip:AddLine("退出当前的接收受令看板，返回您本地的 BOSS 战术预设与排兵布阵工具。", 0.85, 0.85, 0.85, true)
+        local isLeaderRole = not IsInRaid() or UnitIsGroupLeader("player") or UnitIsGroupAssistant("player")
+        if isLeaderRole then
+            GameTooltip:AddLine("切回本地团长战术设计器", 1, 1, 1)
+            GameTooltip:AddLine("退出当前的接收受令看板，返回您本地的 BOSS 战术预设与排兵布阵工具。", 0.85, 0.85, 0.85, true)
+        else
+            GameTooltip:AddLine("切换至个人本地战术沙盘", 1, 1, 1)
+            GameTooltip:AddLine("退出接收受令看板，返回默认首领攻略阵型，可自动同步当前团队人员名单并本地调配（仅自己可见，不影响全团）。", 0.85, 0.85, 0.85, true)
+        end
         GameTooltip:Show()
     end)
     btnBackToEditor:SetScript("OnLeave", GameTooltip_Hide)
@@ -1244,6 +1256,7 @@ function RaidMap.CreateUI()
         GameTooltip:Show()
     end)
     btnReset:SetScript("OnLeave", GameTooltip_Hide)
+    f.btnReset = btnReset
 
     -- 3.3 一键全团广播 (SendMap)
     local btnSend = BG.CreateButton(editControls)
@@ -1305,6 +1318,15 @@ function RaidMap.CreateUI()
     end)
     btnDraw:SetScript("OnLeave", GameTooltip_Hide)
     f.btnDraw = btnDraw
+
+    -- 3.6 个人本地沙盘温馨提示标 (MEMBER_LOCAL 模式下显示)
+    local localSandboxTip = editControls:CreateFontString(nil, "OVERLAY")
+    localSandboxTip:SetFont(BIAOGE_TEXT_FONT, 12, "OUTLINE")
+    localSandboxTip:SetPoint("LEFT", btnDraw, "RIGHT", 10, 0)
+    localSandboxTip:SetTextColor(0.2, 0.9, 0.4)
+    localSandboxTip:SetText("|TInterface\\AddOns\\BGLite_Plus\\Media\\shield.png:13:13:0:0|t 本地沙盘")
+    localSandboxTip:Hide()
+    f.localSandboxTip = localSandboxTip
 
     -- 4. 战术动态推演 (Simulation) 播放/复位按钮 (常驻顶部，受令与编辑双模态皆可用)
     local btnSim = BG.CreateButton(topControls)
@@ -1419,6 +1441,13 @@ function RaidMap.CreateUI()
             tip = tip:gsub("|T.-|t", ""):gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", "")
         end
 
+        local inRaid = IsInRaid and IsInRaid()
+        local isLeaderRole = (not inRaid) or UnitIsGroupLeader("player") or UnitIsGroupAssistant("player")
+        if inRaid and not isLeaderRole then
+            DEFAULT_CHAT_FRAME:AddMessage("|cffff4444[BGLite 战术站位图]|r 权限拦截：只有团队领袖或助理可向团队频道通报战术要点！")
+            return
+        end
+
         local channel = IsInRaid() and "RAID" or (IsInGroup() and "PARTY" or nil)
         if channel then
             SendChatMessage(string.format("【战术站位】<< %s%s >>", bossName, phaseName), channel)
@@ -1449,7 +1478,7 @@ function RaidMap.CreateUI()
     btnFastSend:SetScript("OnLeave", GameTooltip_Hide)
     f.btnFastSend = btnFastSend
 
-    -- 统一模式调度引擎 ("EDITOR" 团长设计模式 | "RECEIVER" 接收受令模式)
+    -- 统一模式调度引擎 ("EDITOR" 团长设计模式 | "MEMBER_LOCAL" 队员个人沙盘 | "RECEIVER" 接收受令模式)
     function RaidMap.SetDisplayMode(mode, sender)
         f.displayMode = mode
         if mode == "RECEIVER" then
@@ -1460,7 +1489,7 @@ function RaidMap.CreateUI()
             if f.drawToolbar then f.drawToolbar:Hide() end
             if f.btnFastSend then f.btnFastSend:Hide() end
 
-            -- 接收模式下攻略卡片横向全展宽 (右侧边距由 -122 紧凑至 -12，释放空间给文字)
+            -- 接收受令模式下攻略卡片横向全展宽 (右侧边距由 -122 紧凑至 -12，释放空间给文字)
             if f.tacticTipText and f.tipPanel then
                 f.tacticTipText:ClearAllPoints()
                 f.tacticTipText:SetPoint("TOPLEFT", f.tipPanel, "TOPLEFT", 10, -8)
@@ -1471,24 +1500,71 @@ function RaidMap.CreateUI()
                 local sText = (sender and sender ~= "") and (string.format("(来自: %s)", sender)) or "(团长推送)"
                 f.receiverBadgeText:SetText(string.format("|TInterface\\AddOns\\BGLite_Plus\\Media\\lock.png:14:14:0:0|t 战术受令看板 |cff00e5ff%s|r", sText))
 
-                -- 仅允许真正拥有团队领袖/助理权限的玩家在受令状态下按需切回本地设计器
                 local canEdit = not IsInRaid() or UnitIsGroupLeader("player") or UnitIsGroupAssistant("player")
-                if canEdit and f.btnBackToEditor then
+                if f.btnBackToEditor then
+                    if canEdit then
+                        f.btnBackToEditor:SetText(BG.STC_w1("返回团长设计"))
+                        f.btnBackToEditor:SetWidth(100)
+                    else
+                        f.btnBackToEditor:SetText(BG.STC_w1("个人战术沙盘"))
+                        f.btnBackToEditor:SetWidth(100)
+                    end
                     f.btnBackToEditor:Show()
-                elseif f.btnBackToEditor then
-                    f.btnBackToEditor:Hide()
                 end
                 f.receiverBadge:Show()
             end
-        else -- "EDITOR"
+        elseif mode == "MEMBER_LOCAL" then
             f.isReceiverMode = false
             f.isViewMode = false
             if f.receiverBadge then f.receiverBadge:Hide() end
             f.viewBadge:Hide()
             f.editControls:Show()
-            if f.btnFastSend then f.btnFastSend:Show() end
 
-            -- 编辑模式下给右侧【通报本阶段】按钮留出 122px 边距
+            -- 队员个人本地沙盘：允许同步、重置、锁定、画板；严格隐藏全团广播与频道通报
+            if f.btnAuto then f.btnAuto:Show() end
+            if f.btnReset then f.btnReset:Show() end
+            if f.btnSend then f.btnSend:Hide() end
+            if f.btnLock and f.btnReset then
+                f.btnLock:ClearAllPoints()
+                f.btnLock:SetPoint("LEFT", f.btnReset, "RIGHT", 4, 0)
+                f.btnLock:Show()
+            end
+            if f.btnDraw and f.btnLock then
+                f.btnDraw:ClearAllPoints()
+                f.btnDraw:SetPoint("LEFT", f.btnLock, "RIGHT", 4, 0)
+                f.btnDraw:Show()
+            end
+            if f.localSandboxTip then f.localSandboxTip:Show() end
+
+            if f.btnFastSend then f.btnFastSend:Hide() end
+            if f.tacticTipText and f.tipPanel then
+                f.tacticTipText:ClearAllPoints()
+                f.tacticTipText:SetPoint("TOPLEFT", f.tipPanel, "TOPLEFT", 10, -8)
+                f.tacticTipText:SetPoint("BOTTOMRIGHT", f.tipPanel, "BOTTOMRIGHT", -12, 6)
+            end
+        else -- "EDITOR" 团长设计模式
+            f.isReceiverMode = false
+            f.isViewMode = false
+            if f.receiverBadge then f.receiverBadge:Hide() end
+            f.viewBadge:Hide()
+            f.editControls:Show()
+
+            if f.btnAuto then f.btnAuto:Show() end
+            if f.btnReset then f.btnReset:Show() end
+            if f.btnSend then f.btnSend:Show() end
+            if f.btnLock and f.btnSend then
+                f.btnLock:ClearAllPoints()
+                f.btnLock:SetPoint("LEFT", f.btnSend, "RIGHT", 4, 0)
+                f.btnLock:Show()
+            end
+            if f.btnDraw and f.btnLock then
+                f.btnDraw:ClearAllPoints()
+                f.btnDraw:SetPoint("LEFT", f.btnLock, "RIGHT", 4, 0)
+                f.btnDraw:Show()
+            end
+            if f.localSandboxTip then f.localSandboxTip:Hide() end
+
+            if f.btnFastSend then f.btnFastSend:Show() end
             if f.tacticTipText and f.tipPanel then
                 f.tacticTipText:ClearAllPoints()
                 f.tacticTipText:SetPoint("TOPLEFT", f.tipPanel, "TOPLEFT", 10, -8)
@@ -1497,7 +1573,7 @@ function RaidMap.CreateUI()
         end
     end
 
-    -- 本地编辑锁定切换器 (仅服务于编辑模式下的临时防误触)
+    -- 本地编辑锁定切换器 (仅服务于编辑模式与个人沙盒下的临时防误触)
     function RaidMap.SetViewMode(isView)
         if f.isReceiverMode then return end
         f.isViewMode = isView
@@ -1508,11 +1584,20 @@ function RaidMap.CreateUI()
         else
             f.viewBadge:Hide()
             f.editControls:Show()
+            if f.displayMode == "MEMBER_LOCAL" then
+                f.btnSend:Hide()
+                if f.localSandboxTip then f.localSandboxTip:Show() end
+                if f.btnFastSend then f.btnFastSend:Hide() end
+            else
+                f.btnSend:Show()
+                if f.localSandboxTip then f.localSandboxTip:Hide() end
+                if f.btnFastSend then f.btnFastSend:Show() end
+            end
         end
     end
 
     f:SetScript("OnShow", function()
-        -- 仅在编辑模式下呼出时才自动同步团队，接收受令模式绝不自动覆盖团长分配
+        -- 仅在编辑模式与个人沙盘模式下呼出时自动同步团队；接收受令模式绝不自动覆盖团长分配
         if not f.isReceiverMode and RaidMap.AutoAssignRosterToMap then
             RaidMap.AutoAssignRosterToMap(true)
         end
@@ -2535,15 +2620,17 @@ function RaidMap.RenderStaticNotes(mapCanvas, notesList, overrideCoords)
             local padY = data.padY or 12
             noteFrame:SetSize(math.max(70, strW + padX), math.max(24, strH + padY))
 
-            -- 自由拖动引擎 (团长编辑模式下生效，受令与锁定模式保护)
+            noteFrame.origBaseX = baseX
+            noteFrame.origBaseY = baseY
+
+            -- 自由拖动引擎 (全模态开放：团长、个人沙盘、受令看板均可拖动以防遮挡点位)
             noteFrame:EnableMouse(true)
             noteFrame:SetMovable(true)
             noteFrame:RegisterForDrag("LeftButton")
+            noteFrame:RegisterForClicks("LeftButtonUp", "RightButtonUp")
 
             noteFrame:SetScript("OnDragStart", function(self)
-                local inRaid = IsInRaid and IsInRaid()
-                local isLeaderRole = (not inRaid) or UnitIsGroupLeader("player") or UnitIsGroupAssistant("player")
-                if not isLeaderRole or RaidMap.isLocked or (f and f.isLocked) or (f and f.displayMode == "RECEIVER") then
+                if RaidMap.isLocked or (f and f.isLocked) then
                     return
                 end
                 self:StartMoving()
@@ -2576,6 +2663,26 @@ function RaidMap.RenderStaticNotes(mapCanvas, notesList, overrideCoords)
                 end
             end)
 
+            noteFrame:SetScript("OnClick", function(self, button)
+                if button == "RightButton" and IsShiftKeyDown() then
+                    self.baseX = self.origBaseX
+                    self.baseY = self.origBaseY
+                    local curW = mapCanvas:GetWidth() or 748
+                    local curH = mapCanvas:GetHeight() or 452
+                    local sX = (curW and curW > 100) and (curW / 748) or 1
+                    local sY = (curH and curH > 100) and (curH / 452) or 1
+                    self.x = math.floor(self.baseX * sX + 0.5)
+                    self.y = math.floor(self.baseY * sY + 0.5)
+                    self:ClearAllPoints()
+                    self:SetPoint("CENTER", mapCanvas, "TOPLEFT", self.x, self.y)
+                    if self.data then
+                        self.data.xy = { self.baseX, self.baseY }
+                    end
+                    BG.PlaySound(1)
+                    DEFAULT_CHAT_FRAME:AddMessage("|cff00BFFF[战术注解]|r 已恢复该注解的默认初始位置。")
+                end
+            end)
+
             noteFrame:SetScript("OnEnter", function(self)
                 if self.SetBackdropBorderColor then
                     self:SetBackdropBorderColor(1, 1, 1, 1)
@@ -2588,12 +2695,9 @@ function RaidMap.RenderStaticNotes(mapCanvas, notesList, overrideCoords)
                 else
                     GameTooltip:AddLine(data.text or "", 0.9, 0.9, 0.9, true)
                 end
-                local inRaid = IsInRaid and IsInRaid()
-                local isLeaderRole = (not inRaid) or UnitIsGroupLeader("player") or UnitIsGroupAssistant("player")
-                if isLeaderRole and not (RaidMap.isLocked or (f and f.isLocked) or (f and f.displayMode == "RECEIVER")) then
-                    GameTooltip:AddLine(" ")
-                    GameTooltip:AddLine("|cff00ff00[鼠标左键按住可自由拖动位置]|r", 0.2, 1, 0.4)
-                end
+                GameTooltip:AddLine(" ")
+                GameTooltip:AddLine("|cff00ff00鼠标左键按住:|r 自由拖拽挪开位置，防止遮挡战术点位", 0.85, 0.85, 0.85)
+                GameTooltip:AddLine("|cff00e5ffShift+右键单击:|r 恢复初始默认位置", 0.7, 0.7, 0.7)
                 GameTooltip:Show()
             end)
 
@@ -2798,7 +2902,7 @@ function RaidMap.LoadBossTacticalPreset(bossID, phaseIndex, forceMode)
 
     RaidMap.RefreshSelfHighlight(f)
     local isLeaderRole = not IsInRaid() or UnitIsGroupLeader("player") or UnitIsGroupAssistant("player")
-    local targetMode = forceMode or (isLeaderRole and "EDITOR" or "RECEIVER")
+    local targetMode = forceMode or (isLeaderRole and "EDITOR" or "MEMBER_LOCAL")
     RaidMap.SetDisplayMode(targetMode)
     if RaidMap.UpdateSimulationButtonVisibility then
         RaidMap.UpdateSimulationButtonVisibility(f, bossData, currentPhase)
@@ -2819,16 +2923,7 @@ function RaidMap.Toggle(bossID)
         local inRaid = IsInRaid and IsInRaid()
         local isLeaderRole = (not inRaid) or UnitIsGroupLeader("player") or UnitIsGroupAssistant("player")
 
-        -- 普通团员若在团队中主动打开，且此前收到过团长广播推送，优先打开最新的受令战术
-        if inRaid and not isLeaderRole and BiaoGe and BiaoGe.maps and #BiaoGe.maps > 0 then
-            local latest = BiaoGe.maps[1]
-            if latest and latest.code then
-                RaidMap.RenderByCode(latest.code, true, latest.sender)
-                return
-            end
-        end
-
-        local targetMode = isLeaderRole and "EDITOR" or "RECEIVER"
+        local targetMode = isLeaderRole and "EDITOR" or "MEMBER_LOCAL"
         RaidMap.LoadBossTacticalPreset(bossID or currentBossID or 5, currentPhase or 1, targetMode)
         if mapFrame and not mapFrame:IsShown() then
             mapFrame:Show()

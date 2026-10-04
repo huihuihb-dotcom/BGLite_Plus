@@ -182,17 +182,26 @@ RaidMap.RegisterBoss({
         [1] = {
             name = "P1·起手站位(3种模式)",
             tacticTip = "【钢铁议会3种击杀顺序与要点】\n1. 模式选择：【简单】破钢->符文->唤雷(留唤雷最便当)；【中等】留符文最后；【困难】唤雷->符文->破钢(留破钢触发252掉落)；\n2. 三坦拉位：主坦将破钢定在北面，副坦A拉唤雷在东(远离大团)，副坦B拉符文在西；\n3. 圈色机制：出【能量符文】(蓝圈)全团进圈+50%伤害；出【死亡符文】(绿圈)坦克秒拉走、近战立刻出圈；\n4. 超载警示：唤雷者读条【超载】近战远离20码！若打困难模式请切【P2斩杀】看板！",
+            notes = {
+                {
+                    xy = { 460, -280 },
+                    title = "【增益与安全提示】",
+                    text = "← 治疗/远程中后场待命\n(出蓝圈全员进圈+50%伤/疗，远离唤雷超载)",
+                    color = "GREEN",
+                    desc = "【治疗站位说明】\n治疗严禁靠近北面破钢者或东面唤雷者！\n全员在西南中后场待命，出【能量符文】(蓝圈)所有人包括治疗立刻踩圈，享受 50% 巨量治疗加成！",
+                },
+            },
             tbl = {
                 -- 坦克 (1~3号位 - 破钢北/唤雷东/符文西)
                 [1] = { xy = { 374, -65 },  role = "tank",   desc = "主坦 MT (抗破钢者靠北墙)" },
                 [2] = { xy = { 590, -125 }, role = "tank",   desc = "副坦 A (拉唤雷者在东侧)" },
                 [3] = { xy = { 180, -135 }, role = "tank",   desc = "副坦 B (拉符文大师在西侧)" },
 
-                -- 治疗 (4~7号位)
-                [4] = { xy = { 320, -115 }, role = "healer", desc = "核心保坦奶骑" },
-                [5] = { xy = { 428, -115 }, role = "healer", desc = "核心保坦戒律" },
-                [6] = { xy = { 260, -260 }, role = "healer", desc = "团补 A" },
-                [7] = { xy = { 440, -260 }, role = "healer", desc = "团补 B" },
+                -- 治疗 (4~7号位 - 居中后场靠近蓝圈，严禁靠近北面破钢与东面唤雷)
+                [4] = { xy = { 300, -210 }, role = "healer", desc = "保坦奶骑 (靠近蓝圈+50%治疗)" },
+                [5] = { xy = { 360, -210 }, role = "healer", desc = "保坦戒律 (靠近蓝圈+50%治疗)" },
+                [6] = { xy = { 260, -260 }, role = "healer", desc = "团补 A (大团强刷)" },
+                [7] = { xy = { 420, -260 }, role = "healer", desc = "团补 B (大团强刷)" },
 
                 -- 远程 DPS (8~17号位 - 集中在中南偏西，随时踩蓝圈，远离东侧唤雷者)
                 [8]  = { xy = { 180, -240 }, role = "ranged", desc = "远程输出" },
@@ -258,6 +267,15 @@ RaidMap.RegisterBoss({
         [2] = {
             name = "P2·破钢斩杀(赴死)",
             tacticTip = "【P2 困难破钢斩杀要点】\n1. 压倒能量自爆：破钢者对当前坦施加【压倒能量】(+200%伤害)，倒数剩余5秒时下一棒坦必须秒嘲讽接怪！\n2. 边缘赴死献祭：中【压倒能量】坦克立刻开加速狂奔至场地边缘【赴死献祭点】自爆赴死，严禁炸大团！\n3. 全团集中嗜血：全团开嗜血在破钢者背后集中抱团踩蓝圈全力 RUSH！\n4. 极限强刷抬血：破钢者伤害逐层暴增并释放全屏大电击，治疗交全团大减伤(光环/牺牲)无脑刷血！",
+            notes = {
+                {
+                    xy = { 510, -250 },
+                    title = "【大团抱团提示】",
+                    text = "← 全员集中抱团吃蓝圈\n(中压倒能量坦克倒数5秒狂奔至边缘献祭)",
+                    color = "GREEN",
+                    desc = "【实战要求】\n除接怪副坦和赴死主坦外，全团治疗与远程极度密集抱团在破钢者背后踩蓝圈 RUSH，吃满嗜血与团队大减伤！",
+                },
+            },
             tbl = {
                 -- 坦克轮换 (1号当前坦、2号换嘲接怪副坦、3号备用坦)
                 [1] = { xy = { 374, -65 },  role = "tank",   desc = "主坦 (1棒吃压倒能量/5秒赴死)" },
@@ -332,6 +350,60 @@ RaidMap.RegisterBoss({
                     size = 34,
                 },
             },
+            simulation = {
+                name = "钢铁议会 困难破钢赴死推演",
+                duration = 6.6,
+                steps = {
+                    {
+                        t = 0.0,
+                        text = "|cff00e5ff[破钢斩杀推演]|r 破钢者高压狂暴！1号主坦中【压倒能量】(+200%伤害)，大团蓝圈猛抽！",
+                    },
+                    {
+                        t = 1.0,
+                        duration = 1.6,
+                        actor = 1,
+                        tag = "|cffff2020【压倒能量】|r",
+                        glowColor = { 1, 0.2, 0.2, 1 },
+                        text = "|cffff2020● [压倒能量倒数5秒]|r 1号主坦即将自爆！2棒副坦准备秒接怪，1号开启火箭靴！",
+                    },
+                    {
+                        t = 2.6,
+                        duration = 1.8,
+                        actions = {
+                            {
+                                actor = 2,
+                                target = { 374, -75 },
+                                tag = "|cff00ff00【接嘲破钢】|r",
+                                glowColor = { 0.2, 1, 0.2, 1 },
+                            },
+                            {
+                                actor = 1,
+                                target = 91,
+                                tag = "|cffff0000【赴死狂奔】|r",
+                                glowColor = { 1, 0, 0, 1 },
+                            },
+                        },
+                        text = "|cffff0000● [换嘲与狂奔]|r 2号副坦秒换嘲接怪！1号主坦狂奔至极远东侧【献祭点】！",
+                    },
+                    {
+                        t = 4.4,
+                        duration = 1.2,
+                        actor = 1,
+                        target = 91,
+                        tag = "|cffff0000【轰!献祭自爆】|r",
+                        glowColor = { 1, 0.5, 0, 1 },
+                        text = "|cffffaa00● [自爆成功]|r 1号在边缘献祭自爆(无伤大团)！大团在蓝圈开嗜血继续猛抽！",
+                    },
+                    {
+                        t = 5.2,
+                        text = "|cff00ff00● [大团RUSH斩杀]|r 1号主坦自爆献祭牺牲！2号接稳破钢，大团踩蓝圈开嗜血全力斩杀！",
+                    },
+                    {
+                        t = 6.4,
+                        text = "|cff00ff00●【推演完成】|r 牢记口诀：倒数5秒副坦嘲，中招主坦边缘跑！",
+                    },
+                },
+            },
         },
     },
 })
@@ -349,27 +421,36 @@ RaidMap.RegisterBoss({
     sub = "以暖炉火堆为轴心抱团 | 坦拉北侧怪背对 | 踩雪避落冰 雷云进堆传电",
     mapTex = "Interface\\AddOns\\BGLite_Plus\\Media\\icon\\ULDtitan\\m8.png",
     tacticTip = "【霍迪尔站位要点】\n1. 场地中央暖炉火堆是全团生存与增伤核心，全团严密围拢在火堆10码内消除极度寒冷层数；\n2. 坦把霍迪尔定在火堆北面10码处，近战脚跟输出并蹭火堆Buff；\n3. 获【风暴之力(雷云)】点名的玩家第一时间跳入火堆人群，为所有法系传导100%暴伤；\n4. 闪霜大落冰前迅速站上积雪，切勿贪打！",
+    notes = {
+        {
+            xy = { 540, -260 },
+            title = "【火堆抱团提示】",
+            text = "← 全员围拢中央火堆\n(消除极度寒冷，雷云进堆传电，落冰跳积雪)",
+            color = "GREEN",
+            desc = "【实战走位铁律】\n开打后，全体远程与治疗必须紧紧贴着暖炉火堆输出！\n不仅能消除寒冷层数，获【雷云】的玩家也能瞬间碰触并传导 135% 暴伤给全团法系！\nBoss读条【闪霜】大落冰时，全员立刻跑向积雪堆！",
+        },
+    },
     tbl = {
-        -- 坦克 (1~2号位 - 火堆北侧)
+        -- 坦克 (1~2号位 - 火堆北侧定怪)
         [1] = { xy = { 374, -65 } },
         [2] = { xy = { 340, -75 } },
 
         -- 治疗与远程 (3~17号位 - 严密围绕中央火堆 10 码内环形抱团)
-        [3]  = { xy = { 320, -170 } },
-        [4]  = { xy = { 428, -170 } },
-        [5]  = { xy = { 290, -210 } },
-        [6]  = { xy = { 458, -210 } },
-        [7]  = { xy = { 300, -250 } },
-        [8]  = { xy = { 448, -250 } },
-        [9]  = { xy = { 335, -270 } },
-        [10] = { xy = { 413, -270 } },
-        [11] = { xy = { 374, -280 } },
-        [12] = { xy = { 270, -180 } },
-        [13] = { xy = { 478, -180 } },
-        [14] = { xy = { 255, -230 } },
-        [15] = { xy = { 493, -230 } },
-        [16] = { xy = { 320, -310 } },
-        [17] = { xy = { 428, -310 } },
+        [3]  = { xy = { 320, -190 } },
+        [4]  = { xy = { 428, -190 } },
+        [5]  = { xy = { 290, -215 } },
+        [6]  = { xy = { 458, -215 } },
+        [7]  = { xy = { 310, -245 } },
+        [8]  = { xy = { 438, -245 } },
+        [9]  = { xy = { 345, -265 } },
+        [10] = { xy = { 403, -265 } },
+        [11] = { xy = { 374, -275 } },
+        [12] = { xy = { 270, -190 } },
+        [13] = { xy = { 478, -190 } },
+        [14] = { xy = { 255, -235 } },
+        [15] = { xy = { 493, -235 } },
+        [16] = { xy = { 320, -300 } },
+        [17] = { xy = { 428, -300 } },
 
         -- 首领与战术图元
         [100] = {
@@ -411,6 +492,79 @@ RaidMap.RegisterBoss({
             isNPC_text = "落冰踩雪",
             isNPC_icon = "Interface\\Icons\\spell_frost_frostnova",
             size = 32,
+        },
+    },
+    simulation = {
+        name = "霍迪尔 雷云传电与踩雪推演",
+        duration = 6.6,
+        steps = {
+            {
+                t = 0.0,
+                text = "|cff00e5ff[霍迪尔战术推演]|r 开怪：坦克拉北面，全团紧紧围拢在中央火堆10码内消寒冷！",
+            },
+            {
+                t = 0.8,
+                duration = 1.4,
+                actor = 8,
+                target = 90,
+                tag = "|cffffd700【雷云进堆】|r",
+                glowColor = { 1, 0.85, 0.1, 1 },
+                text = "|cffffd700● [风暴之力·雷云]|r 8号被点名！立刻跳入中央火堆大团，传导+135%暴伤！",
+            },
+            {
+                t = 2.4,
+                duration = 1.8,
+                actions = {
+                    { actor = 1, target = 92, tag = "|cff00e5ff【踩雪避霜】|r" },
+                    { actor = 2, target = 92, tag = "|cff00e5ff【踩雪避霜】|r" },
+                    { actor = 3, target = 92, tag = "|cff00e5ff【踩雪避霜】|r" },
+                    { actor = 4, target = 92, tag = "|cff00e5ff【踩雪避霜】|r" },
+                    { actor = 5, target = 92, tag = "|cff00e5ff【踩雪避霜】|r" },
+                    { actor = 6, target = 92, tag = "|cff00e5ff【踩雪避霜】|r" },
+                    { actor = 7, target = 92, tag = "|cff00e5ff【踩雪避霜】|r" },
+                    { actor = 8, target = 92, tag = "|cff00e5ff【踩雪避霜】|r" },
+                    { actor = 9, target = 92, tag = "|cff00e5ff【踩雪避霜】|r" },
+                    { actor = 10, target = 92, tag = "|cff00e5ff【踩雪避霜】|r" },
+                    { actor = 11, target = 92, tag = "|cff00e5ff【踩雪避霜】|r" },
+                    { actor = 12, target = 92, tag = "|cff00e5ff【踩雪避霜】|r" },
+                    { actor = 13, target = 92, tag = "|cff00e5ff【踩雪避霜】|r" },
+                    { actor = 14, target = 92, tag = "|cff00e5ff【踩雪避霜】|r" },
+                    { actor = 15, target = 92, tag = "|cff00e5ff【踩雪避霜】|r" },
+                    { actor = 16, target = 92, tag = "|cff00e5ff【踩雪避霜】|r" },
+                    { actor = 17, target = 92, tag = "|cff00e5ff【踩雪避霜】|r" },
+                    { actor = 98, target = 92, tag = "|cff00e5ff【踩雪避霜】|r" },
+                },
+                text = "|cffff0000● [读条闪霜大落冰]|r 地面出现落冰！全团迅速大步跑向【92号积雪堆】避难！",
+            },
+            {
+                t = 4.4,
+                duration = 1.2,
+                actions = {
+                    { actor = 1, target = "origin" },
+                    { actor = 2, target = "origin" },
+                    { actor = 3, target = "origin" },
+                    { actor = 4, target = "origin" },
+                    { actor = 5, target = "origin" },
+                    { actor = 6, target = "origin" },
+                    { actor = 7, target = "origin" },
+                    { actor = 8, target = "origin" },
+                    { actor = 9, target = "origin" },
+                    { actor = 10, target = "origin" },
+                    { actor = 11, target = "origin" },
+                    { actor = 12, target = "origin" },
+                    { actor = 13, target = "origin" },
+                    { actor = 14, target = "origin" },
+                    { actor = 15, target = "origin" },
+                    { actor = 16, target = "origin" },
+                    { actor = 17, target = "origin" },
+                    { actor = 98, target = "origin" },
+                },
+                text = "|cff00ff00● [落冰结束回火堆]|r 闪霜结束！所有人立刻从雪堆跳回中央火堆，继续爆发！",
+            },
+            {
+                t = 5.8,
+                text = "|cff00ff00●【推演完成】|r 牢记口诀：紧抱火堆蹭Buff，雷云进堆落冰踩雪！",
+            },
         },
     },
 })
@@ -490,17 +644,26 @@ RaidMap.RegisterBoss({
         [2] = {
             name = "P2·竞技场斩杀",
             tacticTip = "【P2 竞技场斩杀要点】\n1. 核心致命【闪电充能】：看清外圈哪侧墙壁立柱放电，全团迅速跑往无电的另一半场规避！\n2. 全体人员(近战/远程/治疗)必须严格保持 8 码距离分散，严防【连锁闪电】串死队友！\n3. 换坦节奏：托利姆释放【失衡打击】(受物理伤害+200%)时，副坦必须秒嘲讽换坦；\n4. 困难模式防暴风雪走位，治疗秒驱散冰霜新星！",
+            notes = {
+                {
+                    xy = { 480, -400 },
+                    title = "【8码分散与避雷】",
+                    text = "← 全员严格8码分散\n(看清立柱哪边放电跑对侧，失衡换坦)",
+                    color = "GREEN",
+                    desc = "【P2 灭团核心警示】\n西立柱放电时，西半场被雷电贯穿秒杀，全员立刻大跑位前往东半场！\n东立柱放电时全员前往西半场！\n全程所有人严密保持 8 码分散，严防连锁闪电跳死队友！",
+                },
+            },
             tbl = {
                 -- 双坦 (1~2号位)
                 [1] = { xy = { 460, -90 } },
                 [2] = { xy = { 500, -90 } },
 
-                -- 治疗 (3~7号位 - 竞技场中圈散开)
-                [3] = { xy = { 400, -180 } },
-                [4] = { xy = { 560, -180 } },
-                [5] = { xy = { 380, -230 } },
-                [6] = { xy = { 480, -230 } },
-                [7] = { xy = { 580, -230 } },
+                -- 治疗 (3~7号位 - 竞技场中圈散开，严格远离近战8码)
+                [3] = { xy = { 400, -210 } },
+                [4] = { xy = { 560, -210 } },
+                [5] = { xy = { 380, -245 } },
+                [6] = { xy = { 480, -245 } },
+                [7] = { xy = { 580, -245 } },
 
                 -- 远程 DPS (8~17号位 - 保持8码大分散，随时准备换边)
                 [8]  = { xy = { 330, -260 } },
@@ -562,6 +725,65 @@ RaidMap.RegisterBoss({
                     isNPC_text = "东立柱看放电",
                     isNPC_icon = "Interface\\Icons\\spell_nature_lightning",
                     size = 32,
+                },
+            },
+            simulation = {
+                name = "托利姆 P2 立柱避雷与换坦推演",
+                duration = 6.8,
+                steps = {
+                    {
+                        t = 0.0,
+                        text = "|cff00e5ff[托利姆 P2 推演]|r 托利姆跳入竞技场！全员严格保持 8 码分散，防连锁闪电！",
+                    },
+                    {
+                        t = 0.8,
+                        duration = 1.4,
+                        actor = 92,
+                        tag = "|cffff0000【西侧放电】|r",
+                        glowColor = { 1, 0.2, 0.2, 1 },
+                        text = "|cffff0000● [西立柱充能]|r 西侧闪电贯穿半场！西侧所有队员立刻向东半场大跑位！",
+                    },
+                    {
+                        t = 1.5,
+                        duration = 1.6,
+                        actions = {
+                            { actor = 8, target = { 530, -260 }, tag = "|cff00e5ff【避雷大跑位】|r" },
+                            { actor = 9, target = { 560, -270 }, tag = "|cff00e5ff【避雷大跑位】|r" },
+                            { actor = 10, target = { 590, -280 }, tag = "|cff00e5ff【避雷大跑位】|r" },
+                            { actor = 15, target = { 540, -320 }, tag = "|cff00e5ff【避雷大跑位】|r" },
+                            { actor = 3, target = { 500, -220 }, tag = "|cff00e5ff【避雷大跑位】|r" },
+                            { actor = 5, target = { 520, -240 }, tag = "|cff00e5ff【避雷大跑位】|r" },
+                        },
+                        text = "|cff00ff00● [全员避雷跑位]|r 西侧全员迅速躲入东侧安全半场，严密保持 8 码间距！",
+                    },
+                    {
+                        t = 3.2,
+                        duration = 1.2,
+                        actions = {
+                            { actor = 1, tag = "|cffff0000【失衡打击】|r", glowColor = { 1, 0, 0, 1 } },
+                            { actor = 2, target = { 460, -90 }, tag = "|cff00ff00【接嘲托利姆】|r", glowColor = { 0.2, 1, 0.2, 1 } },
+                        },
+                        text = "|cffffaa00● [失衡打击换坦]|r 1号主坦吃失衡打击(物理易伤+200%)！2号副坦秒换嘲接怪！",
+                    },
+                    {
+                        t = 4.4,
+                        duration = 1.6,
+                        actions = {
+                            { actor = 8, target = "origin" },
+                            { actor = 9, target = "origin" },
+                            { actor = 10, target = "origin" },
+                            { actor = 15, target = "origin" },
+                            { actor = 3, target = "origin" },
+                            { actor = 5, target = "origin" },
+                            { actor = 1, target = "origin" },
+                            { actor = 2, target = "origin" },
+                        },
+                        text = "|cffffd700● [东侧放电换边]|r 东立柱充能！全员大换边返回西半场，稳健立足斩杀！",
+                    },
+                    {
+                        t = 6.0,
+                        text = "|cff00ff00●【推演完成】|r 牢记口诀：哪边放电跑对侧，失衡换坦八码散！",
+                    },
                 },
             },
         },
@@ -732,11 +954,20 @@ RaidMap.RegisterBoss({
         [1] = {
             name = "P1·烈焰战车",
             tacticTip = "【P1 战车与地雷要点】\n1. 主坦在中场偏北拉住战车背对全团，副坦注意凝固汽油抗伤；\n2. 近战脚后跟输出，严禁触碰战车排出的【感应地雷】；\n3. 远程与治疗四散站位，灭火组水球迅速灭火。",
+            notes = {
+                {
+                    xy = { 540, -250 },
+                    title = "【地雷与减伤提示】",
+                    text = "← 治疗/远程外围分散\n(严禁靠近战车防地雷自爆，水球灭火)",
+                    color = "GREEN",
+                    desc = "【安全距离警示】\n战车排出的【感应地雷】伤害致命，且近战会受【震荡冲击】秒杀！\n治疗与远程必须保持 25 码以上外围分散，绝不可站近战位！",
+                },
+            },
             tbl = {
                 [1] = { xy = { 374, -65 } },
                 [2] = { xy = { 340, -80 } },
-                [3] = { xy = { 280, -150 } },
-                [4] = { xy = { 468, -150 } },
+                [3] = { xy = { 300, -220 } },
+                [4] = { xy = { 448, -220 } },
                 [5] = { xy = { 250, -220 } },
                 [6] = { xy = { 374, -230 } },
                 [7] = { xy = { 498, -220 } },
@@ -780,6 +1011,15 @@ RaidMap.RegisterBoss({
         [2] = {
             name = "P2·激光顺时针跑位",
             tacticTip = "【P2 激光扫射顺时针走位要点】\n1. BOSS 升上中台无仇恨！读条【P3Wx2激光弹幕】4秒后 360° 顺时针旋转喷射激光，扫到即死！\n2. 全员必须看清面向，统一按【顺时针大圈同向跑动】，严禁逆行或掉队！\n3. 平时大团分散躲避红圈火箭打击！",
+            notes = {
+                {
+                    xy = { 480, -390 },
+                    title = "【激光与走位提示】",
+                    text = "← 顺时针环形同心圆跑动\n(读条激光弹幕4秒，全员同向顺时针大跑动避激光)",
+                    color = "GREEN",
+                    desc = "【P2 灭团核心机制】\n米米尔隆读条【激光弹幕】4秒，随后向正反两个方向发射巨型死亡激光并 360° 顺时针高速旋转！\n碰到激光直接秒杀！全团所有人必须看清面向，统一沿顺时针同向狂奔！",
+                },
+            },
             tbl = {
                 -- 顺时针环形发散站位 (随时准备顺时针绕场大跑动)
                 [1] = { xy = { 374, -75 } },
@@ -823,6 +1063,54 @@ RaidMap.RegisterBoss({
                     isNPC_text = "近战跟随",
                     isNPC_icon = "Interface\\Icons\\ability_steelmelee",
                     size = 36,
+                },
+            },
+            simulation = {
+                name = "米米尔隆 P2 顺时针跑激光推演",
+                duration = 6.8,
+                steps = {
+                    {
+                        t = 0.0,
+                        text = "|cff00e5ff[米米尔隆 P2 推演]|r Boss升上中台！全团环形发散站位，分散避红圈火箭！",
+                    },
+                    {
+                        t = 0.8,
+                        duration = 1.0,
+                        text = "|cffff0000● [激光弹幕读条 4s]|r 360°旋转死亡激光！看清面向，准备同向顺时针大跑动！",
+                    },
+                    {
+                        t = 1.6,
+                        duration = 2.4,
+                        actions = {
+                            { actor = 1, target = { 550, -210 }, tag = "|cffffd700【顺时针跑】|r" },
+                            { actor = 2, target = { 520, -275 }, tag = "|cffffd700【顺时针跑】|r" },
+                            { actor = 3, target = { 450, -325 }, tag = "|cffffd700【顺时针跑】|r" },
+                            { actor = 4, target = { 374, -345 }, tag = "|cffffd700【顺时针跑】|r" },
+                            { actor = 5, target = { 298, -325 }, tag = "|cffffd700【顺时针跑】|r" },
+                            { actor = 6, target = { 228, -275 }, tag = "|cffffd700【顺时针跑】|r" },
+                            { actor = 7, target = { 198, -210 }, tag = "|cffffd700【顺时针跑】|r" },
+                            { actor = 8, target = { 228, -145 }, tag = "|cffffd700【顺时针跑】|r" },
+                            { actor = 9, target = { 298, -95 }, tag = "|cffffd700【顺时针跑】|r" },
+                            { actor = 10, target = { 374, -75 }, tag = "|cffffd700【顺时针跑】|r" },
+                            { actor = 11, target = { 450, -95 }, tag = "|cffffd700【顺时针跑】|r" },
+                            { actor = 12, target = { 520, -145 }, tag = "|cffffd700【顺时针跑】|r" },
+                            { actor = 13, target = { 470, -250 }, tag = "|cffffd700【顺时针跑】|r" },
+                            { actor = 14, target = { 278, -250 }, tag = "|cffffd700【顺时针跑】|r" },
+                            { actor = 15, target = { 278, -170 }, tag = "|cffffd700【顺时针跑】|r" },
+                            { actor = 16, target = { 470, -170 }, tag = "|cffffd700【顺时针跑】|r" },
+                            { actor = 17, target = { 198, -210 }, tag = "|cffffd700【顺时针跑】|r" },
+                            { actor = 98, target = { 434, -210 }, tag = "|cffffd700【顺时针跑】|r" },
+                        },
+                        text = "|cffff0000● [激光扫射中！]|r 全团沿同心圆同向狂奔！绝不逆行、绝不掉队！",
+                    },
+                    {
+                        t = 4.2,
+                        text = "|cff00ff00● [激光停火]|r 全员就地分散停步！严禁贪跑回原位防红圈火箭，就地爆发！",
+                    },
+                    {
+                        t = 6.0,
+                        text = "|cff00ff00●【推演完成】|r 牢记口诀：顺时针跑圈躲激光，激光停火就地停！",
+                    },
                 },
             },
         },
@@ -954,6 +1242,15 @@ RaidMap.RegisterBoss({
     sub = "近战秒断灼热烈焰 | 暗影涌动坦风筝近战跟背 | 远程踩黑水省蓝 | 印记向南单跑",
     mapTex = "Interface\\AddOns\\BGLite_Plus\\Media\\icon\\ULDtitan\\m12.png",
     tacticTip = "【维扎克斯将军站位要点】\n1. 绝对打断：近战必须分配专人严格盯防秒断【灼热烈焰】，漏断直接全团易伤猝死！\n2. 风筝规避：将军开启【暗影涌动】(+100%伤害)时，坦克立刻后退风筝，近战跟随背后输出严禁去正面！\n3. 回蓝站位：远程/治疗分为A/B两堆踩【暗影废墟】(黑水)施法(-75%耗蓝/+100%急速)；\n4. 点名印记：被点名【无面者印记】的玩家必须立刻一人向正南(6点)单跑，严禁吸血灭团！",
+    notes = {
+        {
+            xy = { 374, -315 },
+            title = "【黑水与印记提示】",
+            text = "← A组黑水 | B组黑水 →\n(中无面者印记立刻向正南6点单跑，严禁吸血灭团)",
+            color = "GREEN",
+            desc = "【回蓝与印记铁律】\n全场无自然回蓝，必须站在【暗影废墟】(黑水)中施法(-75%耗蓝/+100%急速)！\n被点名【无面者印记】的玩家必须立刻一人向正南(6点)单跑，脱离大团15码以上！",
+        },
+    },
     tbl = {
         -- 坦克 (1~2号位 - 台阶前拉怪)
         [1] = { xy = { 374, -65 } },
@@ -1026,6 +1323,57 @@ RaidMap.RegisterBoss({
             isNPC_text = "暗影涌动坦风筝",
             isNPC_icon = "Interface\\Icons\\ability_rogue_sprint",
             size = 34,
+        },
+    },
+    simulation = {
+        name = "维扎克斯将军 印记与风筝推演",
+        duration = 6.6,
+        steps = {
+            {
+                t = 0.0,
+                text = "|cff00e5ff[将军战术推演]|r 开怪：近战秒断灼热烈焰，远程/治疗A/B两堆踩黑水省蓝！",
+            },
+            {
+                t = 1.0,
+                duration = 1.6,
+                actor = 8,
+                target = 92,
+                tag = "|cffbf00ff【印记南跑】|r",
+                glowColor = { 0.8, 0.2, 1, 1 },
+                text = "|cffbf00ff● [无面者印记]|r 8号被点名！立刻大步向正南(6点)单跑，严禁吸血灭团！",
+            },
+            {
+                t = 2.6,
+                duration = 1.8,
+                actions = {
+                    {
+                        actor = 1,
+                        target = 93,
+                        tag = "|cffff0000【暗影涌动】|r",
+                        glowColor = { 1, 0, 0, 1 },
+                    },
+                    {
+                        actor = 98,
+                        target = { 260, -135 },
+                        tag = "|cff00ff00【跟背输出】|r",
+                    },
+                },
+                text = "|cffffaa00● [暗影涌动风筝]|r 将军攻击+100%！主坦沿外圈退步风筝，近战紧跟背后输出！",
+            },
+            {
+                t = 4.6,
+                duration = 1.4,
+                actions = {
+                    { actor = 8, target = "origin" },
+                    { actor = 1, target = "origin" },
+                    { actor = 98, target = "origin" },
+                },
+                text = "|cff00ff00● [全员归位]|r 印记消失，涌动结束！主坦带回原位，8号回黑水继续爆发！",
+            },
+            {
+                t = 6.0,
+                text = "|cff00ff00●【推演完成】|r 牢记口诀：印记向南单人跑，涌动后退近战跟！",
+            },
         },
     },
 })
@@ -1138,14 +1486,23 @@ RaidMap.RegisterBoss({
         [3] = {
             name = "P3·疯狂斩杀",
             tacticTip = "【P3 疯狂斩杀要点】\n1. 尤格萨隆本体破壳！读条【疯狂凝视】全团所有人必须立刻转身背对 BOSS，心智归零将被心控！\n2. 副坦拉住【不朽守护者】(信标怪)拉开击杀；全团猛抽本体斩杀！",
+            notes = {
+                {
+                    xy = { 540, -290 },
+                    title = "【背对凝视提示】",
+                    text = "← 治疗/远程中外圈站位\n(疯狂凝视立刻背对Boss，防心智归零心控)",
+                    color = "GREEN",
+                    desc = "【疯狂凝视应对】\n尤格萨隆读条【疯狂凝视】时，全团所有人必须立刻按住鼠标右键调头【背对BOSS】！\n直视凝视每秒丢失大量心智，心智归零将被永久心控击杀队友！",
+                },
+            },
             tbl = {
                 [1] = { xy = { 374, -75 } },
                 [2] = { xy = { 520, -170 } }, -- 副坦拉信标小怪
-                [3] = { xy = { 300, -160 } },
-                [4] = { xy = { 448, -160 } },
-                [5] = { xy = { 260, -220 } },
-                [6] = { xy = { 374, -230 } },
-                [7] = { xy = { 488, -220 } },
+                [3] = { xy = { 300, -210 } },
+                [4] = { xy = { 448, -210 } },
+                [5] = { xy = { 260, -230 } },
+                [6] = { xy = { 374, -240 } },
+                [7] = { xy = { 488, -230 } },
                 [8]  = { xy = { 180, -270 } },
                 [9]  = { xy = { 240, -290 } },
                 [10] = { xy = { 300, -305 } },
@@ -1199,17 +1556,26 @@ RaidMap.RegisterBoss({
     sub = "主坦4层相位换坦 | 单杀坍缩星逐个爆 | 外场留坦抗大爆炸其他人进洞",
     mapTex = "Interface\\AddOns\\BGLite_Plus\\Media\\icon\\ULDtitan\\m14.png",
     tacticTip = "【阿加隆站位要点】\n1. 换坦与消层：主坦抗到 4 层【相位冲孔】副坦秒嘲讽接怪，主坦进黑洞消 Debuff；\n2. 坍缩星修血：严禁AOE！必须单点逐个击杀，每次爆炸全团大掉血，抬满血再杀下一个；\n3. 大爆炸生死规则：外场绝不可空人(否则直接全灭)！留一名坦克开大技能/无敌硬吃，全团其他人倒数2秒跳黑洞！\n4. 出洞节奏：大爆炸伤害判定后所有人立刻出洞归位，副坦将活化星宿带入黑洞消除！",
+    notes = {
+        {
+            xy = { 580, -290 },
+            title = "【生死铁律提示】",
+            text = "← 治疗/远程紧邻黑洞抱团\n(留1坦在北面外场吃爆炸，其余全员跳洞！)",
+            color = "GREEN",
+            desc = "【防团灭生死铁律】\n大爆炸时外场绝不可空无一人（否则阿加隆直接狂暴全灭）！\n留1名坦克开大盾墙/无敌在正北硬吃，全团所有人倒数2秒跳入黑洞！\n大爆炸伤害判定后，所有人立刻出洞重返外场！",
+        },
+    },
     tbl = {
-        -- 坦克 (1~2号位)
+        -- 坦克 (1~2号位 - 正北抗怪与换坦)
         [1] = { xy = { 374, -65 } },
         [2] = { xy = { 340, -75 } },
 
-        -- 治疗与远程 (3~17号位 - 紧贴黑洞避难点两翼)
-        [3]  = { xy = { 300, -145 } },
-        [4]  = { xy = { 448, -145 } },
-        [5]  = { xy = { 260, -210 } },
-        [6]  = { xy = { 374, -220 } },
-        [7]  = { xy = { 488, -210 } },
+        -- 治疗与远程 (3~17号位 - 紧贴黑洞避难点两翼，距黑洞仅一步之遥)
+        [3]  = { xy = { 310, -220 } },
+        [4]  = { xy = { 438, -220 } },
+        [5]  = { xy = { 260, -240 } },
+        [6]  = { xy = { 374, -210 } },
+        [7]  = { xy = { 488, -240 } },
         [8]  = { xy = { 220, -260 } },
         [9]  = { xy = { 275, -280 } },
         [10] = { xy = { 330, -295 } },
@@ -1261,6 +1627,84 @@ RaidMap.RegisterBoss({
             isNPC_text = "外场吃大爆炸位",
             isNPC_icon = "Interface\\Icons\\spell_holy_divineintervention",
             size = 34,
+        },
+    },
+    simulation = {
+        name = "观察者阿加隆 换坦与跳黑洞推演",
+        duration = 6.8,
+        steps = {
+            {
+                t = 0.0,
+                text = "|cff00e5ff[阿加隆战术推演]|r 开怪：主坦正北定怪，大团紧邻黑洞两翼抱团，坍缩星逐个修血！",
+            },
+            {
+                t = 0.8,
+                duration = 1.2,
+                actions = {
+                    { actor = 1, tag = "|cffff0000【4层相位】|r", glowColor = { 1, 0, 0, 1 } },
+                    { actor = 2, target = { 374, -65 }, tag = "|cff00ff00【嘲讽接怪】|r", glowColor = { 0.2, 1, 0.2, 1 } },
+                },
+                text = "|cffffaa00● [4层相位换坦]|r 1号主坦4层相位冲孔！2号副坦秒换嘲接怪，1号进洞消Debuff！",
+            },
+            {
+                t = 2.0,
+                duration = 1.6,
+                actions = {
+                    { actor = 1, target = 92, tag = "|cffffd700【硬吃大爆炸】|r", glowColor = { 1, 0.85, 0.1, 1 } },
+                    { actor = 2, target = 90, tag = "|cffbf00ff【进洞】|r" },
+                    { actor = 3, target = 90, tag = "|cffbf00ff【进洞】|r" },
+                    { actor = 4, target = 90, tag = "|cffbf00ff【进洞】|r" },
+                    { actor = 5, target = 90, tag = "|cffbf00ff【进洞】|r" },
+                    { actor = 6, target = 90, tag = "|cffbf00ff【进洞】|r" },
+                    { actor = 7, target = 90, tag = "|cffbf00ff【进洞】|r" },
+                    { actor = 8, target = 90, tag = "|cffbf00ff【进洞】|r" },
+                    { actor = 9, target = 90, tag = "|cffbf00ff【进洞】|r" },
+                    { actor = 10, target = 90, tag = "|cffbf00ff【进洞】|r" },
+                    { actor = 11, target = 90, tag = "|cffbf00ff【进洞】|r" },
+                    { actor = 12, target = 90, tag = "|cffbf00ff【进洞】|r" },
+                    { actor = 13, target = 90, tag = "|cffbf00ff【进洞】|r" },
+                    { actor = 14, target = 90, tag = "|cffbf00ff【进洞】|r" },
+                    { actor = 15, target = 90, tag = "|cffbf00ff【进洞】|r" },
+                    { actor = 16, target = 90, tag = "|cffbf00ff【进洞】|r" },
+                    { actor = 17, target = 90, tag = "|cffbf00ff【进洞】|r" },
+                    { actor = 98, target = 90, tag = "|cffbf00ff【进洞】|r" },
+                },
+                text = "|cffff0000● [读条大爆炸]|r 外场留坦克开盾墙硬吃！其余全团倒数2秒集体跳入【90号黑洞】！",
+            },
+            {
+                t = 4.2,
+                duration = 1.0,
+                text = "|cffff0000● [大爆炸判定]|r 轰！！！外场坦克神圣开大硬吃！内场人员安全规避灭顶之灾！",
+            },
+            {
+                t = 5.2,
+                duration = 1.2,
+                actions = {
+                    { actor = 1, target = "origin" },
+                    { actor = 2, target = "origin" },
+                    { actor = 3, target = "origin" },
+                    { actor = 4, target = "origin" },
+                    { actor = 5, target = "origin" },
+                    { actor = 6, target = "origin" },
+                    { actor = 7, target = "origin" },
+                    { actor = 8, target = "origin" },
+                    { actor = 9, target = "origin" },
+                    { actor = 10, target = "origin" },
+                    { actor = 11, target = "origin" },
+                    { actor = 12, target = "origin" },
+                    { actor = 13, target = "origin" },
+                    { actor = 14, target = "origin" },
+                    { actor = 15, target = "origin" },
+                    { actor = 16, target = "origin" },
+                    { actor = 17, target = "origin" },
+                    { actor = 98, target = "origin" },
+                },
+                text = "|cff00ff00● [全员出洞归位]|r 伤害判定结束！全员立刻出洞重返外场，副坦拉走活化星宿！",
+            },
+            {
+                t = 6.4,
+                text = "|cff00ff00●【推演完成】|r 牢记口诀：外场绝不空人，大爆炸完秒出洞！",
+            },
         },
     },
 })
