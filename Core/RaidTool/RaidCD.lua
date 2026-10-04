@@ -15,12 +15,13 @@ _G.RaidCD = RaidCD
 -- 1. 监控技能核心数据库定义
 --------------------------------------------------------------------------------
 -- 默认监控规则：
--- 1) 圣骑士：默认仅勾选【神圣牺牲】，其余技能（牺牲之手、保护之手、拯救之手、圣盾术、圣佑术、圣疗术）默认关闭，供用户按需开启。
+-- 1) 圣骑士：默认仅勾选【神圣牺牲】，其余技能（光环掌握、牺牲之手、保护之手、拯救之手、圣盾术、圣佑术、圣疗术）默认关闭，供用户按需开启。
 -- 2) 坦克/治疗核心减伤：默认开启。
 -- 3) 团队战略/大抬血技能：按需可选。
 RaidCD.SPELLS = {
     -- 圣骑士 (PALADIN)
     { id = 64205, name = "神圣牺牲", class = "PALADIN", cd = 120, category = "raid",     default = true,  icon = 236254, desc = "全团20%伤害转移，团本大减伤" },
+    { id = 31821, name = "光环掌握", class = "PALADIN", cd = 120, category = "raid",     default = false, icon = 135872, desc = "增强当前光环效果并免疫沉默打断，团队抗性大减伤" },
     { id = 6940,  name = "牺牲之手", class = "PALADIN", cd = 120, category = "external", default = false, icon = 135966, desc = "单体转移30%伤害，交接保T" },
     { id = 10278, name = "保护之手", class = "PALADIN", cd = 300, category = "external", default = false, icon = 135964, desc = "物理免疫10秒，救法系/消物理Debuff" },
     { id = 1038,  name = "拯救之手", class = "PALADIN", cd = 120, category = "external", default = false, icon = 135967, desc = "降仇恨防OT，插雕文自身20%减伤" },
@@ -729,7 +730,31 @@ end
 -- 4. 事件监听框架 (Combat Log & Roster Listener)
 --------------------------------------------------------------------------------
 local eventFrame = CreateFrame("Frame", "BG_RaidCDEventFrame")
-eventFrame:RegisterEvent("COMBAT_LOG_EVENT_UNFILTERED")
+RaidCD.eventFrame = eventFrame
+RaidCD.isCombatLogRegistered = false
+
+-- 动态启停战斗日志监听引擎：实现真正的零开销
+function RaidCD.UpdateCombatLogListener()
+    local db = BiaoGe and BiaoGe.RaidCD
+    local shouldEnable = db and db.showHUD
+
+    if shouldEnable then
+        if not RaidCD.isCombatLogRegistered then
+            eventFrame:RegisterEvent("COMBAT_LOG_EVENT_UNFILTERED")
+            RaidCD.isCombatLogRegistered = true
+        end
+    else
+        if RaidCD.isCombatLogRegistered then
+            eventFrame:UnregisterEvent("COMBAT_LOG_EVENT_UNFILTERED")
+            RaidCD.isCombatLogRegistered = false
+            -- 彻底关闭时清理活跃中的冷却记录，释放内存
+            if RaidCD.activeCDs then
+                wipe(RaidCD.activeCDs)
+            end
+        end
+    end
+end
+
 if pcall then
     pcall(function() eventFrame:RegisterEvent("GROUP_ROSTER_UPDATE") end)
     pcall(function() eventFrame:RegisterEvent("PARTY_MEMBERS_CHANGED") end)
@@ -986,8 +1011,9 @@ function RaidCD.OpenHUDMenu(anchorFrame)
             db.showHUD = false
             if RaidCD.hudFrame then RaidCD.hudFrame:Hide() end
             if RaidCD.cbShowHUD then RaidCD.cbShowHUD:SetChecked(false) end
+            RaidCD.UpdateCombatLogListener()
             if DEFAULT_CHAT_FRAME then
-                DEFAULT_CHAT_FRAME:AddMessage("|cff00BFFF[BGLite 技能监控]|r 悬浮条已隐藏。如需再次开启，可在【团队工具】顶部勾选「开启 技能监控」。")
+                DEFAULT_CHAT_FRAME:AddMessage("|cff00BFFF[BGLite 技能监控]|r 悬浮条已隐藏，已彻底注销战斗日志监听。如需再次开启，可在【团队工具】顶部勾选「开启 技能监控」。")
             end
             CloseDropDownMenusSafe()
         end,
@@ -1519,6 +1545,9 @@ end
 
 -- 全量刷新 HUD 布局与人员条目
 function RaidCD.UpdateHUD()
+    if RaidCD.UpdateCombatLogListener then
+        RaidCD.UpdateCombatLogListener()
+    end
     local hud = RaidCD.hudFrame or RaidCD.CreateHUD()
     local db = BiaoGe and BiaoGe.RaidCD
 
@@ -1753,7 +1782,7 @@ function RaidCD.ToggleConfigModal()
 
     if not configModal then
         local f = CreateFrame("Frame", "BG_RaidCDConfigModal", UIParent, "BackdropTemplate")
-        f:SetSize(760, 480)
+        f:SetSize(760, 500)
         f:SetPoint("CENTER", UIParent, "CENTER", 0, 10)
         f:SetFrameStrata("FULLSCREEN_DIALOG")
         f:EnableMouse(true)
@@ -2184,6 +2213,9 @@ end
 --------------------------------------------------------------------------------
 function ns.InitRaidCDModule()
     ns.InitRaidCDDB()
+    if RaidCD.UpdateCombatLogListener then
+        RaidCD.UpdateCombatLogListener()
+    end
     if BiaoGe and BiaoGe.RaidCD and BiaoGe.RaidCD.showHUD then
         RaidCD.CreateHUD()
         RaidCD.UpdateHUD()

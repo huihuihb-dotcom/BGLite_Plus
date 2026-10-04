@@ -1317,6 +1317,9 @@ function RaidTool.CreateUI(parent)
             BiaoGe.RaidCD.showHUD = checked
         end
         if ns.RaidCD then
+            if ns.RaidCD.UpdateCombatLogListener then
+                ns.RaidCD.UpdateCombatLogListener()
+            end
             ns.RaidCD.UpdateHUD()
         end
         BG.PlaySound(1)
@@ -1327,7 +1330,7 @@ function RaidTool.CreateUI(parent)
     cbShowHUD:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_TOP")
         GameTooltip:AddLine("开启 技能监控", 1, 1, 1)
-        GameTooltip:AddLine("勾选后在屏幕中央悬浮显示当前团队中受监控成员的关键减伤技能实时冷却倒计时，可自由拖拽位置。", 0.8, 0.8, 0.8, true)
+        GameTooltip:AddLine("勾选：开启并在屏幕中央悬浮显示全团关键技能冷却倒计时。\n取消勾选：关闭技能监控，并注销战斗日志监听，后台零资源占用。", 0.8, 0.8, 0.8, true)
         GameTooltip:Show()
     end)
     cbShowHUD:SetScript("OnLeave", GameTooltip_Hide)

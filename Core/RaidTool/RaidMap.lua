@@ -1315,6 +1315,7 @@ function RaidMap.CreateUI()
         RaidMap.StartSimulation(f)
         BG.PlaySound(1)
     end)
+    btnSim:Hide() -- 默认先隐藏，后续由 UpdateSimulationButtonVisibility 根据首领/阶段路径动态决定显隐
     f.btnSim = btnSim
 
     -- 5. 历史战术预设下拉菜单 (宽度微调至100，右边距对齐，彻底消除与推演按钮压盖)
@@ -2610,7 +2611,35 @@ function RaidMap.RenderStaticNotes(mapCanvas, notesList, overrideCoords)
 end
 
 --------------------------------------------------------------------------------
--- 8. 核心 BOSS 专属预设构建与多阶段加载器 (LoadBossTacticalPreset)
+-- 8. 战术动态推演路径检测与显隐调度中枢
+--------------------------------------------------------------------------------
+-- 检查首领或阶段是否配置了有效的动态战术推演剧本
+function RaidMap.HasSimulationData(bossData, phaseIndex)
+    if not bossData then return false end
+    local curP = (bossData.phases and phaseIndex and bossData.phases[phaseIndex]) or (bossData.phases and bossData.phases[1])
+    local simData = (curP and curP.simulation) or bossData.simulation
+    return (simData and simData.steps and #simData.steps > 0) and true or false
+end
+
+-- 动态更新战术推演按钮的显隐状态 (无推演路径时自动隐藏，保持界面清爽)
+function RaidMap.UpdateSimulationButtonVisibility(f, bossData, phaseIndex)
+    f = f or mapFrame
+    if not f or not f.btnSim then return end
+
+    local hasSim = RaidMap.HasSimulationData(bossData, phaseIndex)
+    if hasSim then
+        f.btnSim:Show()
+    else
+        f.btnSim:Hide()
+        -- 若切到无推演的首领且正在播放，安全停止并复位
+        if f.isSimulating and RaidMap.StopSimulation then
+            RaidMap.StopSimulation(f)
+        end
+    end
+end
+
+--------------------------------------------------------------------------------
+-- 9. 核心 BOSS 专属预设构建与多阶段加载器 (LoadBossTacticalPreset)
 --------------------------------------------------------------------------------
 function RaidMap.LoadBossTacticalPreset(bossID, phaseIndex, forceMode)
     local f = RaidMap.CreateUI()
@@ -2771,6 +2800,9 @@ function RaidMap.LoadBossTacticalPreset(bossID, phaseIndex, forceMode)
     local isLeaderRole = not IsInRaid() or UnitIsGroupLeader("player") or UnitIsGroupAssistant("player")
     local targetMode = forceMode or (isLeaderRole and "EDITOR" or "RECEIVER")
     RaidMap.SetDisplayMode(targetMode)
+    if RaidMap.UpdateSimulationButtonVisibility then
+        RaidMap.UpdateSimulationButtonVisibility(f, bossData, currentPhase)
+    end
     f:Show()
     f:Raise()
 end
@@ -3460,6 +3492,9 @@ function RaidMap.RenderByCode(code, notSave, sender)
 
     RaidMap.RefreshSelfHighlight(f)
     RaidMap.SetDisplayMode("RECEIVER", sender)
+    if RaidMap.UpdateSimulationButtonVisibility then
+        RaidMap.UpdateSimulationButtonVisibility(f, bossData, targetPhase)
+    end
     f:Show()
     return true
 end
@@ -3730,7 +3765,7 @@ function RaidMap.StartSimulation(f)
 
     f.isSimulating = true
     if f.btnSim then
-        f.btnSim:SetText("|cffff4444⏹ 复位|r")
+        f.btnSim:SetText("|cffff4444 复位|r")
     end
     f.simBanner:Show()
 
