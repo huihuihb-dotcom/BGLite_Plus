@@ -1116,6 +1116,256 @@ function BG.SetHope(link, FB, isBiaoGe)
     return false
 end
 
+------------------------------------------------------------
+-- 喵影 (AtlasLootMY) 配装/偏好清单联动支持 (全防御沙箱)
+------------------------------------------------------------
+local inMiaoYingSync = false
+
+local function GetMiaoYingFavouritesAddon()
+    local AL = _G.AtlasLootMY or _G.AtlasLoot
+    if not AL or type(AL) ~= "table" then return nil end
+    local Addons = AL.Addons
+    if not Addons or type(Addons) ~= "table" or type(Addons.GetAddon) ~= "function" then return nil end
+    local ok, fav = pcall(Addons.GetAddon, Addons, "Favourites")
+    if ok and fav and type(fav) == "table" then
+        return fav
+    end
+    return nil
+end
+
+local function IsInMiaoYingFavourites(itemID)
+    if not itemID then return false end
+    local numID = tonumber(itemID)
+    if not numID then return false end
+
+    -- 若用户主动关闭了喵影联动选项，则不检查 (默认开启，nil 或 1 均视为开启，只有明确为 0 才关闭)
+    if BiaoGe and BiaoGe.options and BiaoGe.options["linkMiaoYingHope"] == 0 then
+        return false
+    end
+
+    local fav = GetMiaoYingFavouritesAddon()
+    if not fav or not fav.db or not fav.db.lists then return false end
+
+    -- 严格角色隔离：仅检查当前角色的 Profile lists (基础列表/专属配装)，绝对不检查 globalDb (整体列表)
+    for listID, listData in pairs(fav.db.lists) do
+        if listData and listData[numID] then
+            return true
+        end
+    end
+    return false
+end
+
+local function RemoveFromMiaoYingFavourites(itemID)
+    if not itemID then return false end
+    local numID = tonumber(itemID)
+    if not numID then return false end
+
+    local fav = GetMiaoYingFavouritesAddon()
+    if not fav or not fav.db or not fav.db.lists then return false end
+
+    local removedAny = false
+    -- 严格角色隔离：仅从当前角色的 Profile 列表 (基础列表) 中移除，绝不触碰整体列表 (globalDb)
+    for listID, listData in pairs(fav.db.lists) do
+        if listData and listData[numID] then
+            listData[numID] = nil
+            removedAny = true
+        end
+    end
+
+    if removedAny then
+        -- 若当前激活的列表正好是 Profile 列表，同步更新 activeList 和计数
+        if fav.activeList and (not fav.db.activeList or fav.db.activeList[2] ~= true) and fav.activeList[numID] then
+            fav.activeList[numID] = nil
+            if fav.numItems and fav.numItems > 0 then
+                fav.numItems = fav.numItems - 1
+            end
+        end
+        if type(fav.CleanUpMainItems) == "function" then
+            pcall(fav.CleanUpMainItems, fav)
+        end
+        if type(fav.UpdateDb) == "function" then
+            pcall(fav.UpdateDb, fav)
+        end
+        if type(fav.OnItemsChanged) == "function" then
+            pcall(fav.OnItemsChanged, fav)
+        end
+        return true
+    end
+    return false
+end
+
+-- 全局检索：根据物品ID在所有已注册的团本战利品表中定位所属副本、难度序号、BOSS序号
+local function FindFBAndBoss(itemID)
+    if not itemID then return nil end
+    local numID = tonumber(itemID)
+    if not numID then return nil end
+
+    local priorityFBs = {}
+    if BG.FB1 then table.insert(priorityFBs, BG.FB1) end
+    if BG.FBtable then
+        for _, fb in ipairs(BG.FBtable) do
+            if fb ~= BG.FB1 then
+                table.insert(priorityFBs, fb)
+            end
+        end
+    end
+
+    for _, fb in ipairs(priorityFBs) do
+        local diffs = BG.difficultyTable and BG.difficultyTable[fb]
+        if diffs and BG.Loot and BG.Loot[fb] then
+            for hardIndex, hard in ipairs(diffs) do
+                if BG.Loot[fb][hard] then
+                    local b = 1
+                    while BG.Loot[fb][hard]["boss" .. b] do
+                        for _, _itemID in ipairs(BG.Loot[fb][hard]["boss" .. b]) do
+                            local match = false
+                            if BG.IsSame then
+                                match = BG.IsSame(numID, _itemID)
+                            else
+                                match = (numID == tonumber(_itemID))
+                            end
+                            if match then
+                                return fb, hardIndex, b
+                            end
+                        end
+                        b = b + 1
+                    end
+                end
+            end
+        end
+    end
+    return nil
+end
+
+-- 检查某个物品是否已经存在于心愿单对应的 BOSS 格子中
+local function IsItemAlreadyInHope(itemID, fb, n, b)
+    local charHopeDB = (BG.GetHopeDB and BG.GetHopeDB())
+    if not charHopeDB and BiaoGe and BiaoGe.Hope then
+        local rID = GetRealmID()
+        local pName = UnitName("player") or BG.playerName or ""
+        charHopeDB = BiaoGe.Hope[rID] and BiaoGe.Hope[rID][pName]
+    end
+
+    for i = 1, (HopeMaxi or 3) do
+        local hopeFrameExist = BG.HopeFrame and BG.HopeFrame[fb] and BG.HopeFrame[fb]["nandu" .. n] and BG.HopeFrame[fb]["nandu" .. n]["boss" .. b]
+        local hopeUI = hopeFrameExist and BG.HopeFrame[fb]["nandu" .. n]["boss" .. b]["zhuangbei" .. i]
+        if hopeUI and (GetItemID(hopeUI:GetText()) == itemID) then
+            return true
+        end
+        if charHopeDB and charHopeDB[fb] and charHopeDB[fb]["nandu" .. n] and charHopeDB[fb]["nandu" .. n]["boss" .. b] then
+            local dbLink = charHopeDB[fb]["nandu" .. n]["boss" .. b]["zhuangbei" .. i]
+            if dbLink and (GetItemID(dbLink) == itemID) then
+                return true
+            end
+        end
+    end
+    return false
+end
+
+-- 安全地将喵影装备填入 BGLite 心愿单
+local function SafeSetHopeFromMiaoYing(itemID, isSilent)
+    local numID = tonumber(itemID)
+    if not numID then return false, "invalid_id" end
+
+    -- 若用户主动关闭联动开关，直接返回
+    if BiaoGe and BiaoGe.options and BiaoGe.options["linkMiaoYingHope"] == 0 then
+        return false, "disabled"
+    end
+
+    local fb, n, b = FindFBAndBoss(numID)
+    if not fb or not n or not b then
+        return false, "not_raid_boss_drop"
+    end
+
+    if IsItemAlreadyInHope(numID, fb, n, b) then
+        return true, "already_exists"
+    end
+
+    local _, link = GetItemInfo(numID)
+    if not link then
+        local item = Item:CreateFromItemID(numID)
+        item:ContinueOnItemLoad(function()
+            local _, loadedLink = GetItemInfo(numID)
+            if loadedLink then
+                SafeSetHopeFromMiaoYing(numID, isSilent)
+            end
+        end)
+        return false, "loading"
+    end
+
+    local ok, success = pcall(BG.SetHope, link, fb, true)
+    if ok and success then
+        if not isSilent then
+            local bossName = (BG.Boss and BG.Boss[fb] and BG.Boss[fb]["boss" .. b] and BG.Boss[fb]["boss" .. b].name2) or ("BOSS " .. b)
+            local fbName = (BG.GetFBinfo and BG.GetFBinfo(fb, "shortName")) or fb
+            local msg = format(L["已将 %s 自动加入心愿清单（%s - %s）。"], link, fbName, bossName)
+            if BG.SendSystemMessage then
+                BG.SendSystemMessage(msg)
+            elseif SendSystemMessage then
+                SendSystemMessage(BG.BG .. BG.STC_g1(msg))
+            end
+        end
+        return true, "added"
+    end
+    return false, "failed"
+end
+
+-- 批量同步喵影【基础列表/角色专属配装】到 BGLite 心愿清单 (严格隔离整体列表)
+function BG.SyncAllMiaoYingHope(isSilent)
+    if BiaoGe and BiaoGe.options and BiaoGe.options["linkMiaoYingHope"] == 0 then
+        if not isSilent and BG.SendSystemMessage then
+            BG.SendSystemMessage(L["喵影配装联动当前处于关闭状态，请先在下方勾选开启。"])
+        end
+        return 0
+    end
+
+    local fav = GetMiaoYingFavouritesAddon()
+    local profileLists = fav and ((fav.GetProfileLists and fav:GetProfileLists()) or (fav.db and fav.db.lists))
+    if not fav or not profileLists then
+        if not isSilent and BG.SendSystemMessage then
+            BG.SendSystemMessage(L["未检测到喵影(AtlasLootMY)基础配装清单或未启用该插件。"])
+        end
+        return 0
+    end
+
+    local addedCount = 0
+    local processedItems = {}
+
+    -- 严格仅扫描当前角色的 profileLists (包含 ProfileBase 基础列表与该角色下的专属列表)，绝对不扫描 globalDb 整体列表
+    for listID, listData in pairs(profileLists) do
+        if type(listData) == "table" then
+            for itemID, val in pairs(listData) do
+                if type(itemID) == "number" and val and not processedItems[itemID] then
+                    processedItems[itemID] = true
+                    local ok, status = SafeSetHopeFromMiaoYing(itemID, true)
+                    if ok and status == "added" then
+                        addedCount = addedCount + 1
+                    end
+                end
+            end
+        end
+    end
+
+    if not isSilent then
+        if addedCount > 0 then
+            local msg = format(L["成功同步喵影【基础列表】至心愿清单，共新增 %d 件装备！"], addedCount)
+            if BG.SendSystemMessage then
+                BG.SendSystemMessage(msg)
+            elseif SendSystemMessage then
+                SendSystemMessage(BG.BG .. BG.STC_g1(msg))
+            end
+        else
+            local msg = L["喵影基础列表中的团本装备已全部存在于心愿清单中。"]
+            if BG.SendSystemMessage then
+                BG.SendSystemMessage(msg)
+            elseif SendSystemMessage then
+                SendSystemMessage(BG.BG .. BG.STC_g1(msg))
+            end
+        end
+    end
+    return addedCount
+end
+
 -- 参数1（必选）：link或itemID。类型：string或number
 -- 参数2（可选）：表格ID。不传参数则历遍全部表格的心愿进行匹配删除。类型：string
 -- 返回：没有返回值
@@ -1126,9 +1376,9 @@ function BG.DeleteHope(LINKorID, FB)
     elseif type(LINKorID) == "string" then
         itemID = GetItemID(LINKorID)
     end
-    if not itemID then error(L["物品链接错误，没有读取到物品ID。"]) end
+    if not itemID then return end
     local FBs = FB and BG.phaseFBtable and BG.phaseFBtable[FB] or BG.FBtable
-    if not FBs then error(L["表格ID错误"]) end
+    if not FBs then return end
 
     local charHopeDB = (BG.GetHopeDB and BG.GetHopeDB())
     if not charHopeDB and BiaoGe and BiaoGe.Hope then
@@ -1137,13 +1387,13 @@ function BG.DeleteHope(LINKorID, FB)
         charHopeDB = BiaoGe.Hope[rID] and BiaoGe.Hope[rID][pName]
     end
 
-    for _, FB in pairs(FBs) do
-        for n = 1, (HopeMaxn[FB] or 3) do
-            for b = 1, (HopeMaxb[FB] or 25) do
+    for _, fbName in pairs(FBs) do
+        for n = 1, (HopeMaxn[fbName] or 3) do
+            for b = 1, (HopeMaxb[fbName] or 25) do
                 for i = 1, HopeMaxi do
-                    local hopeFrameExist = BG.HopeFrame and BG.HopeFrame[FB] and BG.HopeFrame[FB]["nandu" .. n] and BG.HopeFrame[FB]["nandu" .. n]["boss" .. b]
-                    local hopeUI = hopeFrameExist and BG.HopeFrame[FB]["nandu" .. n]["boss" .. b]["zhuangbei" .. i]
-                    local dbLink = charHopeDB and charHopeDB[FB] and charHopeDB[FB]["nandu" .. n] and charHopeDB[FB]["nandu" .. n]["boss" .. b] and charHopeDB[FB]["nandu" .. n]["boss" .. b]["zhuangbei" .. i]
+                    local hopeFrameExist = BG.HopeFrame and BG.HopeFrame[fbName] and BG.HopeFrame[fbName]["nandu" .. n] and BG.HopeFrame[fbName]["nandu" .. n]["boss" .. b]
+                    local hopeUI = hopeFrameExist and BG.HopeFrame[fbName]["nandu" .. n]["boss" .. b]["zhuangbei" .. i]
+                    local dbLink = charHopeDB and charHopeDB[fbName] and charHopeDB[fbName]["nandu" .. n] and charHopeDB[fbName]["nandu" .. n]["boss" .. b] and charHopeDB[fbName]["nandu" .. n]["boss" .. b]["zhuangbei" .. i]
 
                     local matched = false
                     if hopeUI and itemID == GetItemID(hopeUI:GetText()) then
@@ -1153,12 +1403,19 @@ function BG.DeleteHope(LINKorID, FB)
                     if dbLink and itemID == GetItemID(dbLink) then
                         matched = true
                     end
-                    if matched and charHopeDB and charHopeDB[FB] and charHopeDB[FB]["nandu" .. n] and charHopeDB[FB]["nandu" .. n]["boss" .. b] then
-                        charHopeDB[FB]["nandu" .. n]["boss" .. b]["zhuangbei" .. i] = nil
+                    if matched and charHopeDB and charHopeDB[fbName] and charHopeDB[fbName]["nandu" .. n] and charHopeDB[fbName]["nandu" .. n]["boss" .. b] then
+                        charHopeDB[fbName]["nandu" .. n]["boss" .. b]["zhuangbei" .. i] = nil
                     end
                 end
             end
         end
+    end
+
+    -- 联动检查并移出喵影基础配装清单 (全防御沙箱 + 防递归保护 + 仅限当前角色专属列表)
+    if not inMiaoYingSync and IsInMiaoYingFavourites(itemID) then
+        inMiaoYingSync = true
+        RemoveFromMiaoYingFavourites(itemID)
+        inMiaoYingSync = false
     end
 end
 
@@ -1172,9 +1429,9 @@ function BG.IsHope(LINKorID, FB)
     elseif type(LINKorID) == "string" then
         itemID = GetItemID(LINKorID)
     end
-    if not itemID then error(L["物品链接错误，没有读取到物品ID。"]) end
+    if not itemID then return false end
     local FBs = FB and BG.phaseFBtable and BG.phaseFBtable[FB] or BG.FBtable
-    if not FBs then error(L["表格ID错误"]) end
+    if not FBs then return false end
 
     local charHopeDB = (BG.GetHopeDB and BG.GetHopeDB())
     if not charHopeDB and BiaoGe and BiaoGe.Hope then
@@ -1183,20 +1440,19 @@ function BG.IsHope(LINKorID, FB)
         charHopeDB = BiaoGe.Hope[rID] and BiaoGe.Hope[rID][pName]
     end
 
-    for _, FB in pairs(FBs) do
-        for n = 1, (HopeMaxn[FB] or 3) do
-            for b = 1, (HopeMaxb[FB] or 25) do
+    -- 1. 原生 BGLite_Plus 心愿单判定
+    for _, fbName in pairs(FBs) do
+        for n = 1, (HopeMaxn[fbName] or 3) do
+            for b = 1, (HopeMaxb[fbName] or 25) do
                 for i = 1, HopeMaxi do
-                    -- 1. 优先查 UI 控件 (如果在当前已初始化的心愿单中)
-                    local hopeFrameExist = BG.HopeFrame and BG.HopeFrame[FB] and BG.HopeFrame[FB]["nandu" .. n] and BG.HopeFrame[FB]["nandu" .. n]["boss" .. b]
-                    local hopeUI = hopeFrameExist and BG.HopeFrame[FB]["nandu" .. n]["boss" .. b]["zhuangbei" .. i]
+                    local hopeFrameExist = BG.HopeFrame and BG.HopeFrame[fbName] and BG.HopeFrame[fbName]["nandu" .. n] and BG.HopeFrame[fbName]["nandu" .. n]["boss" .. b]
+                    local hopeUI = hopeFrameExist and BG.HopeFrame[fbName]["nandu" .. n]["boss" .. b]["zhuangbei" .. i]
                     if hopeUI and BG.IsSame(itemID, hopeUI) then
                         return true
                     end
 
-                    -- 2. 查持久化数据库 (即使未打开心愿单 UI 也保证精确判定)
-                    if charHopeDB and charHopeDB[FB] and charHopeDB[FB]["nandu" .. n] and charHopeDB[FB]["nandu" .. n]["boss" .. b] then
-                        local link = charHopeDB[FB]["nandu" .. n]["boss" .. b]["zhuangbei" .. i]
+                    if charHopeDB and charHopeDB[fbName] and charHopeDB[fbName]["nandu" .. n] and charHopeDB[fbName]["nandu" .. n]["boss" .. b] then
+                        local link = charHopeDB[fbName]["nandu" .. n]["boss" .. b]["zhuangbei" .. i]
                         if link and link ~= "" then
                             local dbItemID = GetItemID(link)
                             if dbItemID and (dbItemID == itemID or (BG.IsSame and BG.IsSame(itemID, dbItemID))) then
@@ -1208,5 +1464,226 @@ function BG.IsHope(LINKorID, FB)
             end
         end
     end
+
+    -- 2. 喵影 (AtlasLootMY) 基础配装清单联动判定 (严格角色隔离，不含整体列表)
+    if IsInMiaoYingFavourites(itemID) then
+        local okCount, count = pcall(GetItemCount, itemID, true)
+        if okCount and count and count > 0 then
+            return false
+        end
+        return true
+    end
+
     return false
 end
+
+-- 实时挂钩喵影配装事件 (Alt+左键点装备 / 喵影界面收藏 / 移除)
+local miaoYingHooked = false
+local function HookMiaoYingEvents()
+    if miaoYingHooked then return end
+    local fav = GetMiaoYingFavouritesAddon()
+    if not fav then return end
+
+    if type(fav.AddItemID) == "function" and not fav._BGLite_OrigAddItemID then
+        fav._BGLite_OrigAddItemID = fav.AddItemID
+        fav.AddItemID = function(self, itemID, ...)
+            local res = fav._BGLite_OrigAddItemID(self, itemID, ...)
+            local isGlobal = (self.db and self.db.activeList and self.db.activeList[2] == true)
+            -- 核心隔离约束：只有处于当前角色的基础列表/Profile列表时，才同步到心愿单；处于整体列表时不录入
+            if res and not isGlobal and (not BiaoGe or not BiaoGe.options or BiaoGe.options["linkMiaoYingHope"] ~= 0) then
+                SafeSetHopeFromMiaoYing(itemID, false)
+            end
+            return res
+        end
+    end
+
+    if type(fav.RemoveItemID) == "function" and not fav._BGLite_OrigRemoveItemID then
+        fav._BGLite_OrigRemoveItemID = fav.RemoveItemID
+        fav.RemoveItemID = function(self, itemID, ...)
+            local res = fav._BGLite_OrigRemoveItemID(self, itemID, ...)
+            local isGlobal = (self.db and self.db.activeList and self.db.activeList[2] == true)
+            if res and not isGlobal and (not BiaoGe or not BiaoGe.options or BiaoGe.options["linkMiaoYingHope"] ~= 0) then
+                if not inMiaoYingSync then
+                    inMiaoYingSync = true
+                    pcall(BG.DeleteHope, itemID)
+                    inMiaoYingSync = false
+                end
+            end
+            return res
+        end
+    end
+
+    miaoYingHooked = true
+end
+
+-- 创建心愿单主界面 (BG.HopeMainFrame) 上的喵影联动控件
+local uiControlsCreated = false
+function BG.CreateMiaoYingHopeUI()
+    if uiControlsCreated then return end
+    if not BG.HopeMainFrame then return end
+    uiControlsCreated = true
+
+    if BG.HopeDaoChuUI and not BG.ButtonImportHope then
+        pcall(BG.HopeDaoChuUI)
+    end
+
+    local baseFrameLevel = (BG.HopeMainFrame.GetFrameLevel and BG.HopeMainFrame:GetFrameLevel()) or 100
+
+    -- 1. 复选框：联动喵影配装 (仅基础列表)
+    local cb = CreateFrame("CheckButton", "BGLite_Plus_LinkMiaoYingHopeCheckButton", BG.HopeMainFrame, "UICheckButtonTemplate")
+    cb:SetSize(22, 22)
+    cb:SetPoint("BOTTOMLEFT", BG.MainFrame, "BOTTOMLEFT", 35, 105)
+    cb:SetFrameLevel(baseFrameLevel + 15)
+
+    local textLabel = cb.text or _G[cb:GetName() .. "Text"]
+    if not textLabel then
+        textLabel = cb:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
+        textLabel:SetPoint("LEFT", cb, "RIGHT", 4, 0)
+        cb.text = textLabel
+    end
+    textLabel:SetFont(BIAOGE_TEXT_FONT, 14, "OUTLINE")
+    textLabel:SetText(L["联动喵影配装 (仅基础列表 Alt+左键)"])
+    textLabel:SetWordWrap(false)
+
+    -- 默认开启（只要不是明确为 0，就打勾）
+    local isChecked = true
+    if BiaoGe and BiaoGe.options and BiaoGe.options["linkMiaoYingHope"] == 0 then
+        isChecked = false
+    end
+    cb:SetChecked(isChecked)
+
+    cb:SetScript("OnClick", function(self)
+        local val = self:GetChecked() and 1 or 0
+        BiaoGe.options = BiaoGe.options or {}
+        BiaoGe.options["linkMiaoYingHope"] = val
+        BG.PlaySound(1)
+        if val == 1 then
+            HookMiaoYingEvents()
+            BG.SyncAllMiaoYingHope(false)
+        end
+    end)
+
+    cb:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_TOPLEFT", 0, 5)
+        GameTooltip:ClearLines()
+        GameTooltip:AddLine(BG.STC_g1(L["喵影配装与心愿单 (角色隔离联动)"]), 1, 1, 1)
+        GameTooltip:AddLine(L["开启后，仅同步喵影的【基础列表】(当前角色专属配装)，绝对不会同步全账号共享的【整体列表】，确保不同角色的心愿单完全独立不混淆。"], 1, 0.82, 0, true)
+        GameTooltip:AddLine(L["在喵影中激活基础列表并按住 Alt+左键 点击装备时，自动填入当前角色对应 BOSS 的心愿单。"], 0.8, 0.8, 0.8, true)
+        GameTooltip:AddLine(L["在喵影基础列表中移除或在心愿单右键清除装备时，双方也将同步移除。"], 0.6, 0.6, 0.6, true)
+        GameTooltip:Show()
+    end)
+    cb:SetScript("OnLeave", function(self)
+        GameTooltip:Hide()
+    end)
+    BG.CheckButtonLinkMiaoYing = cb
+
+    -- 2. 按钮：一键同步喵影【基础列表】配装
+    local btnSync = BG.CreateButton(BG.HopeMainFrame)
+    btnSync:SetSize(130, 22)
+    btnSync:SetPoint("LEFT", textLabel, "RIGHT", 15, 0)
+    btnSync:SetFrameLevel(baseFrameLevel + 15)
+    btnSync:SetText(L["同步基础列表配装"])
+    btnSync:SetScript("OnClick", function()
+        HookMiaoYingEvents()
+        BG.SyncAllMiaoYingHope(false)
+    end)
+    btnSync:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_TOP", 0, 5)
+        GameTooltip:ClearLines()
+        GameTooltip:AddLine(L["一键同步喵影【基础列表】"], 1, 1, 1)
+        GameTooltip:AddLine(L["仅扫描当前角色的喵影基础列表及本角色配装方案，批量填入本角色心愿单，不导入整体列表。"], 1, 0.82, 0, true)
+        GameTooltip:Show()
+    end)
+    btnSync:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    BG.ButtonSyncMiaoYingHope = btnSync
+
+    -- 3. 按钮：打开喵影配装管理
+    local btnOpen = BG.CreateButton(BG.HopeMainFrame)
+    btnOpen:SetSize(110, 22)
+    btnOpen:SetPoint("LEFT", btnSync, "RIGHT", 8, 0)
+    btnOpen:SetFrameLevel(baseFrameLevel + 15)
+    btnOpen:SetText(L["打开喵影配装"])
+    btnOpen:SetScript("OnClick", function()
+        local fav = GetMiaoYingFavouritesAddon()
+        if fav and fav.GUI and fav.GUI.Toggle then
+            fav.GUI:Toggle()
+        else
+            local msg = L["未检测到喵影(AtlasLootMY)插件或插件未开启。"]
+            if BG.SendSystemMessage then
+                BG.SendSystemMessage(msg)
+            elseif SendSystemMessage then
+                SendSystemMessage(BG.BG .. BG.STC_r1(msg))
+            end
+        end
+    end)
+    BG.ButtonOpenMiaoYingFav = btnOpen
+end
+
+-- 监听交易成功取消心愿联动
+do
+    local tradeHooked = false
+    local function HookTradeCancel()
+        if tradeHooked then return end
+        if not BG.CancelGuanZhuAndHopeInTrade then return end
+        tradeHooked = true
+
+        local orig_Cancel = BG.CancelGuanZhuAndHopeInTrade
+        BG.CancelGuanZhuAndHopeInTrade = function(itemID)
+            if orig_Cancel then
+                pcall(orig_Cancel, itemID)
+            end
+            if itemID and IsInMiaoYingFavourites(itemID) then
+                local removed = RemoveFromMiaoYingFavourites(itemID)
+                if removed then
+                    local name = GetItemInfo(itemID) or ("item:" .. itemID)
+                    if BG.SendSystemMessage then
+                        BG.SendSystemMessage(format(L["已自动满足%s的喵影配装心愿。"], name))
+                    end
+                end
+            end
+        end
+    end
+
+    if BG.Init then
+        BG.Init(HookTradeCancel)
+    else
+        HookTradeCancel()
+    end
+end
+
+-- 整体事件驱动初始化与动态挂钩
+do
+    local eventFrame = CreateFrame("Frame")
+    eventFrame:RegisterEvent("PLAYER_LOGIN")
+    eventFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
+    eventFrame:RegisterEvent("ADDON_LOADED")
+    eventFrame:SetScript("OnEvent", function(self, event, arg1)
+        HookMiaoYingEvents()
+        if BG.HopeMainFrame and BG.CreateMiaoYingHopeUI then
+            BG.CreateMiaoYingHopeUI()
+        end
+    end)
+
+    -- 延迟与 Tab 切换安全重试兜底
+    C_Timer.After(0.2, function()
+        HookMiaoYingEvents()
+        if BG.HopeMainFrame and BG.CreateMiaoYingHopeUI then
+            BG.CreateMiaoYingHopeUI()
+        end
+    end)
+
+    if BG.ClickTabButton then
+        hooksecurefunc(BG, "ClickTabButton", function(num)
+            if num == (BG.HopeMainFrameTabNum or 21) then
+                HookMiaoYingEvents()
+                if BG.HopeMainFrame and BG.CreateMiaoYingHopeUI then
+                    BG.CreateMiaoYingHopeUI()
+                end
+            end
+        end)
+    end
+
+    -- 立即尝试首次挂钩
+    HookMiaoYingEvents()
+end
+

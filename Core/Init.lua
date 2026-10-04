@@ -378,6 +378,11 @@ local function InitPlusUI()
         t:SetText(L["你可以设置一些装备，这些装备只要掉落就会提醒，并且自动关注团长拍卖"])
     end
 
+    -- 初始化心愿单界面喵影联动控件
+    if BG.CreateMiaoYingHopeUI then
+        securecall(BG.CreateMiaoYingHopeUI)
+    end
+
     for _, FB in ipairs(BG.FBtable or {}) do
         if BG.HopeUI then
             securecall(BG.HopeUI, FB)

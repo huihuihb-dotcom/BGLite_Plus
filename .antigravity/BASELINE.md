@@ -368,6 +368,28 @@
      3. **无缝补齐 T8 代币与徽记**: 采用 `SafeAppend` 自动为 boss8~13 补入 15 枚 T8 套装代币，为 boss15 补入任务徽记；
      4. **长效防冲防退**: 无论上游未来如何微调散件，本补丁均平滑叠加，杜绝覆盖破坏。
 
+### 3.10 喵影 (AtlasLootMY) 配装/偏好清单心愿联动与闭环治理 (2026-10-04)
+1. **背景与用户诉求**:
+   - 玩家习惯在 AtlasLoot（喵影版）中按住 `Alt + 左键` 挑选全身 BIS 配装，希望打本摸尸体与拍卖时 BGLite 能自动将这些装备识别为心愿装备并弹出关注/掉落提醒，同时在 BGLite 心愿清单 Tab 中直接可见。
+2. **零侵入与全防御沙箱机制 (`Core/Module/Hope.lua`)**:
+   - **零源码侵入**: 严格不修改上游 BGLite 与第三方 miaoying 任何源码，所有逻辑由 `BGLite_Plus` 独立承接；
+   - **全沙箱与防崩溃保护**: 对 `_G.AtlasLootMY`、`Addons:GetAddon("Favourites")`、`IsFavouriteItemID` 等 API 全覆盖 `pcall` 校验与类型防御；若用户未安装 miaoying 或关闭了偏好模块，毫秒级安全回退，绝不抛出任何 `nil` 异常或中断外层执行栈；
+   - **防骚扰（已拥有自动免提醒）**: 若玩家身上或背包中已持有该装备（`GetItemCount > 0`），即使喵影清单中挂载，也自动判定为已圆满而不重复警报。
+3. **严格角色隔离与单向 Profile 绑定 (重要设计决策)**:
+   - **BGLite 存储模型**: `BiaoGe.Hope[RealmID][player]` 以服务器及角色名建立物理级独立命名空间，各角色完全独立；
+   - **喵影列表区分**: 喵影分为全账号共享的【整体列表 (`globalDb.lists`)】与各角色独立的【基础列表 (`db.lists`)】；
+   - **严格限定 Profile 基础列表**: 为防止将其他角色的装备（如战士号同步法师布甲）混入当前角色心愿单，`IsInMiaoYingFavourites`、`SafeSetHopeFromMiaoYing` 与 `BG.SyncAllMiaoYingHope` **100% 严格限定仅扫描与同步当前角色的 Profile 基础配装列表**，彻底杜绝全账号整体列表的跨职业交叉污染；
+   - **实时 Hook 列表检测**: 在挂钩 `Favourites.AddItemID` 时，检测 `fav.db.activeList[2]`，若玩家当前正在编辑【整体列表】，不触发当前角色心愿单录入。
+4. **实时双向事件钩子 (Active Hook & Auto-populate)**:
+   - **实时挂钩 Alt+左键 点击**: Hook 喵影 `Favourites.AddItemID`，当玩家在喵影中按 `Alt + 左键` 添加配装时，BGLite 自动触发 `FindFBAndBoss` 在所有团本掉落数据库（`BG.Loot[FB][hard]["boss" .. b]`）中自动检索所属副本、难度与 BOSS，并调用 `BG.SetHope` 自动填入心愿单物理格子与持久化数据库，同时在聊天框输出绿色确认提示；
+   - **未缓存装备异步装载**: 对新物品通过 `Item:CreateFromItemID` 注册 `ContinueOnItemLoad`，服务端数据返回后自动填入；
+   - **递归保护与双向删除**: 维护 `inMiaoYingSync` 重入屏障；在喵影中移除装备或在心愿单右键清除格子时，双向同步移出，杜绝死循环；
+   - **交易履约自动满足**: Hook `BG.CancelGuanZhuAndHopeInTrade`，当在金团交易中成功拿到心愿装备时，自动满足并移出喵影清单，发送系统消息提示。
+5. **可视化 UI 交互与批量同步 (`BG.HopeMainFrame`)**:
+   - **心愿单底部复选框**: 布局调整至 `BG.HopeMainFrame` 说明文字上方（`Y = 105`），避免遮挡底部元素，呈现 `[√] 联动喵影配装 (仅基础列表 Alt+左键)`（`BiaoGe.options["linkMiaoYingHope"]`，默认开启，未设置或为 1 均开启，仅为 0 时关闭）；
+   - **一键同步按钮**: 提供 `[同步基础列表配装]` 按钮，一键扫描当前角色专属基础配装并批量写入心愿单；
+   - **快捷入口按钮**: 提供 `[打开喵影配装]` 按钮，方便玩家快速呼出喵影的配装方案管理面板。
+
 ---
 
 ## 4. 尚未解决的隐患与持续监控项
