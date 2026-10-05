@@ -927,6 +927,21 @@ function RaidMap.CreateUI()
     local frameName = "BG.RaidMapFrame"
     local f = CreateFrame("Frame", frameName, UIParent, "BackdropTemplate")
 
+    -- 注册 ESC 键一键关闭支持 (UISpecialFrames)
+    _G[frameName] = f
+    if UISpecialFrames then
+        local found = false
+        for _, name in ipairs(UISpecialFrames) do
+            if name == frameName then
+                found = true
+                break
+            end
+        end
+        if not found then
+            tinsert(UISpecialFrames, frameName)
+        end
+    end
+
     -- 动态自适应初始尺寸：默认高度设为游戏窗口高度的 75%，保持最佳视界比例
     local screenH = UIParent and UIParent:GetHeight() or 768
     local defaultH = math.max(660, math.floor(screenH * 0.75))
@@ -992,6 +1007,7 @@ function RaidMap.CreateUI()
     end)
     f:HookScript("OnHide", function(self)
         if RaidMap.StopSimulation then RaidMap.StopSimulation(self) end
+        if self.drawToolbar and self.drawToolbar:IsShown() then self.drawToolbar:Hide() end
     end)
 
     f:EnableMouseWheel(true)
@@ -1031,20 +1047,94 @@ function RaidMap.CreateUI()
     mapSubText:SetText("")
     f.mapSubText = mapSubText
 
-    -- 顶部标题
-    local title = f:CreateFontString(nil, "OVERLAY")
-    title:SetFont(BIAOGE_TEXT_FONT, 17, "OUTLINE")
-    title:SetPoint("TOPLEFT", 16, -10)
-    title:SetTextColor(1, 0.85, 0.1)
-    title:SetText("【奥杜尔】 战术站位图")
-    f.title = title
+    -- 1. 副本切换下拉菜单 (第一行左侧，预留多副本架构，目前默认单选【奥杜尔】)
+    local dropRaid = LibBG and LibBG:Create_UIDropDownMenu("BG_RaidMapRaidDropdown", f) or CreateFrame("Frame", "BG_RaidMapRaidDropdown", f, "UIDropDownMenuTemplate")
+    dropRaid:SetPoint("TOPLEFT", f, "TOPLEFT", -12, -4)
+    f.dropRaid = dropRaid
 
+    local raidList = {
+        { id = "ULDtitan", name = "奥杜尔", shortName = "ULD" },
+        -- 后续预留: { id = "TOCtitan", name = "十字军试炼", shortName = "TOC" },
+        -- 后续预留: { id = "ICCtitan", name = "冰冠堡垒", shortName = "ICC" },
+    }
+    f.currentRaidID = "ULDtitan"
+
+    local function InitRaidMenu(self, level)
+        for _, r in ipairs(raidList) do
+            local info = LibBG and LibBG:UIDropDownMenu_CreateInfo() or UIDropDownMenu_CreateInfo()
+            info.text = r.name
+            info.value = r.id
+            info.checked = (f.currentRaidID == r.id)
+            info.func = function()
+                f.currentRaidID = r.id
+                if LibBG then LibBG:UIDropDownMenu_SetText(dropRaid, r.name) else UIDropDownMenu_SetText(dropRaid, r.name) end
+            end
+            if LibBG then LibBG:UIDropDownMenu_AddButton(info, level) else UIDropDownMenu_AddButton(info, level) end
+        end
+    end
+
+    if LibBG and LibBG.UIDropDownMenu_Initialize then
+        LibBG:UIDropDownMenu_Initialize(dropRaid, InitRaidMenu)
+        LibBG:UIDropDownMenu_SetWidth(dropRaid, 85)
+        LibBG:UIDropDownMenu_SetText(dropRaid, "奥杜尔")
+    else
+        UIDropDownMenu_Initialize(dropRaid, InitRaidMenu)
+        UIDropDownMenu_SetWidth(dropRaid, 85)
+        UIDropDownMenu_SetText(dropRaid, "奥杜尔")
+    end
+    if BG.dropDownToggle then BG.dropDownToggle(dropRaid) end
+
+    -- 2. BOSS 模板切换下拉菜单 (移至第一行，紧随副本选择器之后)
+    local dropBoss = LibBG and LibBG:Create_UIDropDownMenu("BG_RaidMapBossDropdown", f) or CreateFrame("Frame", "BG_RaidMapBossDropdown", f, "UIDropDownMenuTemplate")
+    dropBoss:SetPoint("LEFT", dropRaid, "RIGHT", -16, 0)
+    f.dropBoss = dropBoss
+
+    local function InitBossMenu(self, level)
+        local bosses = RaidMap.GetAllBosses()
+        for _, b in ipairs(bosses) do
+            local info = LibBG and LibBG:UIDropDownMenu_CreateInfo() or UIDropDownMenu_CreateInfo()
+            info.text = b.name
+            info.value = b.id
+            info.checked = (currentBossID == b.id)
+            info.func = function()
+                currentBossID = b.id
+                if LibBG then LibBG:UIDropDownMenu_SetText(dropBoss, b.name) else UIDropDownMenu_SetText(dropBoss, b.name) end
+                RaidMap.LoadBossTacticalPreset(b.id, 1)
+            end
+            if LibBG then LibBG:UIDropDownMenu_AddButton(info, level) else UIDropDownMenu_AddButton(info, level) end
+        end
+    end
+
+    if LibBG and LibBG.UIDropDownMenu_Initialize then
+        LibBG:UIDropDownMenu_Initialize(dropBoss, InitBossMenu)
+        LibBG:UIDropDownMenu_SetWidth(dropBoss, 125)
+    else
+        UIDropDownMenu_Initialize(dropBoss, InitBossMenu)
+        UIDropDownMenu_SetWidth(dropBoss, 125)
+    end
+    if BG.dropDownToggle then BG.dropDownToggle(dropBoss) end
+
+    local curB = RaidMap.GetBoss(currentBossID)
+    local curName = curB and curB.name or "拆解者 XT-002"
+    if LibBG and LibBG.UIDropDownMenu_SetText then
+        LibBG:UIDropDownMenu_SetText(dropBoss, curName)
+    else
+        UIDropDownMenu_SetText(dropBoss, curName)
+    end
+
+    -- 3. 专属站位提示 (第一行挂载在首领下拉框右侧)
     local selfNotice = f:CreateFontString(nil, "OVERLAY")
     selfNotice:SetFont(BIAOGE_TEXT_FONT, 13, "OUTLINE")
-    selfNotice:SetPoint("LEFT", title, "RIGHT", 14, 0)
+    selfNotice:SetPoint("LEFT", dropBoss, "RIGHT", -2, 0)
     selfNotice:SetTextColor(0.2, 1, 0.4)
     selfNotice:SetText("")
     f.selfNotice = selfNotice
+
+    -- 虚拟 title 对象，向后兼容保留接口
+    local title = f:CreateFontString(nil, "OVERLAY")
+    title:SetFont(BIAOGE_TEXT_FONT, 12, "OUTLINE")
+    title:Hide()
+    f.title = title
 
     -- 右上角操作区：直接关闭与恢复默认大小 (已按规范删除左侧最小化按钮，点击 X 直接关闭)
     local btnClose = CreateFrame("Button", nil, f, "UIPanelCloseButton")
@@ -1086,57 +1176,16 @@ function RaidMap.CreateUI()
     btnResetSize:SetScript("OnLeave", GameTooltip_Hide)
     f.btnResetSize = btnResetSize
 
-    -- 顶部控制栏 (Top Controls)
+    -- 顶部控制栏 (Top Controls) - 第二行操作栏
     local topControls = CreateFrame("Frame", nil, f)
     topControls:SetPoint("TOPLEFT", 14, -34)
     topControls:SetPoint("TOPRIGHT", -14, -34)
     topControls:SetHeight(28)
     f.topControls = topControls
 
-    -- 1. BOSS 模板切换下拉菜单
-    local dropBoss = LibBG and LibBG:Create_UIDropDownMenu("BG_RaidMapBossDropdown", topControls) or CreateFrame("Frame", "BG_RaidMapBossDropdown", topControls, "UIDropDownMenuTemplate")
-    dropBoss:SetPoint("LEFT", -14, 0)
-    f.dropBoss = dropBoss
-
-    local function InitBossMenu(self, level)
-        local bosses = RaidMap.GetAllBosses()
-        for _, b in ipairs(bosses) do
-            local info = LibBG and LibBG:UIDropDownMenu_CreateInfo() or UIDropDownMenu_CreateInfo()
-            info.text = b.name
-            info.value = b.id
-            info.checked = (currentBossID == b.id)
-            info.func = function()
-                currentBossID = b.id
-                if LibBG then LibBG:UIDropDownMenu_SetText(dropBoss, b.name) else UIDropDownMenu_SetText(dropBoss, b.name) end
-                RaidMap.LoadBossTacticalPreset(b.id, 1)
-            end
-            if LibBG then LibBG:UIDropDownMenu_AddButton(info, level) else UIDropDownMenu_AddButton(info, level) end
-        end
-    end
-
-    if LibBG and LibBG.UIDropDownMenu_Initialize then
-        LibBG:UIDropDownMenu_Initialize(dropBoss, InitBossMenu)
-        LibBG:UIDropDownMenu_SetWidth(dropBoss, 135)
-    else
-        UIDropDownMenu_Initialize(dropBoss, InitBossMenu)
-        UIDropDownMenu_SetWidth(dropBoss, 135)
-    end
-
-    if BG.dropDownToggle then
-        BG.dropDownToggle(dropBoss)
-    end
-
-    local curB = RaidMap.GetBoss(currentBossID)
-    local curName = curB and curB.name or "拆解者 XT-002"
-    if LibBG and LibBG.UIDropDownMenu_SetText then
-        LibBG:UIDropDownMenu_SetText(dropBoss, curName)
-    else
-        UIDropDownMenu_SetText(dropBoss, curName)
-    end
-
     -- 2. 接收受令模式专属状态栏 (纯净接收端展示：零广播、零通报、零解锁锁定、零修改)
     local receiverBadge = CreateFrame("Frame", nil, topControls)
-    receiverBadge:SetPoint("LEFT", dropBoss, "RIGHT", 8, 0)
+    receiverBadge:SetPoint("LEFT", 0, 0)
     receiverBadge:SetPoint("RIGHT", 0, 0)
     receiverBadge:SetHeight(28)
     receiverBadge:Hide()
@@ -1183,7 +1232,7 @@ function RaidMap.CreateUI()
 
     -- 3. 本地查阅模式防误触状态条 (仅在团长主动点击【锁定】时使用)
     local viewBadge = CreateFrame("Frame", nil, topControls)
-    viewBadge:SetPoint("LEFT", dropBoss, "RIGHT", 8, 0)
+    viewBadge:SetPoint("LEFT", 0, 0)
     viewBadge:SetSize(360, 26)
     viewBadge:Hide()
     f.viewBadge = viewBadge
@@ -1213,14 +1262,14 @@ function RaidMap.CreateUI()
 
     -- 3. 编辑工具栏 (编辑模式下显示)
     local editControls = CreateFrame("Frame", nil, topControls)
-    editControls:SetPoint("LEFT", dropBoss, "RIGHT", 8, 0)
+    editControls:SetPoint("LEFT", 0, 0)
     editControls:SetPoint("RIGHT", -230, 0)
     editControls:SetHeight(28)
     f.editControls = editControls
 
     -- 3.1 同步团队按钮
     local btnAuto = BG.CreateButton(editControls)
-    btnAuto:SetSize(92, 24)
+    btnAuto:SetSize(84, 24)
     btnAuto:SetPoint("LEFT", 0, 0)
     btnAuto:SetText(BG.STC_b1("同步团队"))
     btnAuto:SetScript("OnClick", function()
@@ -1238,7 +1287,7 @@ function RaidMap.CreateUI()
 
     -- 3.2 恢复默认站位按钮
     local btnReset = BG.CreateButton(editControls)
-    btnReset:SetSize(86, 24)
+    btnReset:SetSize(80, 24)
     btnReset:SetPoint("LEFT", btnAuto, "RIGHT", 4, 0)
     btnReset:SetText(BG.STC_w1("恢复默认"))
     btnReset:SetScript("OnClick", function()
@@ -1260,9 +1309,9 @@ function RaidMap.CreateUI()
 
     -- 3.3 一键全团广播 (SendMap)
     local btnSend = BG.CreateButton(editControls)
-    btnSend:SetSize(86, 24)
+    btnSend:SetSize(72, 24)
     btnSend:SetPoint("LEFT", btnReset, "RIGHT", 4, 0)
-    btnSend:SetText(BG.STC_g1("广播全团"))
+    btnSend:SetText(BG.STC_g1("|TInterface\\Common\\VoiceChat-Speaker:13:13:0:0|t 广播"))
     btnSend:SetScript("OnClick", function()
         RaidMap.BroadcastCurrentMap()
         BG.PlaySound(1)
@@ -1278,7 +1327,7 @@ function RaidMap.CreateUI()
 
     -- 3.4 快捷主动锁定按钮
     local btnLock = BG.CreateButton(editControls)
-    btnLock:SetSize(62, 24)
+    btnLock:SetSize(58, 24)
     btnLock:SetPoint("LEFT", btnSend, "RIGHT", 4, 0)
     btnLock:SetText(BG.STC_y1("|TInterface\\AddOns\\BGLite_Plus\\Media\\lock.png:13:13:0:0|t 锁定"))
     btnLock:SetScript("OnClick", function()
@@ -1297,9 +1346,9 @@ function RaidMap.CreateUI()
 
     -- 3.5 简易战术画板/标注工具箱入口按钮
     local btnDraw = BG.CreateButton(editControls)
-    btnDraw:SetSize(86, 24)
+    btnDraw:SetSize(76, 24)
     btnDraw:SetPoint("LEFT", btnLock, "RIGHT", 4, 0)
-    btnDraw:SetText(BG.STC_b1("|TInterface\\TargetingFrame\\UI-RaidTargetingIcon_8:13:13:0:0|t 战术画板"))
+    btnDraw:SetText(BG.STC_b1("战术画板"))
     btnDraw:SetScript("OnClick", function()
         local bar = f.drawToolbar or RaidMap.CreateDrawToolbar(f)
         if bar:IsShown() then
@@ -2779,7 +2828,15 @@ function RaidMap.LoadBossTacticalPreset(bossID, phaseIndex, forceMode)
 
     local fbName = bossData.fbName or "奥杜尔"
     local bossName = bossData.name or "首领"
-    f.title:SetText(string.format("【%s】 %s", fbName, bossName))
+    if f.title then f.title:SetText(string.format("【%s】 %s", fbName, bossName)) end
+
+    if f.dropRaid then
+        if LibBG and LibBG.UIDropDownMenu_SetText then
+            LibBG:UIDropDownMenu_SetText(f.dropRaid, fbName)
+        else
+            UIDropDownMenu_SetText(f.dropRaid, fbName)
+        end
+    end
 
     if f.dropBoss then
         if LibBG and LibBG.UIDropDownMenu_SetText then
@@ -3431,7 +3488,24 @@ function RaidMap.RenderByCode(code, notSave, sender)
     RaidMap.currentBossID = bossIndex
     RaidMap.currentPhase = targetPhase
 
-    f.title:SetText(string.format("【%s】 %s%s%s", FB or "团本", bossName or "战术站位", phaseNameSuffix, fmtNotice))
+    if f.title then
+        f.title:SetText(string.format("【%s】 %s%s%s", FB or "团本", bossName or "战术站位", phaseNameSuffix, fmtNotice))
+    end
+    if f.dropRaid then
+        local rName = (FB == "ULDtitan" and "奥杜尔") or FB or "团本"
+        if LibBG and LibBG.UIDropDownMenu_SetText then
+            LibBG:UIDropDownMenu_SetText(f.dropRaid, rName)
+        else
+            UIDropDownMenu_SetText(f.dropRaid, rName)
+        end
+    end
+    if f.dropBoss then
+        if LibBG and LibBG.UIDropDownMenu_SetText then
+            LibBG:UIDropDownMenu_SetText(f.dropBoss, bossName or "首领")
+        else
+            UIDropDownMenu_SetText(f.dropBoss, bossName or "首领")
+        end
+    end
     f.selfNotice:SetText(string.format("(推送者: %s)", sender or "团长"))
 
     -- 场地左上角战术一句话核心概括 (绿字呈现)
