@@ -9,7 +9,25 @@
 local AddonName, ns = ...
 
 local function FixAndPatchUlduarLoot()
-    if not BG or not BG.IsTitan then return end
+    if not BG then return end
+
+    -- ==========================================================================
+    -- 0. 物品堆叠与自动合并规则修补 (确保符文宝珠与橙锤碎片在任何模式下均自动合并)
+    -- ==========================================================================
+    if BG.Loot then
+        if BG.Loot.noStackItems then
+            BG.Loot.noStackItems[45087] = nil -- 符文宝珠从不堆叠表中彻底移除
+            BG.Loot.noStackItems[47556] = nil -- 十字军宝珠从不堆叠表中彻底移除
+        end
+        if BG.Loot.stackItems then
+            BG.Loot.stackItems[45087] = true   -- 符文宝珠
+            BG.Loot.stackItems[270187] = true  -- 瓦兰奈尔的碎片 (时光服ID)
+            BG.Loot.stackItems[45038] = true   -- 瓦兰奈尔的碎片 (经典服ID)
+            BG.Loot.stackItems[47556] = true   -- 十字军宝珠
+        end
+    end
+
+    if not BG.IsTitan then return end
 
     local FB = "ULDtitan"
     local hard = "N"
@@ -76,7 +94,6 @@ local function FixAndPatchUlduarLoot()
         45548, -- 沉睡者束带 (旧版小怪)
         45549, -- 混乱之箍 (旧版小怪)
         45605, -- 达斯卡尔之牙 (旧版小怪)
-        45506, -- 切碎者
     }
 
     for b = 1, 15 do
@@ -115,11 +132,11 @@ local function FixAndPatchUlduarLoot()
     end
 
     -- ==========================================================================
-    -- 3. 补齐 boss15 杂项中遗漏的关键任务道具 (四大守护者徽记)
+    -- 3. 补齐 boss15 杂项中遗漏的关键任务道具与碎片
     -- ==========================================================================
-    -- 45784 托里姆的徽记, 45787 米米尔隆的徽记
+    -- 45784 托里姆的徽记, 45787 米米尔隆的徽记, 45038 瓦兰奈尔的碎片(原版), 45506 档案馆数据圆盘
     if lootTable.boss15 then
-        SafeAppend(lootTable.boss15, { 45784, 45787 })
+        SafeAppend(lootTable.boss15, { 45784, 45787, 45038, 45506 })
     end
 end
 
