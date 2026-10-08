@@ -637,7 +637,8 @@ function BG.RoleOverviewUI()
             }
         elseif BG.IsTitan then
             BG.FBCDall_table = {
-                -- 泰坦服当前核心团本
+                -- 泰坦服当前核心团本 (奥杜尔排在最左边第一位)
+                { name = "25ULD", name2 = L["奥杜尔"], shortName = "ULD", color = "00BFFF", fbId = 603, num = 25, type = "fb" },
                 { name = "SWtitan", name2 = L["太阳井"], shortName = "SW", color = "00BFFF", fbId = 580, type = "fb" },
                 { name = "ZAtitan", name2 = L["祖阿曼"], shortName = "ZA", color = "00BFFF", fbId = 568, type = "fb" },
                 { name = "TOCtitan", name2 = L["十字军"], shortName = "TOC", color = "00BFFF", fbId = 649, type = "fb" },
@@ -655,7 +656,6 @@ function BG.RoleOverviewUI()
                 { name = "Kazaketitan", name2 = L["卡扎克(世界)"], shortName = "卡扎克", color = "99ccff", fbId = 117, type = "fb" },
 
                 -- WLK 经典/后续扩展团本
-                { name = "25ULD", name2 = L["奥杜尔"], shortName = "ULD", color = "00BFFF", fbId = 603, num = 25, type = "fb" },
                 { name = "25ICC", name2 = L["冰冠堡垒"], shortName = "ICC", color = "9370DB", fbId = 631, num = 25, type = "fb" },
                 { name = "25RS", name2 = L["红玉圣殿"], shortName = "RS", color = "FF4500", fbId = 724, num = 25, type = "fb" },
                 { name = "25OL", name2 = L["黑龙MM"], shortName = "黑龙", color = "FFA500", fbId = 249, num = 25, type = "fb" },

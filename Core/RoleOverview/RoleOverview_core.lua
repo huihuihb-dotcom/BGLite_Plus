@@ -2047,7 +2047,7 @@ function BG.SetFBCD(self, position, click, refresh)
                         t_paizi:SetText(UNKNOWN)
                     end
                 elseif id == "xp" then
-                    local fullLvl = BG.fullLevel_RoleOverview or BG.fullLevel or (GetMaxPlayerLevel and GetMaxPlayerLevel()) or 80
+                    local fullLvl = (GetMaxPlayerLevel and GetMaxPlayerLevel()) or BG.fullLevel or 80
                     if level and level >= fullLvl then
                         t_paizi:SetText(L["满级"] .. (isNewUI and "" or " " .. AddTexture(vv.tex)))
                         t_paizi:SetTextColor(0, 1, 0)

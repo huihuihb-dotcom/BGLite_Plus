@@ -465,6 +465,20 @@
 
 ---
 
+### 3.14 角色总览表头副本列排序与双倍经验满级判定修复 (2026-10-08)
+1. **表头副本列横向排序机制**:
+   - **机制溯源**: 原版插件只针对“角色行（玩家列表）”设计了自由鼠标拖拽自定义排序（`RoleOverviewSort.lua`），对顶层表头的“副本列”**未设计 UI 拖拽排序逻辑**。表头副本列的横向顺序 100% 由 `BG.FBCDall_table` 数组的静态声明顺序决定；
+   - **奥杜尔置顶**: 在时光服（`BG.IsTitan`）环境下，奥杜尔（`25ULD`）此前被声明在末尾（第 16 位），导致显示在最右侧。已在 `Core/RoleOverview/RoleOverview.lua` 中将其直接移至 `BG.FBCDall_table` 第一位，当前开荒版本自动排在最左侧首列。
+2. **小号双倍经验错误显示“满级”根因与修复**:
+   - **真实根因**: 在 `Core/RoleOverview/RoleOverview_core.lua` 第 2050 行判断经验是否满级时，原代码为：
+     `local fullLvl = BG.fullLevel_RoleOverview or BG.fullLevel or (GetMaxPlayerLevel and GetMaxPlayerLevel()) or 80`；
+     由于 `BG.fullLevel_RoleOverview` 在上游是用来过滤“角色是否展示在总览中的最低门槛等级”（WLK/Titan 设定为 60），因短路求值优先取到了 60。导致凡是 >= 60 级未满级角色（如 66 级、67 级）均满足 `level >= fullLvl`，被错误渲染为绿色的【满级 XP】；
+   - **修复方案**: 彻底剥离展示门槛变量，修正为真实满级判定：
+     `local fullLvl = (GetMaxPlayerLevel and GetMaxPlayerLevel()) or BG.fullLevel or 80`；
+     未满 80 级角色恢复正常显示其双倍经验具体数值或百分比。
+
+---
+
 ## 4. 尚未解决的隐患与持续监控项
 
 1. **掉落极端并发与跨区重试压力**:
