@@ -39,6 +39,7 @@ Core\RaidTool\RaidMap_Data\General.lua
 Core\RaidTool\RaidMap_Data\ULD.lua
 Core\RaidTool\RaidMap.lua
 Core\RaidTool\RaidMock.lua
+Core\RaidTool\AlgalonStarHelper.lua
 
 # --- 业务功能模块 (Module) ---
 Core\Module\FilterClassItem.lua

@@ -845,11 +845,16 @@ function RaidMap.CreateToolEntry(parent)
     end)
     cbFloating:SetScript("OnLeave", GameTooltip_Hide)
 
-    -- 辅助说明提示文本
-    local tipText = entry:CreateFontString(nil, "OVERLAY")
-    tipText:SetFont(BIAOGE_TEXT_FONT, 12, "OUTLINE")
-    tipText:SetPoint("LEFT", cbFloating.text, "RIGHT", 12, 0)
-    tipText:SetText(BG.STC_dis("(勾选后屏幕常驻悬浮按钮，可按住拖拽移动，点击随时呼出站位图)"))
+    -- 挂载观星修星助手 (位于站位图开关右侧，支持事件硬截断)
+    if ns.AlgalonStar and ns.AlgalonStar.CreateToolControls then
+        ns.AlgalonStar.CreateToolControls(entry, cbFloating)
+    else
+        -- 辅助说明提示文本 (降级)
+        local tipText = entry:CreateFontString(nil, "OVERLAY")
+        tipText:SetFont(BIAOGE_TEXT_FONT, 12, "OUTLINE")
+        tipText:SetPoint("LEFT", cbFloating.text, "RIGHT", 12, 0)
+        tipText:SetText(BG.STC_dis("(勾选后屏幕常驻悬浮按钮，可按住拖拽移动，点击随时呼出站位图)"))
+    end
 
     return entry
 end

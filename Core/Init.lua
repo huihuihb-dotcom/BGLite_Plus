@@ -205,6 +205,9 @@ local function InitPlusUI()
     if ns.InitRaidCDDB then
         ns.InitRaidCDDB()
     end
+    if ns.InitAlgalonStarDB then
+        ns.InitAlgalonStarDB()
+    end
     if ns.InitRoleOverviewOptions then
         ns.InitRoleOverviewOptions()
     end
@@ -492,6 +495,11 @@ local function InitPlusUI()
     end
     if ns.RaidMap and ns.RaidMap.CreateToolEntry and BG.RaidToolMainFrame then
         securecall(ns.RaidMap.CreateToolEntry, BG.RaidToolMainFrame)
+    end
+
+    -- 4.6.3 观星者修星助手模块初始化
+    if ns.InitAlgalonStarModule then
+        securecall(ns.InitAlgalonStarModule)
     end
 
     -- 4.7 打工人收益看板模块初始化 (WorkerReport)
