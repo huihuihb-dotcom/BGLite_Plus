@@ -29,6 +29,9 @@ local BIG_BANG_SPELLS = {
     [64443] = true,
 }
 
+local BIGBANG_BASE_COOLDOWN = 90.0   -- 大爆炸周期约 90 秒
+local PHASE2_HP_THRESHOLD = 0.20     -- 奥尔加隆血量低于 20% 进入 P2 (转阶段)
+
 -- 团队标记固定映射：1号骷髅(8), 2号红叉(7), 3号方块(6), 4号三角(4)
 local MARK_LIST = { 8, 7, 6, 4 }
 local MARK_NAMES = {
@@ -131,9 +134,13 @@ end
 --------------------------------------------------------------------------------
 -- 2. 状态变量与数据结构
 --------------------------------------------------------------------------------
-local activeStars = {}       -- [guid] = starData
-local starCounter = 0        -- 顺位注册计数器
-local bigBangCastEnd = 0     -- 当前大爆炸施法结束时间戳
+local activeStars = {}            -- [guid] = starData
+local starCounter = 0             -- 顺位注册计数器
+local bigBangCastEnd = 0          -- 当前大爆炸施法结束时间戳 (8s 施法)
+local bigBangNextEstimate = 0     -- 下次大爆炸预计发生的时间戳
+local encounterStartTime = 0      -- 开战时间戳
+local isPhase2 = false            -- 是否进入 P2 阶段 (<= 20% HP)
+local algalonGUID = nil           -- 奥尔加隆 GUID
 local isCombatRegistered = false
 local isTesting = false
 local testTicker = nil
@@ -143,7 +150,7 @@ local eventFrame = CreateFrame("Frame", "BG_AlgalonStarEventFrame", UIParent)
 AlgalonStar.eventFrame = eventFrame
 
 --------------------------------------------------------------------------------
--- 3. 辅助解析函数
+-- 3. 辅助解析与权限函数
 --------------------------------------------------------------------------------
 local function GetNpcIDFromGUID(guid)
     if not guid or type(guid) ~= "string" then return nil end
@@ -206,7 +213,7 @@ function AlgalonStar.IsInUlduar()
 end
 
 --------------------------------------------------------------------------------
--- 4. 注册与数据更新核心算法
+-- 4. 注册与数据更新核心算法 (自适应与平滑掉血)
 --------------------------------------------------------------------------------
 local function RegisterStar(guid, maxHP)
     if not activeStars[guid] then
@@ -214,21 +221,28 @@ local function RegisterStar(guid, maxHP)
         local assignIndex = starCounter
         local mark = MARK_LIST[assignIndex] or 0
 
+        -- 默认基准血量：时光服 25 人约 7.56w，10 人约 3.78w。一旦姓名板出现立即用真实 maxHP 校准
+        local defaultMax = maxHP
+        if not defaultMax or defaultMax <= 0 then
+            defaultMax = (IsInRaid() and GetNumGroupMembers() > 10) and 75600 or 37800
+        end
+
         activeStars[guid] = {
             guid = guid,
             index = assignIndex,
             raidMark = mark,
-            currentHP = maxHP or 75600,
-            maxHP = maxHP or 75600,
-            dps = 0,
+            currentHP = defaultMax,
+            maxHP = defaultMax,
+            dps = defaultMax * 0.01,  -- 刚出生默认自残速率 1%/s
             dmgHistory = {},
             dots = {},
             lastTick = GetTime(),
             nameplateUnit = nil,
             lastMarkTime = 0,
+            isDead = false,
         }
     else
-        if maxHP and maxHP > 0 and (not activeStars[guid].maxHP or activeStars[guid].maxHP <= 0) then
+        if maxHP and maxHP > 0 then
             activeStars[guid].maxHP = maxHP
         end
     end
@@ -253,7 +267,7 @@ local function AddDamageHistory(star, dmg, now)
     end
 
     local timeSpan = now - oldestTime
-    if timeSpan > 0.5 and totalDmg > 0 then
+    if timeSpan > 0.4 and totalDmg > 0 then
         star.dps = totalDmg / timeSpan
     else
         star.dps = (star.dps > 0) and star.dps or (star.maxHP * 0.01) -- 兜底自残1%/s
@@ -286,7 +300,7 @@ local function ScanNameplateDots(star, unit)
         end
     end
 
-    -- 清理已经不存在的 DoT
+    -- 清理已经自然结束或消失的 DoT
     for dotName, _ in pairs(star.dots) do
         if not seenDots[dotName] then
             star.dots[dotName] = nil
@@ -295,7 +309,108 @@ local function ScanNameplateDots(star, unit)
 end
 
 --------------------------------------------------------------------------------
--- 5. UI 界面构建 (StatusBar + DoT 图标槽 + 大爆炸预警)
+-- 5. 核心安全预测模型 (红 / 黄 / 绿 深度判定算法)
+--------------------------------------------------------------------------------
+--[[
+  【安全模型法则】
+  1. 绿色 (完美安全 / 最理想)：
+     - 大爆炸之后几秒（炸完出洞后 2s ~ 15s）才自爆的星！全团血线已抬满、减伤已就绪，最稳！
+     - 或者在大爆炸读条中（已进洞）在暮光领域免伤期提前炸掉。
+  2. 黄色 (需注意 / 提前留洞)：
+     - 提前在大爆炸前 5s~30s 引爆（虽能备洞，但团队会吃一次自爆AOE，需治疗覆盖）。
+     - 或者掉血极慢（大爆炸后 >15s 才爆），留洞节奏较晚。
+  3. 红色 (不安全 / 高度危险 / 撞车)：
+     - 大爆炸前夕或刚出洞瞬间爆炸（距大爆炸结束 -4s ~ +1.5s）：致命重叠减员！
+     - 濒死猝死自爆（ETA <= 5s 或 HP <= 15% 且非进洞期）：随时乱炸。
+     - 场上两颗星 ETA 相差 <= 3.5s：双星撞车连炸团灭！
+]]
+local function EvaluateStarSafety(star, now, isBigBangCasting, bigBangLeft, timeToNextBB, allStars)
+    local pct = (star.maxHP > 0) and ((star.currentHP / star.maxHP) * 100) or 100
+    local dps = (star.dps > 0) and star.dps or (star.maxHP * 0.01)
+    local eta = star.currentHP / dps
+
+    -- 检查是否与场上其它活星发生“双星连炸撞车”
+    local isMultiStarCollision = false
+    local collisionOtherMark = nil
+    for _, other in pairs(allStars) do
+        if other.guid ~= star.guid and not other.isDead and other.currentHP > 0 then
+            local otherDps = (other.dps > 0) and other.dps or (other.maxHP * 0.01)
+            local otherEta = other.currentHP / otherDps
+            if math.abs(eta - otherEta) <= 3.2 and eta <= 35.0 then
+                isMultiStarCollision = true
+                collisionOtherMark = MARK_NAMES[other.raidMark] or ("星" .. other.index)
+                break
+            end
+        end
+    end
+
+    -- A. 大爆炸正在读条中 (8 秒读条期间，全团进入黑洞躲避)
+    if isBigBangCasting then
+        -- A1. 刚进洞免伤期内炸 (自爆时间在出洞前 1.5s 以前)：全团在洞内免疫物理伤害！
+        if eta >= 1.5 and eta <= (bigBangLeft - 1.2) then
+            return "GREEN", string.format("✓进洞免伤炸 (洞内%.1fs)", eta), 0.1, 0.85, 0.3
+        end
+
+        -- A2. 出洞瞬间炸 (|eta - bigBangLeft| <= 1.5s)：刚出洞残血吃自爆，大团灭点！
+        if math.abs(eta - bigBangLeft) <= 1.5 then
+            return "RED", string.format("💥出洞瞬间炸! (危险%.1fs)", eta), 1.0, 0.2, 0.0
+        end
+
+        -- A3. 大爆炸炸完、全团出洞后 2s ~ 15s 才炸：【最完美节奏！】
+        if eta > (bigBangLeft + 1.5) and eta <= (bigBangLeft + 15.0) then
+            local delay = eta - bigBangLeft
+            return "GREEN", string.format("✓炸后安全爆 (出洞+%.1fs)", delay), 0.1, 0.85, 0.3
+        end
+
+        -- A4. 进洞前不到 1.5 秒急促爆炸：
+        if eta < 1.5 then
+            return "RED", string.format("⚡进洞前猝死! (%.1fs)", eta), 0.95, 0.1, 0.1
+        end
+
+        -- A5. 炸后延后很久 (>15s) 才炸：掉血慢
+        return "YELLOW", string.format("⚠延后较慢 (出洞+%.0fs)", eta - bigBangLeft), 0.95, 0.8, 0.1
+    end
+
+    -- B. 非大爆炸读条期间 (正常战斗阶段，依据下次大爆炸倒计时预测)
+    -- 计算相对下次大爆炸的落点差异 (diff > 0 代表大爆炸后炸，diff < 0 代表大爆炸前炸)
+    local diff = (timeToNextBB > 0) and (eta - timeToNextBB) or nil
+
+    -- B1. 双星连炸报警 (高优先级)
+    if isMultiStarCollision then
+        return "RED", string.format("💥与[%s]连炸撞车!", collisionOtherMark), 1.0, 0.25, 0.0
+    end
+
+    -- B2. 濒死猝死报警 (血量危急)
+    if eta <= 5.0 or pct <= 15 then
+        return "RED", string.format("⚡临界自爆! (%.1fs)", eta), 0.95, 0.1, 0.1
+    end
+
+    -- B3. 与下次大爆炸前夕撞车 (大爆炸前 4 秒至大爆炸开始后 1.5 秒内)：
+    if diff and (diff >= -4.0 and diff <= 1.5) then
+        return "RED", string.format("💥大爆炸撞车危险! (差%.1fs)", math.abs(diff)), 1.0, 0.3, 0.0
+    end
+
+    -- B4. 【核心灵魂：在大爆炸后几秒才炸是最完美的】 (diff 在 +2s ~ +15s)
+    if diff and (diff >= 2.0 and diff <= 15.0) then
+        return "GREEN", string.format("✓完美安全 (大爆炸后%.0fs)", diff), 0.1, 0.85, 0.3
+    end
+
+    -- B5. 提前引爆留洞 (在大爆炸前 5s ~ 30s 爆炸)：
+    if diff and (diff < -4.0 and eta >= 5.0 and eta <= 40.0) then
+        local lead = -diff
+        return "YELLOW", string.format("⚠提前留洞 (提前%.0fs爆)", lead), 0.95, 0.8, 0.1
+    end
+
+    -- B6. 掉血缓慢 / 延后过久 (不会猝死，但留洞慢)
+    if eta > 60.0 or (diff and diff > 15.0) then
+        return "YELLOW", string.format("掉血平稳 (%.0fs后)", eta), 0.2, 0.7, 0.9
+    end
+
+    return "YELLOW", string.format("自爆: %.1fs", eta), 0.9, 0.75, 0.2
+end
+
+--------------------------------------------------------------------------------
+-- 6. UI 界面构建 (StatusBar + DoT 图标槽 + 大爆炸预警)
 --------------------------------------------------------------------------------
 local mainFrame = nil
 local bars = {}
@@ -304,7 +419,7 @@ local function CreateMainUI()
     if mainFrame then return mainFrame end
 
     mainFrame = CreateFrame("Frame", "BG_AlgalonStarMainUI", UIParent, "BackdropTemplate")
-    mainFrame:SetSize(280, 168)
+    mainFrame:SetSize(310, 168)
     mainFrame:SetClampedToScreen(true)
     mainFrame:SetMovable(true)
     mainFrame:EnableMouse(true)
@@ -339,7 +454,7 @@ local function CreateMainUI()
     mainFrame:SetBackdropColor(0.05, 0.07, 0.1, 0.88)
     mainFrame:SetBackdropBorderColor(0.2, 0.6, 1, 0.7)
 
-    -- 顶部标题与大爆炸警报条
+    -- 顶部标题与大爆炸/P2警报条
     local titleBg = mainFrame:CreateTexture(nil, "BACKGROUND")
     titleBg:SetPoint("TOPLEFT", mainFrame, "TOPLEFT", 4, -4)
     titleBg:SetPoint("TOPRIGHT", mainFrame, "TOPRIGHT", -4, -4)
@@ -350,7 +465,7 @@ local function CreateMainUI()
     local titleText = mainFrame:CreateFontString(nil, "OVERLAY")
     titleText:SetFont(BIAOGE_TEXT_FONT, 12, "OUTLINE")
     titleText:SetPoint("LEFT", titleBg, "LEFT", 6, 0)
-    titleText:SetText(STC_b1("观星者") .. " 塌缩星监控")
+    titleText:SetText(STC_b1("观星者") .. " 塌缩星监控 (自适应)")
     mainFrame.titleText = titleText
 
     -- 锁定按钮
@@ -402,10 +517,10 @@ local function CreateMainUI()
         BG.PlaySound(1)
     end)
 
-    -- 4 根血条构建
+    -- 4 根血条构建 (加大宽度以清晰容纳预测状态文字)
     for i = 1, 4 do
         local bar = CreateFrame("Button", "BG_AlgalonStarBar_" .. i, mainFrame, "SecureActionButtonTemplate")
-        bar:SetSize(185, 26)
+        bar:SetSize(215, 26)
         bar:SetPoint("TOPLEFT", mainFrame, "TOPLEFT", 8, -32 - (i - 1) * 32)
         bar:RegisterForClicks("AnyUp")
 
@@ -434,13 +549,13 @@ local function CreateMainUI()
         label:SetPoint("LEFT", markIcon, "RIGHT", 4, 0)
         bar.label = label
 
-        -- 自爆倒计时文本
+        -- 安全预测与倒计时文本
         local timerText = sb:CreateFontString(nil, "OVERLAY")
-        timerText:SetFont(BIAOGE_TEXT_FONT, 11, "OUTLINE")
+        timerText:SetFont(BIAOGE_TEXT_FONT, 10, "OUTLINE")
         timerText:SetPoint("RIGHT", bar, "RIGHT", -4, 0)
         bar.timerText = timerText
 
-        -- 边框高亮材质 (大爆炸冲突时闪烁)
+        -- 边框高亮材质 (危险撞车时闪烁)
         local glow = bar:CreateTexture(nil, "OVERLAY")
         glow:SetPoint("TOPLEFT", -3, 3)
         glow:SetPoint("BOTTOMRIGHT", 3, -3)
@@ -449,7 +564,7 @@ local function CreateMainUI()
         glow:SetAlpha(0)
         bar.glow = glow
 
-        -- 右侧 DoT 图标槽 (3个槽位，尺寸18x18)
+        -- 右侧 DoT 图标槽 (3个槽位，尺寸 20x20)
         local dotsContainer = CreateFrame("Frame", nil, bar)
         dotsContainer:SetSize(72, 22)
         dotsContainer:SetPoint("LEFT", bar, "RIGHT", 6, 0)
@@ -500,25 +615,43 @@ local function CreateMainUI()
 end
 
 --------------------------------------------------------------------------------
--- 6. UI 实时刷新与渲染逻辑
+-- 7. UI 实时刷新与渲染逻辑
 --------------------------------------------------------------------------------
 local function RefreshUI()
     if not mainFrame or not mainFrame:IsShown() then return end
 
     local now = GetTime()
+
+    -- 1. P2 阶段优先展示
+    if isPhase2 then
+        mainFrame.titleBg:SetColorTexture(0.1, 0.5, 0.2, 0.95)
+        mainFrame.titleText:SetText(STC_g1("【P2 阶段】") .. " 塌缩星消失，无大爆炸 ─ 全力 RUSH Boss！")
+        for i = 1, 4 do
+            if bars[i] then bars[i]:Hide() end
+        end
+        return
+    end
+
+    -- 2. 大爆炸读条与预警倒计时
     local bigBangLeft = math.max(0, bigBangCastEnd - now)
     local isBigBangCasting = (bigBangLeft > 0)
+    local timeToNextBB = (bigBangNextEstimate > 0) and math.max(0, bigBangNextEstimate - now) or 0
 
-    -- 顶部标题条状态更新
     if isBigBangCasting then
-        mainFrame.titleBg:SetColorTexture(0.6, 0.15, 0.05, 0.95)
-        mainFrame.titleText:SetText(string.format(STC_r1("【大爆炸读条中】") .. " 剩余: " .. STC_y1("%.1fs") .. " (注意减伤/进洞)", bigBangLeft))
+        mainFrame.titleBg:SetColorTexture(0.65, 0.15, 0.05, 0.95)
+        mainFrame.titleText:SetText(string.format(STC_r1("【大爆炸！进黑洞！】") .. " 剩余: " .. STC_y1("%.1fs"), bigBangLeft))
+    elseif timeToNextBB > 0 and timeToNextBB <= 15.0 then
+        mainFrame.titleBg:SetColorTexture(0.55, 0.35, 0.05, 0.92)
+        mainFrame.titleText:SetText(string.format(STC_y1("【大爆炸临近】") .. " 约 " .. STC_y1("%.0fs") .. " 后施放 (检查留洞/停手)", timeToNextBB))
+    elseif timeToNextBB > 0 then
+        mainFrame.titleBg:SetColorTexture(0.1, 0.18, 0.28, 0.8)
+        mainFrame.titleText:SetText(string.format(STC_b1("观星者") .. " 下次大爆炸约: " .. STC_w1("%.0fs"), timeToNextBB))
     else
         mainFrame.titleBg:SetColorTexture(0.1, 0.18, 0.28, 0.8)
         mainFrame.titleText:SetText(STC_b1("观星者") .. " 塌缩星监控 (自适应)")
     end
 
-    -- 提取星体并排序
+    -- 3. 提取活星并按血量排序
     local starList = {}
     for _, star in pairs(activeStars) do
         if not star.isDead and star.currentHP > 0 then
@@ -526,11 +659,12 @@ local function RefreshUI()
         end
     end
 
-    -- 默认按剩余血量升序排列 (血最少、最危险的排在最前)
+    -- 默认按剩余血量升序排列 (血最少、最优先的排在最前)
     table.sort(starList, function(a, b)
         return a.currentHP < b.currentHP
     end)
 
+    -- 4. 逐条渲染
     for i = 1, 4 do
         local bar = bars[i]
         local star = starList[i]
@@ -549,49 +683,36 @@ local function RefreshUI()
             end
 
             -- 血量百分比与数值
-            local pct = (star.currentHP / (star.maxHP > 0 and star.maxHP or 75600)) * 100
+            local pct = (star.maxHP > 0) and ((star.currentHP / star.maxHP) * 100) or 100
             local markName = MARK_NAMES[star.raidMark] or ("星" .. star.index)
-            bar.label:SetText(string.format("%s %.1f%% (%.1fk)", markName, pct, star.currentHP / 1000))
+            bar.label:SetText(string.format("%s %.1f%%", markName, pct))
 
-            -- 掉血倒计时 ETA 与冲突判定
-            local dps = (star.dps > 0) and star.dps or (star.maxHP * 0.01)
-            local eta = star.currentHP / dps
+            -- 核心预测算法判定 (红 / 黄 / 绿)
+            local safetyLevel, statusText, r, g, b = EvaluateStarSafety(star, now, isBigBangCasting, bigBangLeft, timeToNextBB, starList)
 
-            local isCollision = isBigBangCasting and (math.abs(eta - bigBangLeft) <= 2.5)
+            bar.sb:SetStatusBarColor(r, g, b)
+            bar.timerText:SetText(statusText)
 
-            if isCollision then
-                bar.sb:SetStatusBarColor(1, 0.45, 0) -- 亮橙色警报
-                bar.timerText:SetText(STC_r1(string.format("自爆: %.1fs (撞车危险!)", eta)))
-                bar.glow:SetVertexColor(1, 0.3, 0)
+            -- 红色不安全时触发边框警报与音效
+            if safetyLevel == "RED" then
+                bar.glow:SetVertexColor(1, 0.2, 0)
                 bar.glow:SetAlpha(0.9)
 
-                -- 播放警报音效 (防刷屏节流 4 秒一次)
+                -- 播放音效节流 (4秒一次)
                 if BiaoGe and BiaoGe.AlgalonStar and BiaoGe.AlgalonStar.soundAlert then
                     if (now - lastAlertSoundTime) > 4.0 then
                         lastAlertSoundTime = now
                         PlaySoundFile("Sound\\Interface\\RaidWarning.ogg", "Master")
                     end
                 end
-            elseif pct <= 20 or eta <= 5.0 then
-                bar.sb:SetStatusBarColor(0.9, 0.15, 0.15) -- 濒死自爆深红
-                bar.timerText:SetText(STC_r1(string.format("即将自爆: %.1fs", eta)))
-                bar.glow:SetVertexColor(1, 0, 0)
-                bar.glow:SetAlpha(0.5)
-            elseif isBigBangCasting and (eta < bigBangLeft - 2.5) then
-                bar.sb:SetStatusBarColor(0.2, 0.85, 0.3) -- 绿色安全早引爆
-                bar.timerText:SetText(STC_g1(string.format("自爆: %.1fs (安全提早)", eta)))
-                bar.glow:SetAlpha(0)
+            elseif safetyLevel == "YELLOW" then
+                bar.glow:SetVertexColor(1, 0.8, 0)
+                bar.glow:SetAlpha(0.3)
             else
-                bar.sb:SetStatusBarColor(0, 0.7, 1) -- 正常青蓝
-                if eta < 60 then
-                    bar.timerText:SetText(string.format("自爆: %.1fs", eta))
-                else
-                    bar.timerText:SetText("血量平稳")
-                end
                 bar.glow:SetAlpha(0)
             end
 
-            -- 点击目标宏设置 (非战斗状态或具有有效目标时绑定)
+            -- 点击目标宏设置
             if not InCombatLockdown() then
                 if star.nameplateUnit then
                     bar:SetAttribute("type", "target")
@@ -655,16 +776,40 @@ local function RefreshUI()
 end
 
 --------------------------------------------------------------------------------
--- 7. 战斗与事件监听 (支持开关硬截断)
+-- 8. 战斗与事件监听 (CLEU 优化 + P2 判定 + 截断防线)
 --------------------------------------------------------------------------------
+local function CheckP2Status(bossHP, bossMax)
+    if isPhase2 then return end
+    if bossHP and bossMax and bossMax > 0 and (bossHP / bossMax) <= PHASE2_HP_THRESHOLD then
+        isPhase2 = true
+        bigBangCastEnd = 0
+        bigBangNextEstimate = 0
+        wipe(activeStars)
+        starCounter = 0
+        DEFAULT_CHAT_FRAME:AddMessage(STC_g1("[BGLite 观星助手]") .. " ✔ 观星者血量 ≤ 20%，正式进入 P2 阶段！塌缩星消失，无大爆炸，全力击杀！")
+        RefreshUI()
+    end
+end
+
 local function OnCombatLogEvent(...)
     local timestamp, subEvent, _, sourceGUID, sourceName, _, _, destGUID, destName, _, _, param12, param13, param14, param15 = GetCombatLogArgs(...)
 
-    -- 1. 监控奥尔加隆大爆炸施法
+    -- 记录奥尔加隆 GUID
+    if not algalonGUID then
+        if destGUID and GetNpcIDFromGUID(destGUID) == ALGALON_NPC_ID then
+            algalonGUID = destGUID
+        elseif sourceGUID and GetNpcIDFromGUID(sourceGUID) == ALGALON_NPC_ID then
+            algalonGUID = sourceGUID
+        end
+    end
+
+    -- 1. 监控奥尔加隆大爆炸施法 (SpellID: 64584/64443)
     if subEvent == "SPELL_CAST_START" then
         local spellID = param12
-        if spellID and BIG_BANG_SPELLS[spellID] then
-            bigBangCastEnd = GetTime() + 8.0
+        if spellID and BIG_BANG_SPELLS[spellID] and not isPhase2 then
+            local now = GetTime()
+            bigBangCastEnd = now + 8.0
+            bigBangNextEstimate = now + 8.0 + BIGBANG_BASE_COOLDOWN
             if mainFrame and not mainFrame:IsShown() then
                 mainFrame:Show()
             end
@@ -672,7 +817,17 @@ local function OnCombatLogEvent(...)
         end
     end
 
-    -- 2. 塌缩星伤害扣减与掉血跟踪
+    -- 2. 检查奥尔加隆血量是否触发 P2
+    if destGUID and destGUID == algalonGUID and not isPhase2 then
+        local hp = UnitHealth("boss1")
+        local maxHP = UnitHealthMax("boss1")
+        CheckP2Status(hp, maxHP)
+    end
+
+    -- P2 阶段塌缩星完全不处理
+    if isPhase2 then return end
+
+    -- 3. 塌缩星精准伤害扣减与掉血跟踪
     local npcID = GetNpcIDFromGUID(destGUID)
     if npcID == STAR_NPC_ID then
         local star = activeStars[destGUID] or RegisterStar(destGUID)
@@ -683,8 +838,8 @@ local function OnCombatLogEvent(...)
         local dmg = 0
         if subEvent == "SWING_DAMAGE" then
             dmg = param12 or 0
-        elseif subEvent:find("_DAMAGE") then
-            dmg = param15 or param12 or 0
+        elseif subEvent == "SPELL_DAMAGE" or subEvent == "SPELL_PERIODIC_DAMAGE" or subEvent == "RANGE_DAMAGE" then
+            dmg = param15 or 0
         end
 
         if dmg and dmg > 0 then
@@ -692,7 +847,7 @@ local function OnCombatLogEvent(...)
             AddDamageHistory(star, dmg, GetTime())
         end
 
-        -- 3. 监控 DoT 施加与移除 (视角盲区兜底)
+        -- 4. 监控 DoT 施加与移除 (视角盲区兜底)
         if subEvent == "SPELL_AURA_APPLIED" or subEvent == "SPELL_AURA_REFRESH" then
             local spellID = param12
             local spellName = param13
@@ -716,7 +871,7 @@ local function OnCombatLogEvent(...)
             end
         end
 
-        -- 4. 死亡清理
+        -- 5. 死亡清理
         if subEvent == "UNIT_DIED" then
             star.isDead = true
             star.currentHP = 0
@@ -730,7 +885,7 @@ local function OnEvent(self, event, ...)
     elseif event == "NAME_PLATE_UNIT_ADDED" then
         local unit = ...
         local guid = UnitGUID(unit)
-        if guid and GetNpcIDFromGUID(guid) == STAR_NPC_ID then
+        if guid and GetNpcIDFromGUID(guid) == STAR_NPC_ID and not isPhase2 then
             local maxHP = UnitHealthMax(unit)
             local curHP = UnitHealth(unit)
             local star = RegisterStar(guid, maxHP)
@@ -766,6 +921,16 @@ local function OnEvent(self, event, ...)
         end
     elseif event == "UNIT_HEALTH" then
         local unit = ...
+        -- 监听 Boss 血量，P2 判定
+        if (unit == "boss1" or unit == "target") and not isPhase2 then
+            local guid = UnitGUID(unit)
+            if guid and GetNpcIDFromGUID(guid) == ALGALON_NPC_ID then
+                algalonGUID = guid
+                CheckP2Status(UnitHealth(unit), UnitHealthMax(unit))
+            end
+        end
+
+        -- 塌缩星血量实时校准
         local guid = UnitGUID(unit)
         if guid and activeStars[guid] then
             local hp = UnitHealth(unit)
@@ -784,7 +949,7 @@ local function OnEvent(self, event, ...)
             ScanNameplateDots(activeStars[guid], unit)
         end
     elseif event == "PLAYER_REGEN_ENABLED" then
-        -- 脱战清理 (若场上无活星则重置)
+        -- 脱战清理 (若场上无活星或已结束则重置)
         local hasLiveStar = false
         for _, star in pairs(activeStars) do
             if not star.isDead and star.currentHP > 0 then
@@ -796,13 +961,30 @@ local function OnEvent(self, event, ...)
             wipe(activeStars)
             starCounter = 0
             bigBangCastEnd = 0
+            bigBangNextEstimate = 0
+            isPhase2 = false
+            algalonGUID = nil
             if mainFrame then mainFrame:Hide() end
+        end
+    elseif event == "ENCOUNTER_START" then
+        -- 记录战斗开始，初始化 90 秒首次大爆炸时间轴
+        if not isTesting then
+            encounterStartTime = GetTime()
+            bigBangNextEstimate = encounterStartTime + BIGBANG_BASE_COOLDOWN
+            bigBangCastEnd = 0
+            isPhase2 = false
+            algalonGUID = nil
+            wipe(activeStars)
+            starCounter = 0
         end
     elseif event == "ENCOUNTER_END" then
         if not isTesting then
             wipe(activeStars)
             starCounter = 0
             bigBangCastEnd = 0
+            bigBangNextEstimate = 0
+            isPhase2 = false
+            algalonGUID = nil
             if mainFrame then mainFrame:Hide() end
         end
     elseif event == "ZONE_CHANGED_NEW_AREA" or event == "PLAYER_ENTERING_WORLD" then
@@ -811,7 +993,7 @@ local function OnEvent(self, event, ...)
 end
 
 --------------------------------------------------------------------------------
--- 8. 事件截断与动态开关控制 (核心性能防线)
+-- 9. 事件截断与动态开关控制 (核心性能防线)
 --------------------------------------------------------------------------------
 function AlgalonStar.RegisterCombatEvents()
     if isCombatRegistered then return end
@@ -822,6 +1004,7 @@ function AlgalonStar.RegisterCombatEvents()
     eventFrame:RegisterEvent("UNIT_HEALTH")
     eventFrame:RegisterEvent("UNIT_AURA")
     eventFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
+    eventFrame:RegisterEvent("ENCOUNTER_START")
     eventFrame:RegisterEvent("ENCOUNTER_END")
 
     -- 开启 0.15 秒节流刷新定时器
@@ -844,6 +1027,7 @@ function AlgalonStar.UnregisterCombatEvents()
     eventFrame:UnregisterEvent("UNIT_HEALTH")
     eventFrame:UnregisterEvent("UNIT_AURA")
     eventFrame:UnregisterEvent("PLAYER_REGEN_ENABLED")
+    eventFrame:UnregisterEvent("ENCOUNTER_START")
     eventFrame:UnregisterEvent("ENCOUNTER_END")
     eventFrame:SetScript("OnUpdate", nil)
 end
@@ -876,7 +1060,7 @@ function AlgalonStar.UpdateEventRegistration()
 end
 
 function AlgalonStar.SetEnabled(enabled)
-    if not BiaoGe.AlgalonStar then BiaoGe.AlgalonStar = {} end
+    if not BiaoGe and BiaoGe.AlgalonStar then BiaoGe.AlgalonStar = {} end
     BiaoGe.AlgalonStar.enabled = enabled
     AlgalonStar.UpdateEventRegistration()
 
@@ -888,23 +1072,31 @@ function AlgalonStar.SetEnabled(enabled)
 end
 
 --------------------------------------------------------------------------------
--- 9. 主城模拟测试沙盘 (/star test)
+-- 10. 主城模拟测试沙盘 (/star test - 完美展示绿/黄/红全状态)
 --------------------------------------------------------------------------------
 function AlgalonStar.ToggleTestMode()
     isTesting = not isTesting
     CreateMainUI()
 
     if isTesting then
-        print(STC_g1("[BGLite 观星助手]") .. " 模拟测试沙盘已【启动】！按住标题栏可拖拽调整位置，再次点击或输入 /star test 结束。")
+        print(STC_g1("[BGLite 观星助手]") .. " 模拟测试沙盘已【启动】！按住标题栏可拖拽位置，再次点击或输入 /star test 结束。")
         wipe(activeStars)
         mainFrame:Show()
+        isPhase2 = false
 
         local now = GetTime()
+        bigBangNextEstimate = now + 32.0 -- 模拟 32 秒后大爆炸
+
+        -- 模拟 4 颗星，分别演示不同安全等级：
+        -- 星 1：绿色【最完美】(自爆在 36 秒，刚好在大爆炸后 4 秒炸，完美出洞再引爆)
+        -- 星 2：黄色【提前留洞】(自爆在 16 秒，大爆炸前提前 16 秒爆，能留洞但需覆盖团血)
+        -- 星 3：红色【大爆炸撞车】(自爆在 31 秒，刚好在大爆炸前夕重叠，高危撞车)
+        -- 星 4：黄色【掉血缓慢】(自爆在 65 秒，平稳)
         local mockData = {
-            { hpPct = 0.38, dps = 1450, mark = 8, dots = { { name = "月火术", dur = 12, remain = 6.8, isMine = true }, { name = "虫群", dur = 12, remain = 4.2, isMine = true } } },
-            { hpPct = 0.58, dps = 950,  mark = 7, dots = { { name = "暗言术：痛", dur = 18, remain = 12.0, isMine = true }, { name = "噬灵疫病", dur = 24, remain = 16.5, isMine = false } } },
-            { hpPct = 0.82, dps = 760,  mark = 6, dots = { { name = "吸血鬼之触", dur = 15, remain = 9.4, isMine = true } } },
-            { hpPct = 0.95, dps = 756,  mark = 4, dots = { { name = "腐蚀术", dur = 18, remain = 14.0, isMine = false } } },
+            { hpPct = 0.52, dps = 1080, mark = 8, dots = { { name = "月火术", dur = 12, remain = 8.5, isMine = true }, { name = "虫群", dur = 12, remain = 5.2, isMine = true } } },
+            { hpPct = 0.28, dps = 1320, mark = 7, dots = { { name = "暗言术：痛", dur = 18, remain = 14.0, isMine = true }, { name = "噬灵疫病", dur = 24, remain = 18.5, isMine = false } } },
+            { hpPct = 0.44, dps = 1070, mark = 6, dots = { { name = "吸血鬼之触", dur = 15, remain = 9.4, isMine = true } } },
+            { hpPct = 0.90, dps = 756,  mark = 4, dots = { { name = "腐蚀术", dur = 18, remain = 16.0, isMine = false } } },
         }
 
         for i, item in ipairs(mockData) do
@@ -921,6 +1113,7 @@ function AlgalonStar.ToggleTestMode()
                 dots = {},
                 lastTick = now,
                 nameplateUnit = nil,
+                isDead = false,
             }
 
             for _, d in ipairs(item.dots) do
@@ -941,16 +1134,16 @@ function AlgalonStar.ToggleTestMode()
             loopCounter = loopCounter + 1
             local tickNow = GetTime()
 
-            -- 模拟每 28 秒施放一次大爆炸 (8秒读条)
-            if loopCounter % 140 == 30 then
+            -- 模拟每 45 秒循环一次大爆炸 (8秒读条)
+            if loopCounter % 225 == 160 then
                 bigBangCastEnd = tickNow + 8.0
+                bigBangNextEstimate = tickNow + 8.0 + 45.0
             end
 
             for _, star in pairs(activeStars) do
                 star.currentHP = math.max(0, star.currentHP - (star.dps * 0.2))
                 if star.currentHP <= 0 then
                     star.currentHP = star.maxHP -- 循环重置
-                    -- 刷新 DoT 倒计时
                     for _, dot in pairs(star.dots) do
                         dot.expTime = tickNow + dot.duration
                     end
@@ -964,12 +1157,14 @@ function AlgalonStar.ToggleTestMode()
         wipe(activeStars)
         starCounter = 0
         bigBangCastEnd = 0
+        bigBangNextEstimate = 0
+        isPhase2 = false
         if mainFrame then mainFrame:Hide() end
     end
 end
 
 --------------------------------------------------------------------------------
--- 10. 挂载到团队工具底部 (站位图开关右侧)
+-- 11. 挂载到团队工具底部 (站位图开关右侧)
 --------------------------------------------------------------------------------
 function AlgalonStar.CreateToolControls(entry, anchorFrame)
     if not entry or entry.starControlsCreated then return end
@@ -1005,11 +1200,12 @@ function AlgalonStar.CreateToolControls(entry, anchorFrame)
         GameTooltip:SetOwner(self, "ANCHOR_TOP")
         GameTooltip:AddLine(STC_b1("观星修星助手 (奥尔加隆)") .. " - 核心开关", 1, 1, 1)
         GameTooltip:AddLine("勾选开启奥杜尔观星者塌缩星专属血量自适应监控与大爆炸冲突预警。", 0.85, 0.85, 0.85, true)
-        GameTooltip:AddLine("功能特性：", 1, 0.82, 0)
-        GameTooltip:AddLine("• 4星独立血条与实时掉血速率推算", 0.85, 0.85, 0.85)
+        GameTooltip:AddLine("核心预测与特性：", 1, 0.82, 0)
+        GameTooltip:AddLine("• " .. STC_g1("【绿色·安全】") .. " 预测在大爆炸后几秒炸(最完美节奏)或进洞免伤炸", 0.85, 0.85, 0.85)
+        GameTooltip:AddLine("• " .. STC_y1("【黄色·注意】") .. " 预测提前留洞引爆，需治疗关注团血", 0.85, 0.85, 0.85)
+        GameTooltip:AddLine("• " .. STC_r1("【红色·危险】") .. " 预测在大爆炸前夕撞车、出洞连爆或双星连炸", 0.85, 0.85, 0.85)
         GameTooltip:AddLine("• 鸟德/暗牧核心修星 DoT 倒计时与专属图标", 0.85, 0.85, 0.85)
-        GameTooltip:AddLine("• 大爆炸与自爆重叠撞车全屏警报与音效提示", 0.85, 0.85, 0.85)
-        GameTooltip:AddLine("• 唯一 GUID 绑定防串星，自动打骷髅等团队标记", 0.85, 0.85, 0.85)
+        GameTooltip:AddLine("• 自动识别 P2 阶段 (≤20% HP) 塌缩星消失清空", 0.85, 0.85, 0.85)
         GameTooltip:AddLine(STC_g1("【性能截断】") .. " 关闭时完全注销战斗日志与事件监听，0 CPU 占用！", 0.2, 1, 0.4, true)
         GameTooltip:Show()
     end)
@@ -1027,7 +1223,7 @@ function AlgalonStar.CreateToolControls(entry, anchorFrame)
     btnTest:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_TOP")
         GameTooltip:AddLine(STC_g1("观星修星模拟沙盘 (/star test)"), 1, 1, 1)
-        GameTooltip:AddLine("无需进入奥杜尔副本，在主城即可模拟 4 颗塌缩星平滑掉血、DoT 倒计时、动态排序及大爆炸冲突报警！", 0.85, 0.85, 0.85, true)
+        GameTooltip:AddLine("无需进入奥杜尔副本，在主城即可模拟 4 颗塌缩星平滑掉血、DoT 倒计时、动态排序及红/黄/绿安全预测！", 0.85, 0.85, 0.85, true)
         GameTooltip:AddLine("方便修星人员与团长调试窗口位置、字体及警报效果。", 0.85, 0.85, 0.85, true)
         GameTooltip:Show()
     end)
@@ -1060,11 +1256,11 @@ function AlgalonStar.CreateToolControls(entry, anchorFrame)
     local tipText = entry:CreateFontString(nil, "OVERLAY")
     tipText:SetFont(BIAOGE_TEXT_FONT, 12, "OUTLINE")
     tipText:SetPoint("LEFT", btnToggle, "RIGHT", 10, 0)
-    tipText:SetText(STC_dis("(血量自适应 / 核心DoT倒计时 / 大爆炸撞车预警)"))
+    tipText:SetText(STC_dis("(红/黄/绿安全预测 / 核心DoT倒计时 / P2自动识别)"))
 end
 
 --------------------------------------------------------------------------------
--- 11. 初始化与 Slash 指令注册
+-- 12. 初始化与 Slash 指令注册
 --------------------------------------------------------------------------------
 function ns.InitAlgalonStarDB()
     BiaoGe = BiaoGe or {}
