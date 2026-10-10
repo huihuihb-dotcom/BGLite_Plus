@@ -324,22 +324,29 @@ end
      - 濒死猝死自爆（ETA <= 5s 或 HP <= 15% 且非进洞期）：随时乱炸。
      - 场上两颗星 ETA 相差 <= 3.5s：双星撞车连炸团灭！
 ]]
-local function EvaluateStarSafety(star, now, isBigBangCasting, bigBangLeft, timeToNextBB, allStars)
+local function EvaluateStarSafety(star, now, isBigBangCasting, bigBangLeft, timeToNextBB, collisionInfo)
     local pct = (star.maxHP > 0) and ((star.currentHP / star.maxHP) * 100) or 100
     local dps = (star.dps > 0) and star.dps or (star.maxHP * 0.01)
     local eta = star.currentHP / dps
 
-    -- 检查是否与场上其它活星发生“双星连炸撞车”
-    local isMultiStarCollision = false
-    local collisionOtherMark = nil
-    for _, other in pairs(allStars) do
-        if other.guid ~= star.guid and not other.isDead and other.currentHP > 0 then
-            local otherDps = (other.dps > 0) and other.dps or (other.maxHP * 0.01)
-            local otherEta = other.currentHP / otherDps
-            if math.abs(eta - otherEta) <= 3.2 and eta <= 35.0 then
-                isMultiStarCollision = true
-                collisionOtherMark = MARK_NAMES[other.raidMark] or ("星" .. other.index)
-                break
+    -- 🔴 【最高优先级：双星连炸致命灭团点 (Double Star Collision)】
+    -- 无论大爆炸处于何种阶段，两颗星相隔 <= 4.2s 连续爆炸，瞬间 40k+ 伤害必灭团！
+    -- 若还发生在大爆炸前后（大爆炸前 14s 或大爆炸后出洞 15s 内），更是 100% 团灭大祸！
+    -- 强制标红报警，绝不允许被“大爆炸后安全”掩盖，并给出精确的“打爆拉开 / 停手停DoT”指令！
+    if collisionInfo then
+        local markOther = collisionInfo.otherMark or "另一星"
+        local gap = collisionInfo.gap or 0
+        if collisionInfo.nearBigBang then
+            if collisionInfo.isEarlier then
+                return "RED", string.format("💥大爆炸双爆! (早%.1fs·集火引爆)", gap), 1.0, 0.1, 0.0
+            else
+                return "RED", string.format("💥大爆炸双爆! (慢%.1fs·全团停手!)", gap), 1.0, 0.1, 0.0
+            end
+        else
+            if collisionInfo.isEarlier then
+                return "RED", string.format("💥双星连炸! (早%.1fs·集火拉开)", gap), 1.0, 0.2, 0.0
+            else
+                return "RED", string.format("💥双星连炸! (慢%.1fs·全团停手)", gap), 1.0, 0.2, 0.0
             end
         end
     end
@@ -372,36 +379,30 @@ local function EvaluateStarSafety(star, now, isBigBangCasting, bigBangLeft, time
     end
 
     -- B. 非大爆炸读条期间 (正常战斗阶段，依据下次大爆炸倒计时预测)
-    -- 计算相对下次大爆炸的落点差异 (diff > 0 代表大爆炸后炸，diff < 0 代表大爆炸前炸)
     local diff = (timeToNextBB > 0) and (eta - timeToNextBB) or nil
 
-    -- B1. 双星连炸报警 (高优先级)
-    if isMultiStarCollision then
-        return "RED", string.format("💥与[%s]连炸撞车!", collisionOtherMark), 1.0, 0.25, 0.0
-    end
-
-    -- B2. 濒死猝死报警 (血量危急)
+    -- B1. 濒死猝死报警 (血量危急)
     if eta <= 5.0 or pct <= 15 then
         return "RED", string.format("⚡临界自爆! (%.1fs)", eta), 0.95, 0.1, 0.1
     end
 
-    -- B3. 与下次大爆炸前夕撞车 (大爆炸前 4 秒至大爆炸开始后 1.5 秒内)：
+    -- B2. 与下次大爆炸前夕撞车 (大爆炸前 4 秒至大爆炸开始后 1.5 秒内)：
     if diff and (diff >= -4.0 and diff <= 1.5) then
         return "RED", string.format("💥大爆炸撞车危险! (差%.1fs)", math.abs(diff)), 1.0, 0.3, 0.0
     end
 
-    -- B4. 【核心灵魂：在大爆炸后几秒才炸是最完美的】 (diff 在 +2s ~ +15s)
+    -- B3. 【核心灵魂：在大爆炸后几秒才炸是最完美的】 (diff 在 +2s ~ +15s)
     if diff and (diff >= 2.0 and diff <= 15.0) then
         return "GREEN", string.format("✓完美安全 (大爆炸后%.0fs)", diff), 0.1, 0.85, 0.3
     end
 
-    -- B5. 提前引爆留洞 (在大爆炸前 5s ~ 30s 爆炸)：
+    -- B4. 提前引爆留洞 (在大爆炸前 5s ~ 30s 爆炸)：
     if diff and (diff < -4.0 and eta >= 5.0 and eta <= 40.0) then
         local lead = -diff
         return "YELLOW", string.format("⚠提前留洞 (提前%.0fs爆)", lead), 0.95, 0.8, 0.1
     end
 
-    -- B6. 掉血缓慢 / 延后过久 (不会猝死，但留洞慢)
+    -- B5. 掉血缓慢 / 延后过久 (不会猝死，但留洞慢)
     if eta > 60.0 or (diff and diff > 15.0) then
         return "YELLOW", string.format("掉血平稳 (%.0fs后)", eta), 0.2, 0.7, 0.9
     end
@@ -632,14 +633,86 @@ local function RefreshUI()
         return
     end
 
-    -- 2. 大爆炸读条与预警倒计时
+    -- 2. 提取活星并按血量排序
+    local starList = {}
+    for _, star in pairs(activeStars) do
+        if not star.isDead and star.currentHP > 0 then
+            table.insert(starList, star)
+        end
+    end
+
+    table.sort(starList, function(a, b)
+        return a.currentHP < b.currentHP
+    end)
+
+    -- 3. 大爆炸读条与预警倒计时
     local bigBangLeft = math.max(0, bigBangCastEnd - now)
     local isBigBangCasting = (bigBangLeft > 0)
     local timeToNextBB = (bigBangNextEstimate > 0) and math.max(0, bigBangNextEstimate - now) or 0
 
+    -- 4. 全局双星连炸 (Double Star Collision) 检测
+    -- 灭团死穴：大爆炸前夕或大爆炸后刚出洞，两颗星间隔 <= 4.2 秒连炸，瞬间 40,000+ 伤害直接灭团！
+    local worstCollision = nil
+    local minCollisionGap = 999
+    local collisionMap = {} -- [guid] = { otherMark = markName, gap = gap, isEarlier = bool, nearBigBang = bool }
+
+    for i = 1, #starList do
+        for j = i + 1, #starList do
+            local s1, s2 = starList[i], starList[j]
+            local dps1 = (s1.dps > 0) and s1.dps or (s1.maxHP * 0.01)
+            local dps2 = (s2.dps > 0) and s2.dps or (s2.maxHP * 0.01)
+            local eta1 = s1.currentHP / dps1
+            local eta2 = s2.currentHP / dps2
+            local gap = math.abs(eta1 - eta2)
+
+            -- 只要两颗星都在 65 秒内爆炸，且时间差 <= 4.2 秒，构成致命双星连炸！
+            if gap <= 4.2 and eta1 <= 65 and eta2 <= 65 then
+                local mark1 = MARK_NAMES[s1.raidMark] or ("星" .. s1.index)
+                local mark2 = MARK_NAMES[s2.raidMark] or ("星" .. s2.index)
+
+                -- 是否紧贴大爆炸（大爆炸前 14s 内或大爆炸后出洞 15s 内发生双爆，绝对团灭死穴！）
+                local isNearBB = false
+                if isBigBangCasting then
+                    isNearBB = true
+                elseif timeToNextBB > 0 then
+                    local diff1 = eta1 - timeToNextBB
+                    local diff2 = eta2 - timeToNextBB
+                    if (diff1 >= -14.0 and diff1 <= 16.0) or (diff2 >= -14.0 and diff2 <= 16.0) then
+                        isNearBB = true
+                    end
+                end
+
+                if not collisionMap[s1.guid] or gap < collisionMap[s1.guid].gap then
+                    collisionMap[s1.guid] = { otherMark = mark2, gap = gap, isEarlier = (eta1 <= eta2), nearBigBang = isNearBB }
+                end
+                if not collisionMap[s2.guid] or gap < collisionMap[s2.guid].gap then
+                    collisionMap[s2.guid] = { otherMark = mark1, gap = gap, isEarlier = (eta2 < eta1), nearBigBang = isNearBB }
+                end
+
+                if gap < minCollisionGap then
+                    minCollisionGap = gap
+                    worstCollision = {
+                        markEarlier = (eta1 <= eta2) and mark1 or mark2,
+                        markLater = (eta1 <= eta2) and mark2 or mark1,
+                        gap = gap,
+                        nearBigBang = isNearBB,
+                    }
+                end
+            end
+        end
+    end
+
+    -- 5. 顶部标题栏动态显示 (优先级: P2 > 大爆炸读条 > 双星连炸团灭警报 > 大爆炸临近 > 普通)
     if isBigBangCasting then
         mainFrame.titleBg:SetColorTexture(0.65, 0.15, 0.05, 0.95)
         mainFrame.titleText:SetText(string.format(STC_r1("【大爆炸！进黑洞！】") .. " 剩余: " .. STC_y1("%.1fs"), bigBangLeft))
+    elseif worstCollision then
+        mainFrame.titleBg:SetColorTexture(0.85, 0.05, 0.05, 0.98)
+        if worstCollision.nearBigBang then
+            mainFrame.titleText:SetText(STC_r1("【大爆炸前后双星连炸! 必灭团!】") .. string.format("[%s]与[%s]仅差%.1fs! 立即停手!", worstCollision.markEarlier, worstCollision.markLater, worstCollision.gap))
+        else
+            mainFrame.titleText:SetText(STC_r1("【双星连炸警报!】") .. string.format("[%s]与[%s]仅隔%.1fs! 立即停手拉开!", worstCollision.markEarlier, worstCollision.markLater, worstCollision.gap))
+        end
     elseif timeToNextBB > 0 and timeToNextBB <= 15.0 then
         mainFrame.titleBg:SetColorTexture(0.55, 0.35, 0.05, 0.92)
         mainFrame.titleText:SetText(string.format(STC_y1("【大爆炸临近】") .. " 约 " .. STC_y1("%.0fs") .. " 后施放 (检查留洞/停手)", timeToNextBB))
@@ -651,20 +724,7 @@ local function RefreshUI()
         mainFrame.titleText:SetText(STC_b1("观星者") .. " 塌缩星监控 (自适应)")
     end
 
-    -- 3. 提取活星并按血量排序
-    local starList = {}
-    for _, star in pairs(activeStars) do
-        if not star.isDead and star.currentHP > 0 then
-            table.insert(starList, star)
-        end
-    end
-
-    -- 默认按剩余血量升序排列 (血最少、最优先的排在最前)
-    table.sort(starList, function(a, b)
-        return a.currentHP < b.currentHP
-    end)
-
-    -- 4. 逐条渲染
+    -- 6. 逐条渲染
     for i = 1, 4 do
         local bar = bars[i]
         local star = starList[i]
@@ -687,8 +747,8 @@ local function RefreshUI()
             local markName = MARK_NAMES[star.raidMark] or ("星" .. star.index)
             bar.label:SetText(string.format("%s %.1f%%", markName, pct))
 
-            -- 核心预测算法判定 (红 / 黄 / 绿)
-            local safetyLevel, statusText, r, g, b = EvaluateStarSafety(star, now, isBigBangCasting, bigBangLeft, timeToNextBB, starList)
+            -- 核心预测算法判定 (红 / 黄 / 绿，传入专有双星连炸状态)
+            local safetyLevel, statusText, r, g, b = EvaluateStarSafety(star, now, isBigBangCasting, bigBangLeft, timeToNextBB, collisionMap[star.guid])
 
             bar.sb:SetStatusBarColor(r, g, b)
             bar.timerText:SetText(statusText)
@@ -698,9 +758,9 @@ local function RefreshUI()
                 bar.glow:SetVertexColor(1, 0.2, 0)
                 bar.glow:SetAlpha(0.9)
 
-                -- 播放音效节流 (4秒一次)
+                -- 播放音效节流 (3.5秒一次)
                 if BiaoGe and BiaoGe.AlgalonStar and BiaoGe.AlgalonStar.soundAlert then
-                    if (now - lastAlertSoundTime) > 4.0 then
+                    if (now - lastAlertSoundTime) > 3.5 then
                         lastAlertSoundTime = now
                         PlaySoundFile("Sound\\Interface\\RaidWarning.ogg", "Master")
                     end
@@ -1074,84 +1134,9 @@ end
 --------------------------------------------------------------------------------
 -- 10. 主城模拟测试沙盘 (/star test - 完美展示绿/黄/红全状态)
 --------------------------------------------------------------------------------
-function AlgalonStar.ToggleTestMode()
-    isTesting = not isTesting
-    CreateMainUI()
-
-    if isTesting then
-        print(STC_g1("[BGLite 观星助手]") .. " 模拟测试沙盘已【启动】！按住标题栏可拖拽位置，再次点击或输入 /star test 结束。")
-        wipe(activeStars)
-        mainFrame:Show()
-        isPhase2 = false
-
-        local now = GetTime()
-        bigBangNextEstimate = now + 32.0 -- 模拟 32 秒后大爆炸
-
-        -- 模拟 4 颗星，分别演示不同安全等级：
-        -- 星 1：绿色【最完美】(自爆在 36 秒，刚好在大爆炸后 4 秒炸，完美出洞再引爆)
-        -- 星 2：黄色【提前留洞】(自爆在 16 秒，大爆炸前提前 16 秒爆，能留洞但需覆盖团血)
-        -- 星 3：红色【大爆炸撞车】(自爆在 31 秒，刚好在大爆炸前夕重叠，高危撞车)
-        -- 星 4：黄色【掉血缓慢】(自爆在 65 秒，平稳)
-        local mockData = {
-            { hpPct = 0.52, dps = 1080, mark = 8, dots = { { name = "月火术", dur = 12, remain = 8.5, isMine = true }, { name = "虫群", dur = 12, remain = 5.2, isMine = true } } },
-            { hpPct = 0.28, dps = 1320, mark = 7, dots = { { name = "暗言术：痛", dur = 18, remain = 14.0, isMine = true }, { name = "噬灵疫病", dur = 24, remain = 18.5, isMine = false } } },
-            { hpPct = 0.44, dps = 1070, mark = 6, dots = { { name = "吸血鬼之触", dur = 15, remain = 9.4, isMine = true } } },
-            { hpPct = 0.90, dps = 756,  mark = 4, dots = { { name = "腐蚀术", dur = 18, remain = 16.0, isMine = false } } },
-        }
-
-        for i, item in ipairs(mockData) do
-            local guid = "TEST-COLLAPSING-STAR-" .. i
-            local maxHP = 75600
-            local star = {
-                guid = guid,
-                index = i,
-                raidMark = item.mark,
-                maxHP = maxHP,
-                currentHP = maxHP * item.hpPct,
-                dps = item.dps,
-                dmgHistory = {},
-                dots = {},
-                lastTick = now,
-                nameplateUnit = nil,
-                isDead = false,
-            }
-
-            for _, d in ipairs(item.dots) do
-                local info = DOT_WHITELIST_BY_NAME[d.name] or { name = d.name, duration = d.dur, icon = "Interface\\Icons\\Spell_Nature_StarFall" }
-                star.dots[d.name] = {
-                    name = d.name,
-                    icon = info.icon or "Interface\\Icons\\Spell_Nature_StarFall",
-                    duration = d.dur,
-                    expTime = now + d.remain,
-                    isMine = d.isMine,
-                }
-            end
-            activeStars[guid] = star
-        end
-
-        local loopCounter = 0
-        testTicker = C_Timer.NewTicker(0.2, function()
-            loopCounter = loopCounter + 1
-            local tickNow = GetTime()
-
-            -- 模拟每 45 秒循环一次大爆炸 (8秒读条)
-            if loopCounter % 225 == 160 then
-                bigBangCastEnd = tickNow + 8.0
-                bigBangNextEstimate = tickNow + 8.0 + 45.0
-            end
-
-            for _, star in pairs(activeStars) do
-                star.currentHP = math.max(0, star.currentHP - (star.dps * 0.2))
-                if star.currentHP <= 0 then
-                    star.currentHP = star.maxHP -- 循环重置
-                    for _, dot in pairs(star.dots) do
-                        dot.expTime = tickNow + dot.duration
-                    end
-                end
-            end
-            RefreshUI()
-        end)
-    else
+function AlgalonStar.ToggleTestMode(subMode)
+    if isTesting and not subMode then
+        isTesting = false
         print(STC_r1("[BGLite 观星助手]") .. " 模拟测试沙盘已【关闭】。")
         if testTicker then testTicker:Cancel(); testTicker = nil end
         wipe(activeStars)
@@ -1160,7 +1145,106 @@ function AlgalonStar.ToggleTestMode()
         bigBangNextEstimate = 0
         isPhase2 = false
         if mainFrame then mainFrame:Hide() end
+        return
     end
+
+    isTesting = true
+    CreateMainUI()
+    if testTicker then testTicker:Cancel(); testTicker = nil end
+    wipe(activeStars)
+    mainFrame:Show()
+
+    if subMode == "p2" then
+        isPhase2 = true
+        bigBangCastEnd = 0
+        bigBangNextEstimate = 0
+        print(STC_g1("[BGLite 观星助手]") .. " 模拟测试：【P2 阶段演示】(Boss ≤ 20%，塌缩星消失，全力 RUSH！)")
+        RefreshUI()
+        return
+    end
+
+    isPhase2 = false
+    local now = GetTime()
+    bigBangNextEstimate = now + 32.0 -- 模拟 32 秒后大爆炸
+
+    local mockData = {}
+    if subMode == "double" or subMode == "wipe" then
+        print(STC_r1("[BGLite 观星助手]") .. " 模拟测试：【大爆炸前后双星连炸灭团高危场景】！")
+        -- 骷髅(ETA 37.0s) 与 方块(ETA 36.0s) 在大爆炸(32s)后仅差 1.0s 连爆！
+        -- 触发【大爆炸前后双星连炸! 必灭团!】顶栏警报与精确集火/停手指令！
+        mockData = {
+            { hpPct = 0.50, dps = 1021, mark = 8, dots = { { name = "月火术", dur = 12, remain = 8.5, isMine = true } } },
+            { hpPct = 0.28, dps = 1320, mark = 7, dots = { { name = "暗言术：痛", dur = 18, remain = 14.0, isMine = true } } },
+            { hpPct = 0.48, dps = 1008, mark = 6, dots = { { name = "吸血鬼之触", dur = 15, remain = 9.4, isMine = true } } },
+            { hpPct = 0.85, dps = 600,  mark = 4, dots = { { name = "腐蚀术", dur = 18, remain = 16.0, isMine = false } } },
+        }
+    else
+        print(STC_g1("[BGLite 观星助手]") .. " 模拟测试沙盘已【启动】！输入 /star test double 测双星连炸灭团，/star test p2 测P2。")
+        -- 常规四态演示：
+        -- 星 1：绿色【最完美】(自爆在 36.4 秒，刚好在大爆炸后 4.4 秒炸，完美出洞再引爆)
+        -- 星 2：黄色【提前留洞】(自爆在 16 秒，大爆炸前提前 16 秒爆，能留洞但需覆盖团血)
+        -- 星 3：红色【大爆炸撞车】(自爆在 31 秒，刚好在大爆炸前夕重叠，高危撞车)
+        -- 星 4：黄色【掉血缓慢】(自爆在 90 秒，平稳)
+        mockData = {
+            { hpPct = 0.52, dps = 1080, mark = 8, dots = { { name = "月火术", dur = 12, remain = 8.5, isMine = true }, { name = "虫群", dur = 12, remain = 5.2, isMine = true } } },
+            { hpPct = 0.28, dps = 1320, mark = 7, dots = { { name = "暗言术：痛", dur = 18, remain = 14.0, isMine = true }, { name = "噬灵疫病", dur = 24, remain = 18.5, isMine = false } } },
+            { hpPct = 0.44, dps = 1070, mark = 6, dots = { { name = "吸血鬼之触", dur = 15, remain = 9.4, isMine = true } } },
+            { hpPct = 0.90, dps = 756,  mark = 4, dots = { { name = "腐蚀术", dur = 18, remain = 16.0, isMine = false } } },
+        }
+    end
+
+    for i, item in ipairs(mockData) do
+        local guid = "TEST-COLLAPSING-STAR-" .. i
+        local maxHP = 75600
+        local star = {
+            guid = guid,
+            index = i,
+            raidMark = item.mark,
+            maxHP = maxHP,
+            currentHP = maxHP * item.hpPct,
+            dps = item.dps,
+            dmgHistory = {},
+            dots = {},
+            lastTick = now,
+            nameplateUnit = nil,
+            isDead = false,
+        }
+
+        for _, d in ipairs(item.dots) do
+            local info = DOT_WHITELIST_BY_NAME[d.name] or { name = d.name, duration = d.dur, icon = "Interface\\Icons\\Spell_Nature_StarFall" }
+            star.dots[d.name] = {
+                name = d.name,
+                icon = info.icon or "Interface\\Icons\\Spell_Nature_StarFall",
+                duration = d.dur,
+                expTime = now + d.remain,
+                isMine = d.isMine,
+            }
+        end
+        activeStars[guid] = star
+    end
+
+    local loopCounter = 0
+    testTicker = C_Timer.NewTicker(0.2, function()
+        loopCounter = loopCounter + 1
+        local tickNow = GetTime()
+
+        -- 模拟每 45 秒循环一次大爆炸 (8秒读条)
+        if loopCounter % 225 == 160 then
+            bigBangCastEnd = tickNow + 8.0
+            bigBangNextEstimate = tickNow + 8.0 + 45.0
+        end
+
+        for _, star in pairs(activeStars) do
+            star.currentHP = math.max(0, star.currentHP - (star.dps * 0.2))
+            if star.currentHP <= 0 then
+                star.currentHP = star.maxHP -- 循环重置
+                for _, dot in pairs(star.dots) do
+                    dot.expTime = tickNow + dot.duration
+                end
+            end
+        end
+        RefreshUI()
+    end)
 end
 
 --------------------------------------------------------------------------------
@@ -1291,6 +1375,10 @@ SlashCmdList["ALGALONSTAR"] = function(msg)
     msg = msg and msg:lower():trim() or ""
     if msg == "test" then
         AlgalonStar.ToggleTestMode()
+    elseif msg == "test double" or msg == "test wipe" or msg == "double" then
+        AlgalonStar.ToggleTestMode("double")
+    elseif msg == "test p2" or msg == "p2" then
+        AlgalonStar.ToggleTestMode("p2")
     elseif msg == "lock" then
         if not BiaoGe.AlgalonStar then BiaoGe.AlgalonStar = {} end
         BiaoGe.AlgalonStar.locked = not BiaoGe.AlgalonStar.locked
@@ -1307,6 +1395,6 @@ SlashCmdList["ALGALONSTAR"] = function(msg)
             mainFrame:Show()
             RefreshUI()
         end
-        DEFAULT_CHAT_FRAME:AddMessage(STC_b1("[BGLite 观星助手]") .. " 常用指令: /star test (测试沙盘), /star lock (锁定/解锁), /star on/off (开关)")
+        DEFAULT_CHAT_FRAME:AddMessage(STC_b1("[BGLite 观星助手]") .. " 常用指令: /star test (测试常规状态), /star test double (测试双星连炸灭团), /star test p2 (测试P2), /star lock (锁定), /star on/off (开关)")
     end
 end
