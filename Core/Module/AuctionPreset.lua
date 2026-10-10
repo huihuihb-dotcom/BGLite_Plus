@@ -114,6 +114,13 @@ local function IsTierTokenItem(itemID, FB)
 end
 ns.IsTierTokenItem = IsTierTokenItem
 
+-- 别名副本计算函数
+local function GetAltFB(fbName)
+    if not fbName then return nil end
+    return fbName:find("titan") and (fbName:gsub("titan", "")) or (fbName .. "titan")
+end
+ns.GetAltFB = GetAltFB
+
 -- 全局读取预设价格与起拍语接口 (支持数字与字符串双类型键名，支持时光服别名互通与全副本兜底)
 function BG.GetAuctionPreset(FB, itemID)
     if not itemID then return nil, nil end
@@ -141,9 +148,9 @@ function BG.GetAuctionPreset(FB, itemID)
         if m or t then return m, t end
     end
 
-    -- 2. 检查时光服/正式服对应别名 (如 TOC 与 TOCtitan 双向映射)
+    -- 2. 检查时光服/正式服对应别名 (如 SSC 与 SSCtitan 双向映射)
     if FB then
-        local altFB = FB:find("titan") and (FB:gsub("titan", "")) or (FB .. "titan")
+        local altFB = GetAltFB(FB)
         local m, t = LookupInFBDb(altFB)
         if m or t then return m, t end
     end
@@ -230,6 +237,86 @@ function ns.InitAuctionPresetModule()
 
     -- 全局装备名称与属性缓存字典 (itemID -> { name, link, quality, level, texture })
     local itemInfoCache = {}
+
+    -- 导出供外部模块安全查询已缓存装备品质的接口
+    ns.GetItemCachedQuality = function(itemID)
+        if not itemID then return nil end
+        local numID = tonumber(itemID)
+        if numID and itemInfoCache[numID] and itemInfoCache[numID].quality then
+            return itemInfoCache[numID].quality
+        end
+        return nil
+    end
+
+    -- 封装统一的单件预设价格、起拍语与自动开拍同步设置函数 (双向强同步时光服对应副本，彻底消灭别名割裂与脏数据残留)
+    local function SetPresetItemPrice(fb, itemID, num)
+        if not fb or not itemID then return end
+        local numID = tonumber(itemID)
+        local strID = tostring(itemID)
+        local altFB = GetAltFB(fb)
+
+        local function Apply(targetFB)
+            if not targetFB or not BiaoGe.auctionPreset or not BiaoGe.auctionPreset[targetFB] then return end
+            local mDB = BiaoGe.auctionPreset[targetFB].money
+            if not mDB then return end
+            if num and num > 0 then
+                if numID then mDB[numID] = num end
+                mDB[strID] = num
+            else
+                if numID then mDB[numID] = nil end
+                mDB[strID] = nil
+            end
+        end
+
+        Apply(fb)
+        Apply(altFB)
+    end
+
+    local function SetPresetItemTips(fb, itemID, txt)
+        if not fb or not itemID then return end
+        local numID = tonumber(itemID)
+        local strID = tostring(itemID)
+        local altFB = GetAltFB(fb)
+
+        local function Apply(targetFB)
+            if not targetFB or not BiaoGe.auctionPreset or not BiaoGe.auctionPreset[targetFB] then return end
+            local mDB = BiaoGe.auctionPreset[targetFB].money
+            if not mDB then return end
+            if txt and txt ~= "" then
+                if numID then mDB[numID .. "tips"] = txt end
+                mDB[strID .. "tips"] = txt
+            else
+                if numID then mDB[numID .. "tips"] = nil end
+                mDB[strID .. "tips"] = nil
+            end
+        end
+
+        Apply(fb)
+        Apply(altFB)
+    end
+
+    local function SetPresetItemAuto(fb, itemID, val)
+        if not fb or not itemID then return end
+        local numID = tonumber(itemID)
+        local strID = tostring(itemID)
+        local altFB = GetAltFB(fb)
+
+        local function Apply(targetFB)
+            if not targetFB or not BiaoGe.auctionPreset or not BiaoGe.auctionPreset[targetFB] then return end
+            local aDB = BiaoGe.auctionPreset[targetFB].autoAuction
+            if not aDB then return end
+            if val ~= nil then
+                if numID then aDB[numID] = val end
+                aDB[strID] = val
+            else
+                if numID then aDB[numID] = nil end
+                aDB[strID] = nil
+            end
+        end
+
+        Apply(fb)
+        Apply(altFB)
+    end
 
     -- 穿透式物品查询扫描 Tooltip（强力迫使底层游戏客户端向服务器发送物品查询数据包）
     local scanTip = CreateFrame("GameTooltip", "BGLitePresetScanTip", UIParent, "GameTooltipTemplate")
@@ -1026,7 +1113,6 @@ function ns.InitAuctionPresetModule()
         end
 
         local function BatchSetAutoAuction(mode)
-            local autoDB = BiaoGe.auctionPreset[currentFB].autoAuction
             local count = 0
             for _, item in ipairs(currentItems) do
                 local itemID = item.itemID
@@ -1061,20 +1147,18 @@ function ns.InitAuctionPresetModule()
                         val = 1 -- 自动
                     end
                 end
-                autoDB[itemID] = val
-                autoDB[tostring(itemID)] = val
-                if tonumber(itemID) then autoDB[tonumber(itemID)] = val end
+                SetPresetItemAuto(currentFB, itemID, val)
                 count = count + 1
             end
             ApplyFilterAndSort()
             RefreshScrollView()
 
             if mode == "enable" then
-                DEFAULT_CHAT_FRAME:AddMessage(string.format("|cff00BFFF[BGLite 自动拍卖]|r 已将 %s 共 %d 件装备设为：|cff00ff00全部开启自动拍卖|r (橙装保留人工保护)", GetFBDisplayName(currentFB), count))
+                DEFAULT_CHAT_FRAME:AddMessage(string.format("|cff00BFFF[BGLite 自动拍卖]|r 已将 %s 共 %d 件装备设为：|cff00ff00全部开启自动拍卖|r (橙装保留人工保护，已同步关联副本)", GetFBDisplayName(currentFB), count))
             elseif mode == "disable" then
-                DEFAULT_CHAT_FRAME:AddMessage(string.format("|cff00BFFF[BGLite 自动拍卖]|r 已将 %s 共 %d 件装备设为：|cffff8000全部关闭 (保留人工处理)|r", GetFBDisplayName(currentFB), count))
+                DEFAULT_CHAT_FRAME:AddMessage(string.format("|cff00BFFF[BGLite 自动拍卖]|r 已将 %s 共 %d 件装备设为：|cffff8000全部关闭 (保留人工处理)|r (已同步关联副本)", GetFBDisplayName(currentFB), count))
             elseif mode == "default" then
-                DEFAULT_CHAT_FRAME:AddMessage(string.format("|cff00BFFF[BGLite 自动拍卖]|r 已恢复默认自动规则：|cffffaa00橙装、蓝绿装、套装/兑换物设为不自动(人工处理)|r，|cff00ff00普通紫装已开启自动拍卖|r", GetFBDisplayName(currentFB)))
+                DEFAULT_CHAT_FRAME:AddMessage(string.format("|cff00BFFF[BGLite 自动拍卖]|r 已恢复默认自动规则：|cffffaa00橙装、蓝绿装、套装/兑换物设为不自动(人工处理)|r，|cff00ff00普通紫装已开启自动拍卖|r (已同步关联副本)", GetFBDisplayName(currentFB)))
             end
         end
 
@@ -1150,10 +1234,15 @@ function ns.InitAuctionPresetModule()
                 OnAccept = function()
                     BiaoGe.auctionPreset[currentFB].money = {}
                     BiaoGe.auctionPreset[currentFB].autoAuction = {}
+                    local altFB = GetAltFB(currentFB)
+                    if altFB and BiaoGe.auctionPreset[altFB] then
+                        BiaoGe.auctionPreset[altFB].money = {}
+                        BiaoGe.auctionPreset[altFB].autoAuction = {}
+                    end
                     ApplyFilterAndSort()
                     RefreshScrollView()
                     if UpdateBottomTipCount then UpdateBottomTipCount() end
-                    DEFAULT_CHAT_FRAME:AddMessage("|cff00BFFF[BGLite]|r " .. string.format("已清空 %s 的所有预设价格与自动拍卖设置", GetFBDisplayName(currentFB)))
+                    DEFAULT_CHAT_FRAME:AddMessage("|cff00BFFF[BGLite]|r " .. string.format("已清空 %s 的所有预设价格与自动拍卖设置（已同步时光关联副本）", GetFBDisplayName(currentFB)))
                 end,
             }
             StaticPopup_Show("BGLITE_CLEAR_PRESET_CONFIRM")
@@ -1335,14 +1424,9 @@ function ns.InitAuctionPresetModule()
             pEdit:SetScript("OnTextChanged", function(self, userInput)
                 if not userInput or not row.data then return end
                 local num = tonumber(self:GetText()) or 0
-                local moneyDB = BiaoGe.auctionPreset[currentFB].money
-                if num > 0 then
-                    moneyDB[row.data.itemID] = num
-                    row.data.price = num
-                else
-                    moneyDB[row.data.itemID] = nil
-                    row.data.price = 0
-                end
+                local itemID = row.data.itemID
+                SetPresetItemPrice(currentFB, itemID, num)
+                row.data.price = (num > 0) and num or 0
             end)
             pEdit:SetScript("OnEnterPressed", function(self) self:ClearFocus() end)
             pEdit:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
@@ -1359,14 +1443,9 @@ function ns.InitAuctionPresetModule()
             tEdit:SetScript("OnTextChanged", function(self, userInput)
                 if not userInput or not row.data then return end
                 local txt = self:GetText():trim()
-                local moneyDB = BiaoGe.auctionPreset[currentFB].money
-                if txt ~= "" then
-                    moneyDB[row.data.itemID .. "tips"] = txt
-                    row.data.tips = txt
-                else
-                    moneyDB[row.data.itemID .. "tips"] = nil
-                    row.data.tips = ""
-                end
+                local itemID = row.data.itemID
+                SetPresetItemTips(currentFB, itemID, txt)
+                row.data.tips = (txt ~= "") and txt or ""
             end)
             tEdit:SetScript("OnEnterPressed", function(self) self:ClearFocus() end)
             tEdit:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
@@ -1381,14 +1460,10 @@ function ns.InitAuctionPresetModule()
             aCheck:SetScript("OnClick", function(self)
                 if BG.PlaySound then BG.PlaySound(1) end
                 if not row.data then return end
-                local autoDB = BiaoGe.auctionPreset[currentFB].autoAuction
-                if self:GetChecked() then
-                    autoDB[row.data.itemID] = 1
-                    row.data.autoAuction = 1
-                else
-                    autoDB[row.data.itemID] = 0
-                    row.data.autoAuction = 0
-                end
+                local itemID = row.data.itemID
+                local val = self:GetChecked() and 1 or 0
+                SetPresetItemAuto(currentFB, itemID, val)
+                row.data.autoAuction = val
             end)
             aCheck:SetScript("OnEnter", function(self)
                 GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
@@ -1421,11 +1496,11 @@ function ns.InitAuctionPresetModule()
             clrBt:SetScript("OnClick", function()
                 if BG.PlaySound then BG.PlaySound(1) end
                 if row.data then
-                    local moneyDB = BiaoGe.auctionPreset[currentFB].money
-                    local autoDB = BiaoGe.auctionPreset[currentFB].autoAuction
-                    moneyDB[row.data.itemID] = nil
-                    moneyDB[row.data.itemID .. "tips"] = nil
-                    if autoDB then autoDB[row.data.itemID] = nil end
+                    local itemID = row.data.itemID
+                    SetPresetItemPrice(currentFB, itemID, 0)
+                    SetPresetItemTips(currentFB, itemID, "")
+                    SetPresetItemAuto(currentFB, itemID, nil)
+
                     row.data.price = 0
                     row.data.tips = ""
                     row.data.autoAuction = nil
@@ -1555,9 +1630,42 @@ function ns.InitAuctionPresetModule()
         BG.StartAuction = function(link, bt, isNotAuctioned, notAlt, isRightButton, noSound, callback)
             orig_StartAuction(link, bt, isNotAuctioned, notAlt, isRightButton, noSound, callback)
 
-            -- 当 BG.StartAucitonFrame 弹出且有装备时，读取预设价格并自动填入
+            -- 当 BG.StartAucitonFrame 弹出且有装备时，确保手动修改具有最高绝对优先级
             local f = BG.StartAucitonFrame
             if f and f:IsVisible() and f.Edit2 then
+                -- 核心防御机制：为输入框与开始按钮安装双重防御，确保团长手动输入的价格永远凌驾于任何预设之上
+                if not f._bgliteManualPriceSecured then
+                    f._bgliteManualPriceSecured = true
+
+                    -- 防线 A：输入框实时同步（键盘手输、退格、快捷价格按钮点击时，立即更新 bt.money 与全局配置）
+                    f.Edit2:HookScript("OnTextChanged", function(self)
+                        local val = tonumber(self:GetText())
+                        if f.bt then
+                            f.bt.money = (val and val > 0) and val or nil
+                        end
+                        if val and val > 0 then
+                            BiaoGe.Auction.money = val
+                        end
+                    end)
+
+                    -- 防线 B：开始拍卖按钮前置拦截（点击瞬间强制从 Edit2 提取文本，以当前视觉看到的数字为最终绝对基准）
+                    if f.bt then
+                        local orig_OnClick = f.bt:GetScript("OnClick")
+                        if orig_OnClick then
+                            f.bt:SetScript("OnClick", function(btn, ...)
+                                local manualMoney = f.Edit2 and tonumber(f.Edit2:GetText())
+                                if manualMoney and manualMoney > 0 then
+                                    btn.money = manualMoney
+                                    BiaoGe.Auction.money = manualMoney
+                                else
+                                    btn.money = nil
+                                end
+                                orig_OnClick(btn, ...)
+                            end)
+                        end
+                    end
+                end
+
                 local itemID = SafeGetItemID(link)
                 if itemID then
                     local money, tips = BG.GetAuctionPreset(BG.FB1 or currentFB, itemID)
@@ -1567,8 +1675,14 @@ function ns.InitAuctionPresetModule()
                         if f.bt then
                             f.bt.money = money
                         end
+                        BiaoGe.Auction.money = money
                         if tips and tips ~= "" and f.EditTips then
                             f.EditTips:SetText(tips)
+                        end
+                    else
+                        -- 若无预设底价，清空残留的 bt.money，确保以输入框当前文本为准
+                        if f.bt then
+                            f.bt.money = tonumber(f.Edit2:GetText())
                         end
                     end
                 end

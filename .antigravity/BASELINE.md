@@ -26,7 +26,7 @@
 | **入口与基础库** | `BGLite_Plus.toc`<br>`Core/Init.lua`<br>`Core/Lib.lua` | 插件加载清单、生命周期自启动管理、底部 Tab 栏调度、子框架居中与显隐自愈、暴雪原生 ObjectAPI 安全防护代理。 |
 | **数据层 (DB)** | `Core/DB/DB_FilterClassItem.lua`<br>`Core/DB/DB_ItemName.lua`<br>`Core/DB/DB_Loot_ULDtitan.lua`<br>`Core/DB/DB_Loot_SWtitan.lua` | 数据库层：职业装备过滤字典、时光服物品中文名本地缓存、奥杜尔/SWtitan 官方遗漏掉落的运行时安全修补（零侵入上游）。 |
 | **掉落与自动拍卖** | `Core/Module/AutoAuctionOnLoot.lua`<br>`Core/Module/AuctionPreset.lua`<br>`Core/Module/LootHistory.lua` | 掉落监听（`CHAT_MSG_LOOT`）、表格对账、动态槽位锁、多阶梯异步重试、防抖倒计时悬浮条、预设起拍价面板与双阵营掉落池合并。 |
-| **团队工具与运营** | `Core/RaidTool/RaidTool.lua`<br>`Core/Module/TeamInfo.lua`<br>`Core/Module/WhoHistory.lua` | 进组自动通知（仅团长/助理）、YY/DD 语音安全超链接（防第三方插件乱码破坏）、40人阵容预设网格；团队信息留存抽屉（集结号解码、合规中性化、历史联合存储）；O键查询历史记录。 |
+| **团队工具与运营** | `Core/RaidTool/RaidTool.lua`<br>`Core/Module/TeamInfo.lua`<br>`Core/Module/ItemOutTime.lua`<br>`Core/Module/WhoHistory.lua` | 进组自动通知（仅团长/助理）、YY/DD 语音安全超链接（防第三方插件乱码破坏）、40人阵容预设网格；团队信息留存抽屉；装备过期倒计时右侧抽屉与互斥调度；O键查询历史记录。 |
 | **角色资产与总览** | `Core/RoleOverview/RoleOverview*.lua`<br>`Core/Module/Reputation.lua` | 跨角色全景看板（CD、日常、专业、货币）、+N 装备展开收纳、节日 CD 治理、排序持久化；极轻量超低频声望采集工具类。 |
 | **交易与历史账单** | `Core/Module/TradeHistory.lua`<br>`Core/Module/TradeFix.lua`<br>`Core/Module/History.lua`<br>`Core/Module/BestPrice.lua` | 玩家交易历史记录与明细对账、交易防漏单安全拦截；历史账单多快照保存/应用/查看、装备历史价格走势图与原生 Tooltip 协同。 |
 | **阵容专精与战斗监控** | `Core/RaidTool/RaidComp.lua`<br>`Core/RaidTool/RaidCompUI.lua`<br>`Core/RaidTool/RaidCD*.lua` | 全局专精嗅探中枢（全图超视距）、全口径花名册、双天赋感应、Buff/Debuff 缺口雷达；团队关键技能/大减伤冷却监控与频道智能降级。 |
@@ -60,6 +60,22 @@
    - **防线**: 在 `Lib.lua` 中严格校验输入（仅接受数字 ID > 25 或含合法 `item:(%d+)` 的字符串），阻断普通备注或占位符进入；本地已缓存（`IsItemDataCached`）直接毫秒级放行回调；未缓存调用原生异步并挂载 `pcall` 兜底。
 6. **TOC 双阵营掉落池合并**:
    - 十字军试炼 Boss 11~16 底层严格区分联盟/部落两套 ID，在 `CollectFBItems` 中通过 `TOC_FACTION_LOOT_TABLES` 自动合并双阵营掉落，确保无论团长当前登录何种阵营，预设底价均能覆盖两端，杜绝换号漏拍。
+8. **【已排查并修复 2026-10-10】单件修改价格（如橙装改1000）拍卖时仍以批量价格（15）发起的真实根因与修复**:
+   - **问题现象**: 团长配置毒蛇神殿批量起拍价 15 后，橙装默认手动未勾选自动，团长在列表中将橙装单件底价改为 1000。开团测试时，橙装在发起拍卖时起拍价依然显示为批量价格 15。
+   - **真实根因 (Asymmetric Storage & bt.money Deadlock)**:
+     1. **数据写入不对称**: 批量改价（`BGLITE_BATCH_PRESET_PRICE`）同时更新了当前副本 `currentFB` 和时光服对应关联副本 `altFB`（如 `SSCtitan` 与 `SSC`），且同时写入了数字键和字符串键；但单件输入框 `row.priceEdit` OnTextChanged 仅写入了 `currentFB` 的数字键，**完全遗漏了 `altFB`，且未更新字符串键**。导致 `altFB` 与字符串键中依然死锁着批量写入的 15；
+     2. **多副本检索顺序脏数据屏蔽**: 开团时活动副本识别出的代号（如 `SSC`）与团长在预设下拉选中的 `SSCtitan` 互为别名。`BG.GetAuctionPreset("SSC", itemID)` 原逻辑第一步先查 `SSC`，直接命中了批量残留的 15，团长在 `SSCtitan` 中修改的 1000 彻底被脏数据屏蔽；
+     3. **拍卖弹窗 `f.bt.money` 锁死导致手动修改被彻底无视 (核心根因)**:
+        - 原版 `BGLite/Auction.lua` 的 `Start_OnClick` 取值逻辑硬编码为：`local money = self.money or tonumber(BiaoGe.Auction.money)`；
+        - 在打开拍卖弹窗时，Hook 代码执行了 `f.bt.money = money`（被注入了预设底价 15）；
+        - **致命后果**：只要 `f.bt.money` 被赋了值，后续团长在弹窗输入框 `f.Edit2` 里无论敲键盘修改成多少（如 1000），点击【开始拍卖】按钮时，由于 `self.money`（15）存在且具有最高短路优先级，原生代码直接无视输入框的 1000，硬生生按 15 发起了拍卖！
+   - **彻底治理**:
+     1. **全链路关联副本强同步**: 提取 `GetAltFB` 别名计算函数，封装 `SetPresetItemPrice`、`SetPresetItemTips`、`SetPresetItemAuto`，对单件价格、起拍语、自动勾选状态以及清空操作，全面强制**同时写入/清除当前副本与关联副本的双类型键（数字键+字符串键）**；
+     2. **优先预设面板当前副本 + 历史脏数据自愈**: 重构 `BG.GetAuctionPreset(FB, itemID)`。若预设面板当前选中的 `curFB` 与活动副本族关联，最高优先级采用 `curFB`，并在命中时自动将最新数值双向回写同步至 `FB` 与 `altFB`，一举洗净历史脏数据；
+     3. **手动输入价格绝对最高优先级双重防线 (彻底解决输入框 1000 却发 15 的问题)**:
+        - **防线 A (实时输入同步)**：对 `f.Edit2` 挂载 `OnTextChanged`，无论团长手动敲键盘修改、退格、还是点击底部快捷价格按钮（100/300/1000/2000），实时同步更新 `f.bt.money` 与 `BiaoGe.Auction.money`，确保回车发起时立即生效；
+        - **防线 B (点击开始拍卖前置强校验)**：拦截 `f.bt:SetScript("OnClick")`，在原生开拍逻辑执行**之前**，强制从 `f.Edit2:GetText()` 取出当前视觉看到的真实文本，覆写 `btn.money = manualMoney`。确保**团长眼前输入框里的数字拥有绝对最高优先级**，彻底杜绝任何被预设价格冲掉的可能；
+     4. **橙装品质判断兜底强化**: 在 `AutoAuctionOnLoot.IsItemAutoEnabled` 中，补充 `itemInfoCache` 与超链接色值判断（`link:find("|cffff8000")`），杜绝因 `GetItemInfo` 异步尚未缓存导致的橙装误判与意外自动开拍。
 
 ### 3.2 团队工具与防封语音通信 (RaidTool / TeamInfo)
 1. **进组通知权限防御**:
@@ -76,6 +92,13 @@
 4. **抽屉式侧边栏架构与联合存储**:
    - 挂载在主框架右侧边缘（宽 340，高 480，层级 `GetFrameLevel() + 35`），切换任意 Tab 保持常驻；
    - 具备未绑定、已绑定、只读历史存档三态展示；在 `BG.SaveBiaoGe(FB)` 时将 `teamInfo` 深度拷贝进历史快照，实现历史账单与当时团队通告的联合自愈还原。
+5. **装备过期时间抽屉移植与团队信息右侧互斥联动规范 (ItemOutTime / TeamInfo) (2026-10-10)**:
+   - **背包交易时限解析**: 采用内部独立的 `BGLite_ItemOutTimeScanTooltip` 专用隐藏扫描 Tooltip，安全提取背包内团本装备的 `BIND_TRADE_TIME_REMAINING` 剩余交易时间，支持中/英/繁等多语言时限正则匹配；
+   - **交互赋能**: 条目支持品质着色、彩色倒计时进度条（绿/红）、Shift+左键发送超链接、Alt+左键（团长）一键发起拍卖；
+   - **右侧抽屉完全互斥机制**:
+     - 顶部按钮排布：`[拍卖记录]` ➔ `[团队信息]` ➔ `[装备过期]` 自左向右紧凑排布；
+     - 互斥闭环：当打开【团队信息】抽屉时，若【装备过期】处于可见状态，自动隐藏过期抽屉并清理持久化；当打开【装备过期】抽屉时，若【团队信息】处于可见状态，自动隐藏团队信息抽屉；
+     - 挂载双向 `OnShow` 钩子防御，确保主界面右侧空间永远只有单一抽屉展开，彻底杜绝两个抽屉重叠打架。
 
 ### 3.3 角色总览与数据资产 (RoleOverview / Reputation)
 1. **节日副本 (holiday) CD 彻底剔除与自愈**:
@@ -87,6 +110,18 @@
    - 注册 `/bgcd`、`/bgrole`、`/bgzl`、`/bgliter` 独立别名，规避其他插件（如 Baganator）抢占 `/bgr` 的冲突。
 4. **轻量声望工具类 (Reputation.lua) 性能规范**:
    - 角色登录后静默等待 30 秒初次扫描；战斗状态完全避让；收到 `UPDATE_FACTION` 触发 10 秒长防抖合并；对齐原版数据格式只读安全输出。
+5. **战斗状态下 CD 悬浮窗允许正常稳定查看与闪烁根除 (2026-10-10)**:
+   - **问题现象**: 战斗中鼠标经过小地图图标或按修饰键（Shift/Ctrl/Alt）时，CD 角色总览悬浮窗产生剧烈抖动与一闪一闪的高频闪烁。
+   - **问题根因 (Oscillation 死循环)**:
+     1. 原版悬浮窗在 `RoleOverview_core.lua` 的 Watchdog（`OnUpdate`）中硬编码了 `if InCombatLockdown() then f:Hide() return end`，试图在战斗中强制隐藏；
+     2. 但悬浮窗不拦截鼠标（`EnableMouse(false)`），隐藏后底层小地图图标直接暴露在鼠标下，暴雪底层立即重新分发 `OnEnter` 唤起悬浮窗；
+     3. 唤起后下一帧 Watchdog 又检测到战斗再次隐藏，形成每秒十余次“显示 -> 隐藏 -> 重新显示 -> 隐藏”的高频振荡死循环；
+     4. `MODIFIER_STATE_CHANGED` 监听在战斗中玩家频繁按组合键施法时，进一步向悬浮窗发送重建请求。
+   - **彻底治理 (战斗中支持稳定查看，移除粗暴强制隐藏)**:
+     - 悬浮窗属于纯展示型非受保护 Frame（Non-Secure），客户端在战斗中完全支持其正常显示和关闭；
+     - 彻底移除 Watchdog 中粗暴的 `if InCombatLockdown() then f:Hide() return end`，仅保留离开锚点 0.25 秒缓冲平滑隐藏；
+     - 鼠标悬停在图标或悬浮窗内部时保持平稳展示（战斗中也能清晰看 CD），移开后正常平滑关闭，彻底消除闪烁抖动；
+     - 在 `MODIFIER_STATE_CHANGED` 事件首行保留 `if InCombatLockdown() then return end`，避免战斗中频繁按组合键触发全量重新布局。
 
 ### 3.4 历史账单与交易记录 (History / TradeHistory / TradeFix)
 1. **双浮窗协同规范**:

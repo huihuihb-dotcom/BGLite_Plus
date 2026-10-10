@@ -829,6 +829,13 @@ function AutoAuctionOnLoot.IsItemAutoEnabled(itemID, FB)
 
     -- 5. 橙装 (Legendary, quality == 5) 出厂保护：默认必须人工处理，除非团长显式配置为开启 (1)
     local name, link, quality = GetItemInfo(itemID)
+    if not quality and link then
+        if link:find("|cffff8000") then quality = 5
+        elseif link:find("|cffa335ee") then quality = 4 end
+    end
+    if not quality and ns.GetItemCachedQuality then
+        quality = ns.GetItemCachedQuality(itemID)
+    end
     if quality == 5 then
         return false -- 橙装默认不自动，保留人工处理
     end

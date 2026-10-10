@@ -1385,13 +1385,7 @@ function BG.SetFBCD(self, position, click, refresh)
                 if elapsedSum < 0.08 then return end
                 elapsedSum = 0
 
-                -- 1. 战斗状态下强制隐去悬浮窗
-                if InCombatLockdown() then
-                    f:Hide()
-                    return
-                end
-
-                -- 2. 锚点按钮已隐藏（如被 SexyMap/MBB 收起或切地图）
+                -- 1. 锚点按钮已隐藏（如被 SexyMap/MBB 收起或切地图）
                 if anchorButton and not anchorButton:IsVisible() then
                     f:Hide()
                     return
@@ -2171,6 +2165,7 @@ function BG.UpdateFBCDFrameScale()
 end
 
 BG.RegisterEvent("MODIFIER_STATE_CHANGED", function(self, event, enter)
+    if InCombatLockdown() then return end
     if BG.FBCDFrame and not BG.FBCDFrame.click and BG.FBCDFrame:IsVisible() then
         BG.FBCDFrame:Hide()
         BG.SetFBCD(BG.FBCDFrame.lastSelf, BG.FBCDFrame.lastPosition)

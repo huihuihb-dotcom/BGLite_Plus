@@ -1004,12 +1004,21 @@ function TeamInfo.CreateUI()
     TeamInfo.topBtn = topBtn
     BG.ButtonTeamInfo = topBtn
 
+    if BG.RepositionButtonGuoQi then
+        BG.RepositionButtonGuoQi()
+    end
+
     topBtn:SetScript("OnClick", function(self)
         BiaoGe.options = BiaoGe.options or {}
         if TeamInfo.sideFrame and TeamInfo.sideFrame:IsVisible() then
             BiaoGe.options.showTeamInfoFrame = 0
             TeamInfo.sideFrame:Hide()
         else
+            -- 核心互斥：打开团队信息抽屉时，自动隐藏右侧装备过期抽屉
+            if BG.itemGuoQiFrame and BG.itemGuoQiFrame:IsVisible() then
+                BiaoGe.options.showGuoQiFrame = 0
+                BG.itemGuoQiFrame:Hide()
+            end
             BiaoGe.options.showTeamInfoFrame = 1
             if TeamInfo.sideFrame then
                 TeamInfo.sideFrame:Show()
@@ -1049,6 +1058,12 @@ function TeamInfo.CreateUI()
     f:SetBackdropBorderColor(0.2, 0.8, 1.0, 0.95)
     f:EnableMouse(true)
     f:SetShown(BiaoGe.options and BiaoGe.options.showTeamInfoFrame == 1)
+    f:HookScript("OnShow", function()
+        if BG.itemGuoQiFrame and BG.itemGuoQiFrame:IsVisible() then
+            BiaoGe.options.showGuoQiFrame = 0
+            BG.itemGuoQiFrame:Hide()
+        end
+    end)
     TeamInfo.sideFrame = f
 
     -- 顶部标题与状态标签

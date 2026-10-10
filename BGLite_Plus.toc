@@ -45,6 +45,7 @@ Core\Module\FilterClassItem.lua
 Core\Module\ItemLib.lua
 Core\Module\Hope.lua
 Core\Module\TeamInfo.lua
+Core\Module\ItemOutTime.lua
 Core\Module\WhoHistory.lua
 Core\Module\TradeHistory.lua
 Core\Module\TradeFix.lua
