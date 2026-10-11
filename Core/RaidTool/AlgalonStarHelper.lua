@@ -9,6 +9,7 @@ local BIAOGE_TEXT_FONT = BIAOGE_TEXT_FONT or STANDARD_TEXT_FONT
 local STC_b1 = BG.STC_b1 or function(t) return "|cff00BFFF" .. t .. "|r" end
 local STC_g1 = BG.STC_g1 or function(t) return "|cff00FF00" .. t .. "|r" end
 local STC_r1 = BG.STC_r1 or function(t) return "|cffff0000" .. t .. "|r" end
+local STC_o1 = BG.STC_o1 or function(t) return "|cffff9900" .. t .. "|r" end
 local STC_y1 = BG.STC_y1 or function(t) return "|cffffff00" .. t .. "|r" end
 local STC_dis = BG.STC_dis or function(t) return "|cff888888" .. t .. "|r" end
 local STC_w1 = BG.STC_w1 or function(t) return "|cffffffff" .. t .. "|r" end
@@ -502,22 +503,39 @@ local function CreateMainUI()
         BG.PlaySound(1)
     end)
 
-    -- 专属战术警报栏 (第 2 行：用于双星连炸等重大突发危机，平时自动隐藏零占用)
+    -- 专属战术警报栏 (第 2 行：用于双星连炸等重大突发危机，暗夜黑红底+金橙高光微边，平时自动隐藏零占用)
     local alertBar = CreateFrame("Frame", nil, mainFrame)
     alertBar:SetPoint("TOPLEFT", mainFrame, "TOPLEFT", 4, -28)
     alertBar:SetPoint("TOPRIGHT", mainFrame, "TOPRIGHT", -4, -28)
-    alertBar:SetHeight(20)
+    alertBar:SetHeight(22)
 
+    -- 暗夜黑红底色（告别刺目廉价大鲜红，兼顾高级感与危机感）
     local alertBg = alertBar:CreateTexture(nil, "BACKGROUND")
     alertBg:SetAllPoints()
-    alertBg:SetColorTexture(0.75, 0.08, 0.08, 0.95)
+    alertBg:SetColorTexture(0.18, 0.04, 0.05, 0.92)
     alertBar.bg = alertBg
+
+    -- 上下 1px 金橙发光细边，打造精致 HUD 战术条质感
+    local borderTop = alertBar:CreateTexture(nil, "BORDER")
+    borderTop:SetPoint("TOPLEFT", alertBar, "TOPLEFT", 0, 0)
+    borderTop:SetPoint("TOPRIGHT", alertBar, "TOPRIGHT", 0, 0)
+    borderTop:SetHeight(1)
+    borderTop:SetColorTexture(1.0, 0.5, 0.1, 0.65)
+    alertBar.borderTop = borderTop
+
+    local borderBottom = alertBar:CreateTexture(nil, "BORDER")
+    borderBottom:SetPoint("BOTTOMLEFT", alertBar, "BOTTOMLEFT", 0, 0)
+    borderBottom:SetPoint("BOTTOMRIGHT", alertBar, "BOTTOMRIGHT", 0, 0)
+    borderBottom:SetHeight(1)
+    borderBottom:SetColorTexture(1.0, 0.5, 0.1, 0.65)
+    alertBar.borderBottom = borderBottom
 
     local alertText = alertBar:CreateFontString(nil, "OVERLAY")
     alertText:SetFont(BIAOGE_TEXT_FONT, 11, "OUTLINE")
     alertText:SetPoint("LEFT", alertBar, "LEFT", 6, 0)
     alertText:SetPoint("RIGHT", alertBar, "RIGHT", -6, 0)
     alertText:SetJustifyH("LEFT")
+    alertText:SetWordWrap(false) -- 彻底杜绝文字折行、下坠穿模
     alertBar.text = alertText
     alertBar:Hide()
     mainFrame.alertBar = alertBar
@@ -755,14 +773,11 @@ local function RefreshUI()
         mainFrame.titleText:SetText(STC_b1("观星者") .. " 塌缩星监控")
     end
 
-    -- 5.5 第 2 行：专属战术警报栏 (双星连炸等重大突发危机，平时自动隐藏零占用)
+    -- 5.5 第 2 行：专属战术警报栏 (双星连炸等重大突发危机，金橙标题+高亮指令，平时自动隐藏零占用)
     local alertMsg = nil
     if worstCollision then
-        if worstCollision.nearBigBang then
-            alertMsg = STC_r1("【大爆炸连爆!】") .. string.format("%s 与 %s 仅差%.1fs! 慢星停手·错开时间!", worstCollision.markEarlier, worstCollision.markLater, worstCollision.gap)
-        else
-            alertMsg = STC_r1("【双星连炸!】") .. string.format("%s 与 %s 仅差%.1fs! 慢星停手·错开时间!", worstCollision.markEarlier, worstCollision.markLater, worstCollision.gap)
-        end
+        local prefix = worstCollision.nearBigBang and STC_o1("【大爆炸连爆】") or STC_o1("【双星连爆】")
+        alertMsg = prefix .. string.format("%s 与 %s 仅差 %.1fs! ", worstCollision.markEarlier, worstCollision.markLater, worstCollision.gap) .. STC_y1("慢星停手·错开")
     end
 
     local isAlertShown = (alertMsg ~= nil and mainFrame.alertBar ~= nil)
@@ -773,9 +788,9 @@ local function RefreshUI()
         mainFrame.alertBar:Hide()
     end
 
-    -- 动态自适应血条起始 Y 坐标与窗口总高度 (有第 2 行警报时向下微展 22px)
-    local startY = isAlertShown and -52 or -30
-    local targetHeight = isAlertShown and 188 or 166
+    -- 动态自适应血条起始 Y 坐标与窗口总高度 (有第 2 行警报时向下微展 24px)
+    local startY = isAlertShown and -54 or -30
+    local targetHeight = isAlertShown and 190 or 166
     if mainFrame:GetHeight() ~= targetHeight then
         mainFrame:SetHeight(targetHeight)
     end
@@ -814,9 +829,9 @@ local function RefreshUI()
         targetWidth = 318
     end
 
-    -- 若触发第 2 行双星连炸警报，适当加宽确保长警告文字完整展示
+    -- 若触发第 2 行双星连炸警报，保持至少 318px 充足宽幅，确保横向单行优雅展开
     if isAlertShown then
-        targetWidth = math.max(targetWidth, 310)
+        targetWidth = math.max(targetWidth, 318)
     end
 
     if mainFrame:GetWidth() ~= targetWidth then
