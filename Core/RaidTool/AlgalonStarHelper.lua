@@ -29,8 +29,9 @@ local BIG_BANG_SPELLS = {
     [64443] = true,
 }
 
-local BIGBANG_BASE_COOLDOWN = 90.0   -- 大爆炸周期约 90 秒
-local PHASE2_HP_THRESHOLD = 0.20     -- 奥尔加隆血量低于 20% 进入 P2 (转阶段)
+local BIGBANG_BASE_COOLDOWN = 90.5     -- 每次施法大爆炸间隔严格为 90.5 秒 (对齐官方 DBM: timerNextBigBang = 90.5s)
+local BIGBANG_FIRST_PULL_DELAY = 98.0  -- 战斗开始到首次大爆炸约 98.0 秒 (对齐 DBM: 8s 开怪剧情台词 + 90s)
+local PHASE2_HP_THRESHOLD = 0.20       -- 奥尔加隆血量低于 20% 进入 P2 (转阶段)
 
 -- 团队标记固定映射：1号骷髅(8), 2号红叉(7), 3号方块(6), 4号三角(4)
 local MARK_LIST = { 8, 7, 6, 4 }
@@ -41,6 +42,14 @@ local MARK_NAMES = {
     [4] = "三角",
 }
 local MARK_TEXTURE_PREFIX = "Interface\\TargetingFrame\\UI-RaidTargetingIcon_"
+
+local function GetMarkIcon(mark, size)
+    size = size or 16
+    if mark and type(mark) == "number" and mark >= 1 and mark <= 8 then
+        return string.format("|TInterface\\TargetingFrame\\UI-RaidTargetingIcon_%d:%d:%d:0:0|t", mark, size, size)
+    end
+    return ""
+end
 
 -- 核心修星伤害 DoT 白名单定义 (德鲁伊、牧师、术士)
 local RAW_DOT_SPELLS = {
@@ -329,81 +338,98 @@ local function EvaluateStarSafety(star, now, isBigBangCasting, bigBangLeft, time
     local dps = (star.dps > 0) and star.dps or (star.maxHP * 0.01)
     local eta = star.currentHP / dps
 
-    -- 🔴 【最高优先级：双星连炸致命灭团点 (Double Star Collision)】
+    -- 【最高优先级：双星连炸致命灭团点 (Double Star Collision)】
     -- 无论大爆炸处于何种阶段，两颗星相隔 <= 4.2s 连续爆炸，瞬间 40k+ 伤害必灭团！
     -- 若还发生在大爆炸前后（大爆炸前 14s 或大爆炸后出洞 15s 内），更是 100% 团灭大祸！
     -- 强制标红报警，绝不允许被“大爆炸后安全”掩盖，并给出精确的“打爆拉开 / 停手停DoT”指令！
     if collisionInfo then
-        local markOther = collisionInfo.otherMark or "另一星"
         local gap = collisionInfo.gap or 0
         if collisionInfo.nearBigBang then
             if collisionInfo.isEarlier then
-                return "RED", string.format("💥大爆炸双爆! (早%.1fs·集火引爆)", gap), 1.0, 0.1, 0.0
+                return "RED", string.format("大爆炸双爆! (早%.1fs·先引爆)", gap), 1.0, 0.1, 0.0
             else
-                return "RED", string.format("💥大爆炸双爆! (慢%.1fs·全团停手!)", gap), 1.0, 0.1, 0.0
+                return "RED", string.format("大爆炸双爆! (慢%.1fs·停手错开)", gap), 1.0, 0.1, 0.0
             end
         else
             if collisionInfo.isEarlier then
-                return "RED", string.format("💥双星连炸! (早%.1fs·集火拉开)", gap), 1.0, 0.2, 0.0
+                return "RED", string.format("双星连炸! (早%.1fs·先引爆)", gap), 1.0, 0.2, 0.0
             else
-                return "RED", string.format("💥双星连炸! (慢%.1fs·全团停手)", gap), 1.0, 0.2, 0.0
+                return "RED", string.format("双星连炸! (慢%.1fs·停手错开)", gap), 1.0, 0.2, 0.0
             end
         end
     end
 
     -- A. 大爆炸正在读条中 (8 秒读条期间，全团进入黑洞躲避)
     if isBigBangCasting then
-        -- A1. 刚进洞免伤期内炸 (自爆时间在出洞前 1.5s 以前)：全团在洞内免疫物理伤害！
+        -- A1. 刚进洞免伤期内炸 (自爆时间在出洞前 1.5s 以前)：全团在洞内免疫伤害！【真正绿色·进洞免伤】
         if eta >= 1.5 and eta <= (bigBangLeft - 1.2) then
-            return "GREEN", string.format("✓进洞免伤炸 (洞内%.1fs)", eta), 0.1, 0.85, 0.3
+            return "GREEN", string.format("进洞免伤 (洞内%.1fs)", eta), 0.1, 0.85, 0.3
         end
 
         -- A2. 出洞瞬间炸 (|eta - bigBangLeft| <= 1.5s)：刚出洞残血吃自爆，大团灭点！
         if math.abs(eta - bigBangLeft) <= 1.5 then
-            return "RED", string.format("💥出洞瞬间炸! (危险%.1fs)", eta), 1.0, 0.2, 0.0
+            return "RED", string.format("出洞瞬间炸! (危险%.1fs)", eta), 1.0, 0.2, 0.0
         end
 
-        -- A3. 大爆炸炸完、全团出洞后 2s ~ 15s 才炸：【最完美节奏！】
-        if eta > (bigBangLeft + 1.5) and eta <= (bigBangLeft + 15.0) then
+        -- A3. 大爆炸炸完、全团出洞后才炸：【出洞炸，黄色警示】
+        if eta > (bigBangLeft + 1.5) and eta <= (bigBangLeft + 20.0) then
             local delay = eta - bigBangLeft
-            return "GREEN", string.format("✓炸后安全爆 (出洞+%.1fs)", delay), 0.1, 0.85, 0.3
+            return "YELLOW", string.format("出洞炸 (出洞+%.1fs)", delay), 0.95, 0.8, 0.1
         end
 
         -- A4. 进洞前不到 1.5 秒急促爆炸：
         if eta < 1.5 then
-            return "RED", string.format("⚡进洞前猝死! (%.1fs)", eta), 0.95, 0.1, 0.1
+            return "RED", string.format("进洞前猝死! (%.1fs)", eta), 0.95, 0.1, 0.1
         end
 
-        -- A5. 炸后延后很久 (>15s) 才炸：掉血慢
-        return "YELLOW", string.format("⚠延后较慢 (出洞+%.0fs)", eta - bigBangLeft), 0.95, 0.8, 0.1
+        -- A5. 炸后延后很久 (>20s) 才炸：掉血慢
+        return "YELLOW", string.format("延后较慢 (出洞+%.0fs)", eta - bigBangLeft), 0.2, 0.7, 0.9
     end
 
     -- B. 非大爆炸读条期间 (正常战斗阶段，依据下次大爆炸倒计时预测)
     local diff = (timeToNextBB > 0) and (eta - timeToNextBB) or nil
 
-    -- B1. 濒死猝死报警 (血量危急)
-    if eta <= 5.0 or pct <= 15 then
-        return "RED", string.format("⚡临界自爆! (%.1fs)", eta), 0.95, 0.1, 0.1
+    -- B1. 与下次大爆炸前夕撞车 (大爆炸前 4 秒至大爆炸开始后 1.5 秒内)：
+    if diff and (diff >= -4.0 and diff < 1.5) then
+        if eta <= 5.0 or pct <= 15 then
+            return "RED", string.format("撞车濒死! (剩%.1fs·差%.1fs)", eta, math.abs(diff)), 1.0, 0.2, 0.0
+        else
+            return "RED", string.format("大爆炸撞车危险! (差%.1fs)", math.abs(diff)), 1.0, 0.3, 0.0
+        end
+    end
+    -- 出洞瞬间撞车 (大爆炸读条 8s 结束前后 1.5s)：
+    if diff and (diff >= 6.5 and diff <= 9.5) then
+        return "RED", string.format("出洞瞬间撞车! (危险%.1fs)", math.abs(diff - 8.0)), 1.0, 0.2, 0.0
     end
 
-    -- B2. 与下次大爆炸前夕撞车 (大爆炸前 4 秒至大爆炸开始后 1.5 秒内)：
-    if diff and (diff >= -4.0 and diff <= 1.5) then
-        return "RED", string.format("💥大爆炸撞车危险! (差%.1fs)", math.abs(diff)), 1.0, 0.3, 0.0
+    -- B2. 【真正完美免伤：进洞免伤】 (自爆正好落在大爆炸 8 秒读条全团在洞内期间，diff 在 +1.5s ~ +6.5s)
+    if diff and (diff >= 1.5 and diff < 6.5) then
+        return "GREEN", string.format("进洞免伤 (洞内%.1fs)", diff - 1.5), 0.1, 0.85, 0.3
     end
 
-    -- B3. 【核心灵魂：在大爆炸后几秒才炸是最完美的】 (diff 在 +2s ~ +15s)
-    if diff and (diff >= 2.0 and diff <= 15.0) then
-        return "GREEN", string.format("✓完美安全 (大爆炸后%.0fs)", diff), 0.1, 0.85, 0.3
-    end
-
-    -- B4. 提前引爆留洞 (在大爆炸前 5s ~ 30s 爆炸)：
+    -- B3. 提前引爆留洞 (在大爆炸前 5s ~ 40s 爆炸)：
     if diff and (diff < -4.0 and eta >= 5.0 and eta <= 40.0) then
         local lead = -diff
-        return "YELLOW", string.format("⚠提前留洞 (提前%.0fs爆)", lead), 0.95, 0.8, 0.1
+        return "YELLOW", string.format("提前留洞 (提前%.0fs爆)", lead), 0.95, 0.8, 0.1
     end
 
-    -- B5. 掉血缓慢 / 延后过久 (不会猝死，但留洞慢)
-    if eta > 60.0 or (diff and diff > 15.0) then
+    -- B4. 濒死自爆预警 (非撞车期，自身血量/时间极度危急)：
+    if eta <= 5.0 or pct <= 15 then
+        if diff and diff < -4.0 then
+            return "YELLOW", string.format("即将留洞 (剩%.1fs·提前%.0fs)", eta, -diff), 0.95, 0.8, 0.1
+        else
+            return "RED", string.format("即将自爆! (剩%.1fs)", eta), 0.95, 0.1, 0.1
+        end
+    end
+
+    -- B5. 【出洞炸】 (大爆炸彻底炸完、全团出洞后爆炸，diff 在 +9.5s ~ +28.0s)：黄色警示！
+    if diff and (diff > 9.5 and diff <= 28.0) then
+        local delay = diff - 8.0
+        return "YELLOW", string.format("出洞炸 (大爆炸后%.0fs)", delay), 0.95, 0.8, 0.1
+    end
+
+    -- B6. 掉血缓慢 / 延后过久 (不会猝死，但留洞慢)
+    if eta > 60.0 or (diff and diff > 28.0) then
         return "YELLOW", string.format("掉血平稳 (%.0fs后)", eta), 0.2, 0.7, 0.9
     end
 
@@ -420,7 +446,7 @@ local function CreateMainUI()
     if mainFrame then return mainFrame end
 
     mainFrame = CreateFrame("Frame", "BG_AlgalonStarMainUI", UIParent, "BackdropTemplate")
-    mainFrame:SetSize(310, 168)
+    mainFrame:SetSize(246, 168)
     mainFrame:SetClampedToScreen(true)
     mainFrame:SetMovable(true)
     mainFrame:EnableMouse(true)
@@ -435,9 +461,7 @@ local function CreateMainUI()
     end
 
     mainFrame:SetScript("OnDragStart", function(self)
-        if not (BiaoGe and BiaoGe.AlgalonStar and BiaoGe.AlgalonStar.locked) then
-            self:StartMoving()
-        end
+        self:StartMoving()
     end)
     mainFrame:SetScript("OnDragStop", function(self)
         self:StopMovingOrSizing()
@@ -466,64 +490,46 @@ local function CreateMainUI()
     local titleText = mainFrame:CreateFontString(nil, "OVERLAY")
     titleText:SetFont(BIAOGE_TEXT_FONT, 12, "OUTLINE")
     titleText:SetPoint("LEFT", titleBg, "LEFT", 6, 0)
-    titleText:SetText(STC_b1("观星者") .. " 塌缩星监控 (自适应)")
+    titleText:SetText(STC_b1("观星者") .. " 塌缩星监控")
     mainFrame.titleText = titleText
-
-    -- 锁定按钮
-    local btnLock = CreateFrame("Button", nil, mainFrame)
-    btnLock:SetSize(16, 16)
-    btnLock:SetPoint("RIGHT", titleBg, "RIGHT", -22, 0)
-    btnLock.icon = btnLock:CreateTexture(nil, "ARTWORK")
-    btnLock.icon:SetAllPoints()
-    btnLock.icon:SetTexture("Interface\\GuildFrame\\GuildFrame")
-    btnLock.icon:SetTexCoord(0.25, 0.35, 0.85, 0.95)
-
-    local function UpdateLockIcon()
-        local locked = BiaoGe and BiaoGe.AlgalonStar and BiaoGe.AlgalonStar.locked
-        if locked then
-            btnLock.icon:SetDesaturated(false)
-            btnLock.icon:SetVertexColor(1, 0.8, 0.2)
-        else
-            btnLock.icon:SetDesaturated(true)
-            btnLock.icon:SetVertexColor(0.8, 0.8, 0.8)
-        end
-    end
-    UpdateLockIcon()
-
-    btnLock:SetScript("OnClick", function()
-        if not BiaoGe.AlgalonStar then BiaoGe.AlgalonStar = {} end
-        BiaoGe.AlgalonStar.locked = not BiaoGe.AlgalonStar.locked
-        UpdateLockIcon()
-        if BiaoGe.AlgalonStar.locked then
-            DEFAULT_CHAT_FRAME:AddMessage(STC_b1("[BGLite 观星助手]") .. " 窗口已锁定。")
-        else
-            DEFAULT_CHAT_FRAME:AddMessage(STC_b1("[BGLite 观星助手]") .. " 窗口已解锁，可按住拖动。")
-        end
-        BG.PlaySound(1)
-    end)
-    btnLock:SetScript("OnEnter", function(self)
-        GameTooltip:SetOwner(self, "ANCHOR_TOP")
-        GameTooltip:AddLine("锁定/解锁位置", 1, 1, 1)
-        GameTooltip:AddLine("解锁后可按住窗口任意空白处拖拽调整位置。", 0.85, 0.85, 0.85, true)
-        GameTooltip:Show()
-    end)
-    btnLock:SetScript("OnLeave", GameTooltip_Hide)
 
     -- 关闭按钮
     local btnClose = CreateFrame("Button", nil, mainFrame, "UIPanelCloseButton")
-    btnClose:SetSize(22, 22)
-    btnClose:SetPoint("RIGHT", titleBg, "RIGHT", 2, 0)
+    btnClose:SetSize(20, 20)
+    btnClose:SetPoint("RIGHT", titleBg, "RIGHT", -2, 0)
     btnClose:SetScript("OnClick", function()
         mainFrame:Hide()
         BG.PlaySound(1)
     end)
 
-    -- 4 根血条构建 (加大宽度以清晰容纳预测状态文字)
+    -- 专属战术警报栏 (第 2 行：用于双星连炸等重大突发危机，平时自动隐藏零占用)
+    local alertBar = CreateFrame("Frame", nil, mainFrame)
+    alertBar:SetPoint("TOPLEFT", mainFrame, "TOPLEFT", 4, -28)
+    alertBar:SetPoint("TOPRIGHT", mainFrame, "TOPRIGHT", -4, -28)
+    alertBar:SetHeight(20)
+
+    local alertBg = alertBar:CreateTexture(nil, "BACKGROUND")
+    alertBg:SetAllPoints()
+    alertBg:SetColorTexture(0.75, 0.08, 0.08, 0.95)
+    alertBar.bg = alertBg
+
+    local alertText = alertBar:CreateFontString(nil, "OVERLAY")
+    alertText:SetFont(BIAOGE_TEXT_FONT, 11, "OUTLINE")
+    alertText:SetPoint("LEFT", alertBar, "LEFT", 6, 0)
+    alertText:SetPoint("RIGHT", alertBar, "RIGHT", -6, 0)
+    alertText:SetJustifyH("LEFT")
+    alertBar.text = alertText
+    alertBar:Hide()
+    mainFrame.alertBar = alertBar
+
+    -- 4 根血条构建 (加大宽度至 230 以清晰容纳预测状态文字，杜绝文字压盖)
     for i = 1, 4 do
         local bar = CreateFrame("Button", "BG_AlgalonStarBar_" .. i, mainFrame, "SecureActionButtonTemplate")
-        bar:SetSize(215, 26)
+        bar:SetSize(230, 26)
         bar:SetPoint("TOPLEFT", mainFrame, "TOPLEFT", 8, -32 - (i - 1) * 32)
         bar:RegisterForClicks("AnyUp")
+        bar:SetAttribute("type", "macro")
+        bar:SetAttribute("macrotext", "/targetexact 塌缩星")
 
         -- 状态条底图
         local sb = CreateFrame("StatusBar", nil, bar)
@@ -538,10 +544,10 @@ local function CreateMainUI()
         bg:SetColorTexture(0.08, 0.12, 0.18, 0.6)
         bar.bg = bg
 
-        -- 标记图标
-        local markIcon = bar:CreateTexture(nil, "OVERLAY")
+        -- 标记图标 (挂载在 sb 上且设为 OVERLAY，确保永远置顶浮在颜色进度条最上方)
+        local markIcon = sb:CreateTexture(nil, "OVERLAY")
         markIcon:SetSize(20, 20)
-        markIcon:SetPoint("LEFT", bar, "LEFT", 2, 0)
+        markIcon:SetPoint("LEFT", sb, "LEFT", 3, 0)
         bar.markIcon = markIcon
 
         -- 血量与名称文本
@@ -564,6 +570,23 @@ local function CreateMainUI()
         glow:SetBlendMode("ADD")
         glow:SetAlpha(0)
         bar.glow = glow
+
+        bar:SetScript("OnEnter", function(self)
+            local star = self.starData
+            if not star then return end
+            GameTooltip:SetOwner(self, "ANCHOR_TOP")
+            local mark = (star.raidMark and star.raidMark > 0) and star.raidMark or MARK_LIST[star.index or i] or 8
+            local markName = MARK_NAMES[mark] or "塌缩星"
+            GameTooltip:AddLine(GetMarkIcon(mark, 16) .. " 塌缩星 (" .. markName .. ")", 1, 1, 1)
+            local pct = (star.maxHP > 0) and ((star.currentHP / star.maxHP) * 100) or 100
+            GameTooltip:AddLine(string.format("血量: %d / %d (%.1f%%)", star.currentHP or 0, star.maxHP or 75600, pct), 0.85, 0.85, 0.85)
+            if star.dps and star.dps > 0 then
+                GameTooltip:AddLine(string.format("掉血速率: %.0f/s", star.dps), 0.85, 0.85, 0.85)
+            end
+            GameTooltip:AddLine("左键点击: 选定目标", 0.2, 1, 0.4)
+            GameTooltip:Show()
+        end)
+        bar:SetScript("OnLeave", GameTooltip_Hide)
 
         -- 右侧 DoT 图标槽 (3个槽位，尺寸 20x20)
         local dotsContainer = CreateFrame("Frame", nil, bar)
@@ -595,11 +618,16 @@ local function CreateMainUI()
             cd:SetAllPoints()
             cd:SetDrawEdge(false)
             cd:SetSwipeColor(0, 0, 0, 0.75)
+            if cd.SetHideCountdownNumbers then
+                cd:SetHideCountdownNumbers(true)
+            end
+            cd.noCooldownCount = true -- 彻底阻止 OmniCC / tullaCC 等外部插件注入倒计时数字
             dotF.cd = cd
 
+            -- 专属倒计时文本 (居中显示，彻底解决与暴雪原生/OmniCC双层文字重叠问题)
             local cdText = dotF:CreateFontString(nil, "OVERLAY")
-            cdText:SetFont(BIAOGE_TEXT_FONT, 9, "OUTLINE")
-            cdText:SetPoint("BOTTOM", dotF, "BOTTOM", 0, -1)
+            cdText:SetFont(BIAOGE_TEXT_FONT, 10, "OUTLINE")
+            cdText:SetPoint("CENTER", dotF, "CENTER", 0, 0)
             dotF.cdText = cdText
 
             dotF:Hide()
@@ -613,6 +641,14 @@ local function CreateMainUI()
     mainFrame:Hide()
     AlgalonStar.mainFrame = mainFrame
     return mainFrame
+end
+
+local function ShowMainUI()
+    CreateMainUI()
+    if mainFrame and not mainFrame:IsShown() then
+        mainFrame:Show()
+        RefreshUI()
+    end
 end
 
 --------------------------------------------------------------------------------
@@ -667,8 +703,10 @@ local function RefreshUI()
 
             -- 只要两颗星都在 65 秒内爆炸，且时间差 <= 4.2 秒，构成致命双星连炸！
             if gap <= 4.2 and eta1 <= 65 and eta2 <= 65 then
-                local mark1 = MARK_NAMES[s1.raidMark] or ("星" .. s1.index)
-                local mark2 = MARK_NAMES[s2.raidMark] or ("星" .. s2.index)
+                local icon1 = GetMarkIcon(s1.raidMark, 16)
+                local icon2 = GetMarkIcon(s2.raidMark, 16)
+                if icon1 == "" then icon1 = "星" .. s1.index end
+                if icon2 == "" then icon2 = "星" .. s2.index end
 
                 -- 是否紧贴大爆炸（大爆炸前 14s 内或大爆炸后出洞 15s 内发生双爆，绝对团灭死穴！）
                 local isNearBB = false
@@ -683,17 +721,17 @@ local function RefreshUI()
                 end
 
                 if not collisionMap[s1.guid] or gap < collisionMap[s1.guid].gap then
-                    collisionMap[s1.guid] = { otherMark = mark2, gap = gap, isEarlier = (eta1 <= eta2), nearBigBang = isNearBB }
+                    collisionMap[s1.guid] = { otherMark = icon2, gap = gap, isEarlier = (eta1 <= eta2), nearBigBang = isNearBB }
                 end
                 if not collisionMap[s2.guid] or gap < collisionMap[s2.guid].gap then
-                    collisionMap[s2.guid] = { otherMark = mark1, gap = gap, isEarlier = (eta2 < eta1), nearBigBang = isNearBB }
+                    collisionMap[s2.guid] = { otherMark = icon1, gap = gap, isEarlier = (eta2 < eta1), nearBigBang = isNearBB }
                 end
 
                 if gap < minCollisionGap then
                     minCollisionGap = gap
                     worstCollision = {
-                        markEarlier = (eta1 <= eta2) and mark1 or mark2,
-                        markLater = (eta1 <= eta2) and mark2 or mark1,
+                        markEarlier = (eta1 <= eta2) and icon1 or icon2,
+                        markLater = (eta1 <= eta2) and icon2 or icon1,
                         gap = gap,
                         nearBigBang = isNearBB,
                     }
@@ -702,50 +740,108 @@ local function RefreshUI()
         end
     end
 
-    -- 5. 顶部标题栏动态显示 (优先级: P2 > 大爆炸读条 > 双星连炸团灭警报 > 大爆炸临近 > 普通)
+    -- 5. 顶部主标题栏：专职展示奥尔加隆大爆炸核心时钟与状态 (绝不被其他警报顶替冲掉)
     if isBigBangCasting then
-        mainFrame.titleBg:SetColorTexture(0.65, 0.15, 0.05, 0.95)
+        mainFrame.titleBg:SetColorTexture(0.7, 0.1, 0.05, 0.95)
         mainFrame.titleText:SetText(string.format(STC_r1("【大爆炸！进黑洞！】") .. " 剩余: " .. STC_y1("%.1fs"), bigBangLeft))
-    elseif worstCollision then
-        mainFrame.titleBg:SetColorTexture(0.85, 0.05, 0.05, 0.98)
-        if worstCollision.nearBigBang then
-            mainFrame.titleText:SetText(STC_r1("【大爆炸前后双星连炸! 必灭团!】") .. string.format("[%s]与[%s]仅差%.1fs! 立即停手!", worstCollision.markEarlier, worstCollision.markLater, worstCollision.gap))
-        else
-            mainFrame.titleText:SetText(STC_r1("【双星连炸警报!】") .. string.format("[%s]与[%s]仅隔%.1fs! 立即停手拉开!", worstCollision.markEarlier, worstCollision.markLater, worstCollision.gap))
-        end
     elseif timeToNextBB > 0 and timeToNextBB <= 15.0 then
         mainFrame.titleBg:SetColorTexture(0.55, 0.35, 0.05, 0.92)
-        mainFrame.titleText:SetText(string.format(STC_y1("【大爆炸临近】") .. " 约 " .. STC_y1("%.0fs") .. " 后施放 (检查留洞/停手)", timeToNextBB))
+        mainFrame.titleText:SetText(string.format(STC_y1("【大爆炸临近】") .. " 约 " .. STC_r1("%.0fs") .. " 后施放 (准备进洞)", timeToNextBB))
     elseif timeToNextBB > 0 then
         mainFrame.titleBg:SetColorTexture(0.1, 0.18, 0.28, 0.8)
         mainFrame.titleText:SetText(string.format(STC_b1("观星者") .. " 下次大爆炸约: " .. STC_w1("%.0fs"), timeToNextBB))
     else
         mainFrame.titleBg:SetColorTexture(0.1, 0.18, 0.28, 0.8)
-        mainFrame.titleText:SetText(STC_b1("观星者") .. " 塌缩星监控 (自适应)")
+        mainFrame.titleText:SetText(STC_b1("观星者") .. " 塌缩星监控")
     end
 
-    -- 6. 逐条渲染
+    -- 5.5 第 2 行：专属战术警报栏 (双星连炸等重大突发危机，平时自动隐藏零占用)
+    local alertMsg = nil
+    if worstCollision then
+        if worstCollision.nearBigBang then
+            alertMsg = STC_r1("【大爆炸连爆!】") .. string.format("%s 与 %s 仅差%.1fs! 慢星停手·错开时间!", worstCollision.markEarlier, worstCollision.markLater, worstCollision.gap)
+        else
+            alertMsg = STC_r1("【双星连炸!】") .. string.format("%s 与 %s 仅差%.1fs! 慢星停手·错开时间!", worstCollision.markEarlier, worstCollision.markLater, worstCollision.gap)
+        end
+    end
+
+    local isAlertShown = (alertMsg ~= nil and mainFrame.alertBar ~= nil)
+    if isAlertShown then
+        mainFrame.alertBar:Show()
+        mainFrame.alertBar.text:SetText(alertMsg)
+    elseif mainFrame.alertBar then
+        mainFrame.alertBar:Hide()
+    end
+
+    -- 动态自适应血条起始 Y 坐标与窗口总高度 (有第 2 行警报时向下微展 22px)
+    local startY = isAlertShown and -52 or -30
+    local targetHeight = isAlertShown and 188 or 166
+    if mainFrame:GetHeight() ~= targetHeight then
+        mainFrame:SetHeight(targetHeight)
+    end
+    for i = 1, 4 do
+        if bars[i] then
+            bars[i]:SetPoint("TOPLEFT", mainFrame, "TOPLEFT", 8, startY - (i - 1) * 32)
+        end
+    end
+
+    -- 6. 动态感知全场活跃 DoT 数量并自适应主窗口宽度 (默认无 DoT 时 246px 极简，根据 DoT 出现平滑扩展)
+    local maxActiveDots = 0
+    for i = 1, math.min(4, #starList) do
+        local star = starList[i]
+        local activeDotCount = 0
+        if star.dots then
+            for _, dot in pairs(star.dots) do
+                if dot.expTime and dot.expTime > now then
+                    activeDotCount = activeDotCount + 1
+                end
+            end
+        end
+        if activeDotCount > maxActiveDots then
+            maxActiveDots = activeDotCount
+        end
+    end
+    maxActiveDots = math.min(3, maxActiveDots)
+
+    -- 基础血条宽 230，边距 8，无 DoT 时宽 246 (精致紧凑)
+    -- 1 个 DoT 宽 272，2 个 DoT 宽 295，3 个 DoT 宽 318
+    local targetWidth = 246
+    if maxActiveDots == 1 then
+        targetWidth = 272
+    elseif maxActiveDots == 2 then
+        targetWidth = 295
+    elseif maxActiveDots >= 3 then
+        targetWidth = 318
+    end
+
+    -- 若触发第 2 行双星连炸警报，适当加宽确保长警告文字完整展示
+    if isAlertShown then
+        targetWidth = math.max(targetWidth, 310)
+    end
+
+    if mainFrame:GetWidth() ~= targetWidth then
+        mainFrame:SetWidth(targetWidth)
+    end
+
+    -- 7. 逐条渲染
     for i = 1, 4 do
         local bar = bars[i]
         local star = starList[i]
 
         if star and bar then
+            bar.starData = star
             bar:Show()
             bar.sb:SetMinMaxValues(0, star.maxHP or 75600)
             bar.sb:SetValue(star.currentHP)
 
-            -- 标记图标
-            if star.raidMark and star.raidMark > 0 then
-                bar.markIcon:SetTexture(MARK_TEXTURE_PREFIX .. star.raidMark)
-                bar.markIcon:Show()
-            else
-                bar.markIcon:Hide()
-            end
+            -- 标记图标 (暴雪原生团队标记材质，若尚未打上标记则保底显示预定顺位标记)
+            local displayMark = (star.raidMark and star.raidMark > 0) and star.raidMark or MARK_LIST[star.index or i] or 8
+            bar.markIcon:SetTexture(MARK_TEXTURE_PREFIX .. displayMark)
+            bar.markIcon:Show()
 
-            -- 血量百分比与数值
+            -- 血量百分比与数值 (由左侧图标展示标记，不再显示汉字标记，杜绝重叠挤压)
             local pct = (star.maxHP > 0) and ((star.currentHP / star.maxHP) * 100) or 100
-            local markName = MARK_NAMES[star.raidMark] or ("星" .. star.index)
-            bar.label:SetText(string.format("%s %.1f%%", markName, pct))
+            bar.label:SetText(string.format("%.1f%%", pct))
 
             -- 核心预测算法判定 (红 / 黄 / 绿，传入专有双星连炸状态)
             local safetyLevel, statusText, r, g, b = EvaluateStarSafety(star, now, isBigBangCasting, bigBangLeft, timeToNextBB, collisionMap[star.guid])
@@ -846,7 +942,7 @@ local function CheckP2Status(bossHP, bossMax)
         bigBangNextEstimate = 0
         wipe(activeStars)
         starCounter = 0
-        DEFAULT_CHAT_FRAME:AddMessage(STC_g1("[BGLite 观星助手]") .. " ✔ 观星者血量 ≤ 20%，正式进入 P2 阶段！塌缩星消失，无大爆炸，全力击杀！")
+        DEFAULT_CHAT_FRAME:AddMessage(STC_g1("[BGLite 观星助手]") .. " 观星者血量 ≤ 20%，正式进入 P2 阶段！塌缩星消失，无大爆炸，全力击杀！")
         RefreshUI()
     end
 end
@@ -854,12 +950,20 @@ end
 local function OnCombatLogEvent(...)
     local timestamp, subEvent, _, sourceGUID, sourceName, _, _, destGUID, destName, _, _, param12, param13, param14, param15 = GetCombatLogArgs(...)
 
-    -- 记录奥尔加隆 GUID
+    -- 记录奥尔加隆 GUID，开怪自动唤醒面板
     if not algalonGUID then
         if destGUID and GetNpcIDFromGUID(destGUID) == ALGALON_NPC_ID then
             algalonGUID = destGUID
+            if bigBangNextEstimate == 0 then
+                bigBangNextEstimate = GetTime() + BIGBANG_FIRST_PULL_DELAY
+            end
+            ShowMainUI()
         elseif sourceGUID and GetNpcIDFromGUID(sourceGUID) == ALGALON_NPC_ID then
             algalonGUID = sourceGUID
+            if bigBangNextEstimate == 0 then
+                bigBangNextEstimate = GetTime() + BIGBANG_FIRST_PULL_DELAY
+            end
+            ShowMainUI()
         end
     end
 
@@ -869,10 +973,9 @@ local function OnCombatLogEvent(...)
         if spellID and BIG_BANG_SPELLS[spellID] and not isPhase2 then
             local now = GetTime()
             bigBangCastEnd = now + 8.0
-            bigBangNextEstimate = now + 8.0 + BIGBANG_BASE_COOLDOWN
-            if mainFrame and not mainFrame:IsShown() then
-                mainFrame:Show()
-            end
+            -- 严格对齐 DBM：计时从施法开始时刻起算 90.5s，彻底根除多算 8 秒读条的时钟漂移
+            bigBangNextEstimate = now + BIGBANG_BASE_COOLDOWN
+            ShowMainUI()
             RefreshUI()
         end
     end
@@ -891,9 +994,7 @@ local function OnCombatLogEvent(...)
     local npcID = GetNpcIDFromGUID(destGUID)
     if npcID == STAR_NPC_ID then
         local star = activeStars[destGUID] or RegisterStar(destGUID)
-        if mainFrame and not mainFrame:IsShown() then
-            mainFrame:Show()
-        end
+        ShowMainUI()
 
         local dmg = 0
         if subEvent == "SWING_DAMAGE" then
@@ -939,6 +1040,27 @@ local function OnCombatLogEvent(...)
     end
 end
 
+local function TryAutoMark(unit)
+    if not unit or not CanSetMarks() then return end
+    local guid = UnitGUID(unit)
+    if not guid or UnitIsDead(unit) then return end
+
+    local npcID = GetNpcIDFromGUID(guid)
+    if npcID ~= STAR_NPC_ID then return end
+
+    local star = activeStars[guid] or RegisterStar(guid, UnitHealthMax(unit))
+    if not star or not star.raidMark or star.raidMark <= 0 then return end
+
+    local now = GetTime()
+    if (now - (star.lastMarkTime or 0)) < 0.6 then return end
+    star.lastMarkTime = now
+
+    local currentMark = GetRaidTargetIndex(unit)
+    if currentMark ~= star.raidMark then
+        SetRaidTarget(unit, star.raidMark)
+    end
+end
+
 local function OnEvent(self, event, ...)
     if event == "COMBAT_LOG_EVENT_UNFILTERED" then
         OnCombatLogEvent(...)
@@ -956,23 +1078,16 @@ local function OnEvent(self, event, ...)
             -- 扫描 DoT
             ScanNameplateDots(star, unit)
 
-            -- 自动分配团队标记 (限团长/助理，防抖)
-            local now = GetTime()
-            if CanSetMarks() and star.raidMark and star.raidMark > 0 then
-                if (now - (star.lastMarkTime or 0)) > 1.5 then
-                    star.lastMarkTime = now
-                    local currentMark = GetRaidTargetIndex(unit)
-                    if currentMark ~= star.raidMark then
-                        SetRaidTarget(unit, star.raidMark)
-                    end
-                end
-            end
+            -- 自动分配团队标记
+            TryAutoMark(unit)
 
-            if mainFrame and not mainFrame:IsShown() then
-                mainFrame:Show()
-            end
+            ShowMainUI()
             RefreshUI()
         end
+    elseif event == "UPDATE_MOUSEOVER_UNIT" then
+        TryAutoMark("mouseover")
+    elseif event == "PLAYER_TARGET_CHANGED" then
+        TryAutoMark("target")
     elseif event == "NAME_PLATE_UNIT_REMOVED" then
         local unit = ...
         local guid = UnitGUID(unit)
@@ -1027,15 +1142,19 @@ local function OnEvent(self, event, ...)
             if mainFrame then mainFrame:Hide() end
         end
     elseif event == "ENCOUNTER_START" then
-        -- 记录战斗开始，初始化 90 秒首次大爆炸时间轴
-        if not isTesting then
+        -- 记录战斗开始，初始化首次大爆炸时间轴 (严格对齐 DBM: 8s 开怪剧情台词 + 90s = 98s)
+        local encounterID, encounterName = ...
+        local isAlgalon = (encounterID == 757 or encounterID == 1130) or
+                          (encounterName and (string.find(encounterName, "奥尔加隆") or string.find(encounterName, "Algalon")))
+        if (isAlgalon or AlgalonStar.IsInUlduar()) and not isTesting then
             encounterStartTime = GetTime()
-            bigBangNextEstimate = encounterStartTime + BIGBANG_BASE_COOLDOWN
+            bigBangNextEstimate = encounterStartTime + BIGBANG_FIRST_PULL_DELAY
             bigBangCastEnd = 0
             isPhase2 = false
             algalonGUID = nil
             wipe(activeStars)
             starCounter = 0
+            ShowMainUI()
         end
     elseif event == "ENCOUNTER_END" then
         if not isTesting then
@@ -1061,6 +1180,8 @@ function AlgalonStar.RegisterCombatEvents()
     eventFrame:RegisterEvent("COMBAT_LOG_EVENT_UNFILTERED")
     eventFrame:RegisterEvent("NAME_PLATE_UNIT_ADDED")
     eventFrame:RegisterEvent("NAME_PLATE_UNIT_REMOVED")
+    eventFrame:RegisterEvent("UPDATE_MOUSEOVER_UNIT")
+    eventFrame:RegisterEvent("PLAYER_TARGET_CHANGED")
     eventFrame:RegisterEvent("UNIT_HEALTH")
     eventFrame:RegisterEvent("UNIT_AURA")
     eventFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
@@ -1084,6 +1205,8 @@ function AlgalonStar.UnregisterCombatEvents()
     eventFrame:UnregisterEvent("COMBAT_LOG_EVENT_UNFILTERED")
     eventFrame:UnregisterEvent("NAME_PLATE_UNIT_ADDED")
     eventFrame:UnregisterEvent("NAME_PLATE_UNIT_REMOVED")
+    eventFrame:UnregisterEvent("UPDATE_MOUSEOVER_UNIT")
+    eventFrame:UnregisterEvent("PLAYER_TARGET_CHANGED")
     eventFrame:UnregisterEvent("UNIT_HEALTH")
     eventFrame:UnregisterEvent("UNIT_AURA")
     eventFrame:UnregisterEvent("PLAYER_REGEN_ENABLED")
@@ -1181,15 +1304,15 @@ function AlgalonStar.ToggleTestMode(subMode)
     else
         print(STC_g1("[BGLite 观星助手]") .. " 模拟测试沙盘已【启动】！输入 /star test double 测双星连炸灭团，/star test p2 测P2。")
         -- 常规四态演示：
-        -- 星 1：绿色【最完美】(自爆在 36.4 秒，刚好在大爆炸后 4.4 秒炸，完美出洞再引爆)
+        -- 星 1：绿色【进洞免伤】(自爆在 35 秒，大爆炸 32s 施法 8s，刚好在进洞期间 3s 免伤自爆，0 伤害极佳)
         -- 星 2：黄色【提前留洞】(自爆在 16 秒，大爆炸前提前 16 秒爆，能留洞但需覆盖团血)
-        -- 星 3：红色【大爆炸撞车】(自爆在 31 秒，刚好在大爆炸前夕重叠，高危撞车)
-        -- 星 4：黄色【掉血缓慢】(自爆在 90 秒，平稳)
+        -- 星 3：黄色【出洞炸】(自爆在 45 秒，大爆炸彻底结束后出洞 5 秒炸，需关注团血)
+        -- 星 4：红色【大爆炸撞车】(自爆在 31 秒，刚好在大爆炸读条前夕重叠，高危撞车)
         mockData = {
-            { hpPct = 0.52, dps = 1080, mark = 8, dots = { { name = "月火术", dur = 12, remain = 8.5, isMine = true }, { name = "虫群", dur = 12, remain = 5.2, isMine = true } } },
-            { hpPct = 0.28, dps = 1320, mark = 7, dots = { { name = "暗言术：痛", dur = 18, remain = 14.0, isMine = true }, { name = "噬灵疫病", dur = 24, remain = 18.5, isMine = false } } },
-            { hpPct = 0.44, dps = 1070, mark = 6, dots = { { name = "吸血鬼之触", dur = 15, remain = 9.4, isMine = true } } },
-            { hpPct = 0.90, dps = 756,  mark = 4, dots = { { name = "腐蚀术", dur = 18, remain = 16.0, isMine = false } } },
+            { hpPct = 0.50, dps = 1080, mark = 8, dots = { { name = "月火术", dur = 12, remain = 8.5, isMine = true } } },
+            { hpPct = 0.28, dps = 1320, mark = 7, dots = { { name = "暗言术：痛", dur = 18, remain = 14.0, isMine = true } } },
+            { hpPct = 0.45, dps = 756,  mark = 6, dots = {} },
+            { hpPct = 0.53, dps = 1300, mark = 4, dots = {} },
         }
     end
 
@@ -1254,16 +1377,10 @@ function AlgalonStar.CreateToolControls(entry, anchorFrame)
     if not entry or entry.starControlsCreated then return end
     entry.starControlsCreated = true
 
-    -- 分隔符
-    local sep = entry:CreateFontString(nil, "OVERLAY")
-    sep:SetFont(BIAOGE_TEXT_FONT, 12, "OUTLINE")
-    sep:SetPoint("LEFT", anchorFrame.text or anchorFrame, "RIGHT", 14, 0)
-    sep:SetText(STC_dis("|"))
-
-    -- 观星修星助手主开关复选框
+    -- 观星修星助手主开关复选框 (直接挂载在战术站位图右侧，无冗余分隔符)
     local cbStar = CreateFrame("CheckButton", "BG_AlgalonStarToolCheckButton", entry, "UICheckButtonTemplate")
     cbStar:SetSize(20, 20)
-    cbStar:SetPoint("LEFT", sep, "RIGHT", 12, 0)
+    cbStar:SetPoint("LEFT", anchorFrame.text or anchorFrame, "RIGHT", 18, 0)
     cbStar.text = cbStar:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
     cbStar.text:SetPoint("LEFT", cbStar, "RIGHT", 4, 0)
     cbStar.text:SetFont(BIAOGE_TEXT_FONT, 13, "OUTLINE")
@@ -1283,13 +1400,13 @@ function AlgalonStar.CreateToolControls(entry, anchorFrame)
     cbStar:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_TOP")
         GameTooltip:AddLine(STC_b1("观星修星助手 (奥尔加隆)") .. " - 核心开关", 1, 1, 1)
-        GameTooltip:AddLine("勾选开启奥杜尔观星者塌缩星专属血量自适应监控与大爆炸冲突预警。", 0.85, 0.85, 0.85, true)
+        GameTooltip:AddLine("勾选开启奥杜尔观星者塌缩星专属血量监控与大爆炸冲突预警。", 0.85, 0.85, 0.85, true)
         GameTooltip:AddLine("核心预测与特性：", 1, 0.82, 0)
-        GameTooltip:AddLine("• " .. STC_g1("【绿色·安全】") .. " 预测在大爆炸后几秒炸(最完美节奏)或进洞免伤炸", 0.85, 0.85, 0.85)
-        GameTooltip:AddLine("• " .. STC_y1("【黄色·注意】") .. " 预测提前留洞引爆，需治疗关注团血", 0.85, 0.85, 0.85)
-        GameTooltip:AddLine("• " .. STC_r1("【红色·危险】") .. " 预测在大爆炸前夕撞车、出洞连爆或双星连炸", 0.85, 0.85, 0.85)
-        GameTooltip:AddLine("• 鸟德/暗牧核心修星 DoT 倒计时与专属图标", 0.85, 0.85, 0.85)
-        GameTooltip:AddLine("• 自动识别 P2 阶段 (≤20% HP) 塌缩星消失清空", 0.85, 0.85, 0.85)
+        GameTooltip:AddLine("- " .. STC_g1("【绿色·进洞免伤】") .. " 预测大爆炸读条期间全团在洞内0伤害引爆 (极佳)", 0.85, 0.85, 0.85)
+        GameTooltip:AddLine("- " .. STC_y1("【黄色·注意】") .. " 预测提前留洞引爆，或出洞后引爆 (需关注团血/备用洞)", 0.85, 0.85, 0.85)
+        GameTooltip:AddLine("- " .. STC_r1("【红色·危险】") .. " 预测在大爆炸前夕撞车、出洞瞬间连爆或双星连炸", 0.85, 0.85, 0.85)
+        GameTooltip:AddLine("- 鸟德/暗牧核心修星 DoT 倒计时与专属图标", 0.85, 0.85, 0.85)
+        GameTooltip:AddLine("- 自动识别 P2 阶段 (≤20% HP) 塌缩星消失清空", 0.85, 0.85, 0.85)
         GameTooltip:AddLine(STC_g1("【性能截断】") .. " 关闭时完全注销战斗日志与事件监听，0 CPU 占用！", 0.2, 1, 0.4, true)
         GameTooltip:Show()
     end)
