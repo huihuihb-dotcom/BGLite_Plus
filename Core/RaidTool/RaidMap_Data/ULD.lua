@@ -1608,7 +1608,7 @@ RaidMap.RegisterBoss({
             xy = { 374, -250 },
             isNPC = true,
             isNPC_help = true,
-            isNPC_text = "全员跳洞(留1坦在外)",
+            isNPC_text = "全员跳洞(留1坦或暗牧在外)",
             isNPC_icon = "Interface\\Icons\\spell_shadow_twilight",
             size = 44,
         },

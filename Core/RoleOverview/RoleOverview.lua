@@ -79,6 +79,15 @@ function BG.RoleOverviewUI()
                 BiaoGe.FBCDchoice.TKtitan = 1
             end
         end)
+        -- 一次性对齐：时光服默认开启奥杜尔 (25ULD)，关闭祖格周常与声望
+        BG.Once("FBCDchoiceTitan_ULD_Raids_261012", 261012, function()
+            if BiaoGe.FBCDchoice then
+                BiaoGe.FBCDchoice["25ULD"] = 1
+                BiaoGe.FBCDchoice.week2 = 0
+                BiaoGe.FBCDchoice.faction270 = 0
+                BiaoGe.FBCDchoice.faction749 = 0
+            end
+        end)
         -- 一次性自愈清洗：清除历史错误残留的 holiday CD 记录，使此前被异常写入明天到期的角色即时恢复干净无 CD 状态
         BG.Once("CleanLegacyHolidayCD_260920", 260920, function()
             for _, dbName in ipairs({ "BiaoGe", "BiaoGeAccounts" }) do
@@ -149,6 +158,7 @@ function BG.RoleOverviewUI()
             BiaoGe.FBCDchoice["week1"] = 1
             BiaoGe.FBCDchoice["faction1156"] = 1
         elseif BG.IsTitan then
+            BiaoGe.FBCDchoice["25ULD"] = 1
             BiaoGe.FBCDchoice["SWtitan"] = 1
             BiaoGe.FBCDchoice["ZAtitan"] = 1
             BiaoGe.FBCDchoice.TOCtitan = 1
@@ -167,12 +177,12 @@ function BG.RoleOverviewUI()
             BiaoGe.FBCDchoice["gamma"] = 1
             BiaoGe.FBCDchoice["heroe"] = 1
             BiaoGe.FBCDchoice["week1"] = 1
-            BiaoGe.FBCDchoice["week2"] = 1
+            -- BiaoGe.FBCDchoice["week2"] = 1
             BiaoGe.FBCDchoice["dungeonMoney"] = 1
             BiaoGe.FBCDchoice["holiday"] = 1
             BiaoGe.FBCDchoice["professionCD"] = 1
-            BiaoGe.FBCDchoice["faction" .. "270"] = 1
-            BiaoGe.FBCDchoice["faction" .. "749"] = 1
+            -- BiaoGe.FBCDchoice["faction" .. "270"] = 1
+            -- BiaoGe.FBCDchoice["faction" .. "749"] = 1
             -- BiaoGe.FBCDchoice["faction" .. "1119"] = 1
             -- BiaoGe.FBCDchoice["faction" .. "1098"] = 1
             -- BiaoGe.FBCDchoice["faction" .. "1106"] = 1
