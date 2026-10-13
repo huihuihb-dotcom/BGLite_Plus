@@ -1471,6 +1471,7 @@ do
     L["表格的核心功能都在这里"] = "The core functions of the form are all here"
     L["心愿清单"] = "Wishlist"
     L["< 心愿清单 >"] = "< Wishlist >"
+    L["在心愿清单点Alt+右键可以设置心愿价格"] = "Alt+Right click on wish list to set wish price"
     L["你可以设置一些装备，这些装备只要掉落就会提醒，并且自动关注团长拍卖"] = "You can set up Gears that will alert you when they are dropped and automatically follow the head auction."
     L["装备库"] = "Gear Lib"
     L["< 装备库 >"] = "< Gear Library >"

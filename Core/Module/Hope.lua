@@ -1532,7 +1532,7 @@ function BG.CreateMiaoYingHopeUI()
     -- 1. 复选框：联动喵影配装 (仅基础列表)
     local cb = CreateFrame("CheckButton", "BGLite_Plus_LinkMiaoYingHopeCheckButton", BG.HopeMainFrame, "UICheckButtonTemplate")
     cb:SetSize(22, 22)
-    cb:SetPoint("BOTTOMLEFT", BG.MainFrame, "BOTTOMLEFT", 35, 105)
+    cb:SetPoint("BOTTOMLEFT", BG.MainFrame, "BOTTOMLEFT", 35, 118)
     cb:SetFrameLevel(baseFrameLevel + 15)
 
     local textLabel = cb.text or _G[cb:GetName() .. "Text"]

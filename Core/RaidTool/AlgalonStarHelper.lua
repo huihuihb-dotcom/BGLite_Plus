@@ -461,14 +461,43 @@ local function CreateMainUI()
         mainFrame:SetPoint("CENTER", UIParent, "CENTER", 340, 50)
     end
 
-    mainFrame:SetScript("OnDragStart", function(self)
-        self:StartMoving()
-    end)
-    mainFrame:SetScript("OnDragStop", function(self)
-        self:StopMovingOrSizing()
-        local point, relTo, relPoint, x, y = self:GetPoint()
+    local function SaveMainFramePosition()
+        local point, relTo, relPoint, x, y = mainFrame:GetPoint()
         if not BiaoGe.AlgalonStar then BiaoGe.AlgalonStar = {} end
         BiaoGe.AlgalonStar.point = { point, "UIParent", relPoint, math.floor(x), math.floor(y) }
+    end
+
+    mainFrame:SetScript("OnMouseDown", function(self, button)
+        if button == "LeftButton" and not self.isMoving then
+            self:StartMoving()
+            self.isMoving = true
+        end
+    end)
+    mainFrame:SetScript("OnMouseUp", function(self, button)
+        if button == "LeftButton" and self.isMoving then
+            self:StopMovingOrSizing()
+            self.isMoving = nil
+            SaveMainFramePosition()
+        end
+    end)
+    mainFrame:SetScript("OnDragStart", function(self)
+        if not self.isMoving then
+            self:StartMoving()
+            self.isMoving = true
+        end
+    end)
+    mainFrame:SetScript("OnDragStop", function(self)
+        if self.isMoving then
+            self:StopMovingOrSizing()
+            self.isMoving = nil
+            SaveMainFramePosition()
+        end
+    end)
+    mainFrame:SetScript("OnHide", function(self)
+        if self.isMoving then
+            self:StopMovingOrSizing()
+            self.isMoving = nil
+        end
     end)
 
     mainFrame:SetBackdrop({
@@ -494,10 +523,53 @@ local function CreateMainUI()
     titleText:SetText(STC_b1("观星者") .. " 塌缩星监控")
     mainFrame.titleText = titleText
 
-    -- 关闭按钮
+    -- 顶部专属拖拽手柄层 (避开右上角关闭按钮，提供 100% 灵敏顺滑的拖动响应)
+    local dragBar = CreateFrame("Frame", nil, mainFrame)
+    dragBar:SetPoint("TOPLEFT", mainFrame, "TOPLEFT", 4, -4)
+    dragBar:SetPoint("BOTTOMRIGHT", mainFrame, "TOPRIGHT", -26, -26)
+    dragBar:EnableMouse(true)
+    dragBar:RegisterForDrag("LeftButton")
+    dragBar:SetScript("OnMouseDown", function(self, button)
+        if button == "LeftButton" and not mainFrame.isMoving then
+            mainFrame:StartMoving()
+            mainFrame.isMoving = true
+        end
+    end)
+    dragBar:SetScript("OnMouseUp", function(self, button)
+        if button == "LeftButton" and mainFrame.isMoving then
+            mainFrame:StopMovingOrSizing()
+            mainFrame.isMoving = nil
+            SaveMainFramePosition()
+        end
+    end)
+    dragBar:SetScript("OnDragStart", function()
+        if not mainFrame.isMoving then
+            mainFrame:StartMoving()
+            mainFrame.isMoving = true
+        end
+    end)
+    dragBar:SetScript("OnDragStop", function()
+        if mainFrame.isMoving then
+            mainFrame:StopMovingOrSizing()
+            mainFrame.isMoving = nil
+            SaveMainFramePosition()
+        end
+    end)
+    dragBar:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_TOP")
+        GameTooltip:AddLine(STC_b1("观星修星助手"), 1, 1, 1)
+        GameTooltip:AddLine("按住鼠标左键可自由拖动窗口位置。", 0.85, 0.85, 0.85)
+        GameTooltip:AddLine("血条区域亦支持 " .. STC_g1("Shift + 左键") .. " 按住拖动。", 0.7, 0.9, 1)
+        GameTooltip:Show()
+    end)
+    dragBar:SetScript("OnLeave", GameTooltip_Hide)
+    mainFrame.dragBar = dragBar
+
+    -- 关闭按钮 (提高层级确保不被拖动手柄覆盖)
     local btnClose = CreateFrame("Button", nil, mainFrame, "UIPanelCloseButton")
     btnClose:SetSize(20, 20)
     btnClose:SetPoint("RIGHT", titleBg, "RIGHT", -2, 0)
+    btnClose:SetFrameLevel(dragBar:GetFrameLevel() + 5)
     btnClose:SetScript("OnClick", function()
         mainFrame:Hide()
         BG.PlaySound(1)
@@ -545,9 +617,42 @@ local function CreateMainUI()
         local bar = CreateFrame("Button", "BG_AlgalonStarBar_" .. i, mainFrame, "SecureActionButtonTemplate")
         bar:SetSize(230, 26)
         bar:SetPoint("TOPLEFT", mainFrame, "TOPLEFT", 8, -32 - (i - 1) * 32)
-        bar:RegisterForClicks("AnyUp")
+        bar:RegisterForClicks("AnyUp", "AnyDown")
         bar:SetAttribute("type", "macro")
         bar:SetAttribute("macrotext", "/targetexact 塌缩星")
+
+        -- 支持 Shift + 左键直接拖拽整个主框体 (彻底根除由于按钮拦截点击导致的无法拖拽困扰)
+        bar:SetScript("OnMouseDown", function(self, button)
+            if button == "LeftButton" and (IsShiftKeyDown() or isTesting) then
+                self.isDragging = true
+                mainFrame:StartMoving()
+                mainFrame.isMoving = true
+            end
+        end)
+        bar:SetScript("OnMouseUp", function(self, button)
+            if self.isDragging then
+                self.isDragging = nil
+                mainFrame:StopMovingOrSizing()
+                mainFrame.isMoving = nil
+                SaveMainFramePosition()
+            end
+        end)
+
+        -- 允许在血条上直接按住拖拽整个窗口 (彻底消除按钮吞事件导致无法拖动的现象)
+        bar:RegisterForDrag("LeftButton")
+        bar:SetScript("OnDragStart", function()
+            if not (BiaoGe and BiaoGe.AlgalonStar and BiaoGe.AlgalonStar.locked) then
+                mainFrame:StartMoving()
+                mainFrame.isMoving = true
+            end
+        end)
+        bar:SetScript("OnDragStop", function()
+            if mainFrame.isMoving then
+                mainFrame:StopMovingOrSizing()
+                mainFrame.isMoving = nil
+                SaveMainFramePosition()
+            end
+        end)
 
         -- 状态条底图
         local sb = CreateFrame("StatusBar", nil, bar)
@@ -602,6 +707,7 @@ local function CreateMainUI()
                 GameTooltip:AddLine(string.format("掉血速率: %.0f/s", star.dps), 0.85, 0.85, 0.85)
             end
             GameTooltip:AddLine("左键点击: 选定目标", 0.2, 1, 0.4)
+            GameTooltip:AddLine("按住拖动 (或 Shift+左键): 移动窗口位置", 0.7, 0.9, 1)
             GameTooltip:Show()
         end)
         bar:SetScript("OnLeave", GameTooltip_Hide)
@@ -662,6 +768,13 @@ local function CreateMainUI()
 end
 
 local function ShowMainUI()
+    -- 核心防御 1：默认不打开，用户未手动勾选时绝对不弹出
+    local enabled = BiaoGe and BiaoGe.AlgalonStar and BiaoGe.AlgalonStar.enabled
+    if not enabled and not isTesting then return end
+
+    -- 核心防御 2：非测试模式且不在奥杜尔副本中绝对不弹出
+    if not isTesting and not AlgalonStar.IsInUlduar() then return end
+
     CreateMainUI()
     if mainFrame and not mainFrame:IsShown() then
         mainFrame:Show()
@@ -1157,11 +1270,11 @@ local function OnEvent(self, event, ...)
             if mainFrame then mainFrame:Hide() end
         end
     elseif event == "ENCOUNTER_START" then
-        -- 记录战斗开始，初始化首次大爆炸时间轴 (严格对齐 DBM: 8s 开怪剧情台词 + 90s = 98s)
+        -- 记录战斗开始，仅在确认是奥尔加隆战斗时才初始化时间轴并唤醒 (严格对齐 DBM: 8s 开怪剧情台词 + 90s = 98s)
         local encounterID, encounterName = ...
         local isAlgalon = (encounterID == 757 or encounterID == 1130) or
                           (encounterName and (string.find(encounterName, "奥尔加隆") or string.find(encounterName, "Algalon")))
-        if (isAlgalon or AlgalonStar.IsInUlduar()) and not isTesting then
+        if isAlgalon and not isTesting then
             encounterStartTime = GetTime()
             bigBangNextEstimate = encounterStartTime + BIGBANG_FIRST_PULL_DELAY
             bigBangCastEnd = 0
@@ -1170,6 +1283,11 @@ local function OnEvent(self, event, ...)
             wipe(activeStars)
             starCounter = 0
             ShowMainUI()
+        elseif not isTesting then
+            -- 严防误弹：在奥杜尔其他任意 Boss（老一、拆解、议会、尤格萨隆等）开战时，强制隐藏修星助手，保持界面绝对纯净
+            if mainFrame and mainFrame:IsShown() then
+                mainFrame:Hide()
+            end
         end
     elseif event == "ENCOUNTER_END" then
         if not isTesting then
@@ -1232,7 +1350,7 @@ end
 
 function AlgalonStar.UpdateEventRegistration()
     local enabled = BiaoGe and BiaoGe.AlgalonStar and BiaoGe.AlgalonStar.enabled
-    if enabled == nil then enabled = true end
+    if enabled == nil then enabled = false end
 
     -- 若被用户总开关关闭：彻底截断所有事件，清空定时器，隐藏界面，实现 0 CPU 消耗
     if not enabled then
@@ -1409,13 +1527,13 @@ function AlgalonStar.CreateToolControls(entry, anchorFrame)
     end)
     cbStar:SetScript("OnShow", function(self)
         local enabled = BiaoGe and BiaoGe.AlgalonStar and BiaoGe.AlgalonStar.enabled
-        if enabled == nil then enabled = true end
+        if enabled == nil then enabled = false end
         self:SetChecked(enabled)
     end)
     cbStar:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_TOP")
         GameTooltip:AddLine(STC_b1("观星修星助手 (奥尔加隆)") .. " - 核心开关", 1, 1, 1)
-        GameTooltip:AddLine("勾选开启奥杜尔观星者塌缩星专属血量监控与大爆炸冲突预警。", 0.85, 0.85, 0.85, true)
+        GameTooltip:AddLine("勾选开启奥杜尔观星者塌缩星专属血量监控与大爆炸冲突预警 (默认关闭，需手动勾选)。", 0.85, 0.85, 0.85, true)
         GameTooltip:AddLine("核心预测与特性：", 1, 0.82, 0)
         GameTooltip:AddLine("- " .. STC_g1("【绿色·进洞免伤】") .. " 预测大爆炸读条期间全团在洞内0伤害引爆 (极佳)", 0.85, 0.85, 0.85)
         GameTooltip:AddLine("- " .. STC_y1("【黄色·注意】") .. " 预测提前留洞引爆，或出洞后引爆 (需关注团血/备用洞)", 0.85, 0.85, 0.85)
@@ -1482,7 +1600,14 @@ function ns.InitAlgalonStarDB()
     BiaoGe = BiaoGe or {}
     BiaoGe.AlgalonStar = BiaoGe.AlgalonStar or {}
     local db = BiaoGe.AlgalonStar
-    if db.enabled == nil then db.enabled = true end
+
+    -- 存量用户一次性平滑迁移：由开启重置为默认关闭（需用户手动在团队工具勾选开启）
+    if not db.v261013_init then
+        db.v261013_init = true
+        db.enabled = false
+    end
+
+    if db.enabled == nil then db.enabled = false end
     if db.autoMark == nil then db.autoMark = true end
     if db.soundAlert == nil then db.soundAlert = true end
     if db.locked == nil then db.locked = false end

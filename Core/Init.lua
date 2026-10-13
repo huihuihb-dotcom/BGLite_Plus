@@ -368,6 +368,12 @@ local function InitPlusUI()
     -- 左下角心愿说明
     if BG.HopeMainFrame and not BG.HopeMainFrame.hasTextIntro then
         BG.HopeMainFrame.hasTextIntro = true
+        local t0 = BG.HopeMainFrame:CreateFontString()
+        t0:SetPoint("BOTTOMLEFT", BG.MainFrame, "BOTTOMLEFT", 35, 96)
+        t0:SetFont(BIAOGE_TEXT_FONT, 14, "OUTLINE")
+        t0:SetTextColor(RGB(BG.g1))
+        t0:SetText(L["在心愿清单点Alt+右键可以设置心愿价格"])
+
         local t = BG.HopeMainFrame:CreateFontString()
         t:SetPoint("BOTTOMLEFT", BG.MainFrame, "BOTTOMLEFT", 35, 75)
         t:SetFont(BIAOGE_TEXT_FONT, 20, "OUTLINE")
