@@ -140,14 +140,110 @@ local function FixAndPatchUlduarLoot()
     end
 end
 
--- 立即执行初次修复
-FixAndPatchUlduarLoot()
+-- ==============================================================================
+-- 4. 注入奥杜尔 (ULD / ULDtitan, mapID 603) 橙锤碎片一键分配与老板指定规则
+--    (上游 BGLite 官方遗漏了 mapID 603 的 autoLoot.info 映射，导致团长摸尸时不显示【橙片：未指定】按钮)
+-- ==============================================================================
+local function PatchUlduarAutoLootShard()
+    pcall(function()
+        if not BG then return end
+        BG.autoLoot = BG.autoLoot or {}
+        BG.autoLoot.info = BG.autoLoot.info or {}
 
--- 并在 PLAYER_LOGIN 与 PLAYER_ENTERING_WORLD 进行安全防御修补
+        local defaultShardID = (BG.IsTitan and 270187) or 45038
+        if not BG.autoLoot.info[603] then
+            BG.autoLoot.info[603] = {
+                {
+                    itemID = defaultShardID,
+                    quest = 13622,
+                    maxCount = 30,
+                    title = "|cffff8000橙锤碎片",
+                }
+            }
+        else
+            local cfg = BG.autoLoot.info[603][1]
+            if cfg then
+                cfg.itemID = cfg.itemID or defaultShardID
+                cfg.quest = cfg.quest or 13622
+                cfg.maxCount = cfg.maxCount or 30
+                cfg.title = cfg.title or "|cffff8000橙锤碎片"
+            end
+        end
+    end)
+end
+
+-- 掉落开启时动态感知适配碎片 ID（兼容 270187 时光服与 45038 原版双 ID，全沙箱防护）
+local function OnLootOpenedAdaptShard()
+    pcall(function()
+        if not (BG and BG.autoLoot and BG.autoLoot.info) then return end
+        if not IsInInstance then return end
+        local inInstance, instanceType = IsInInstance()
+        if not inInstance or instanceType ~= "raid" then return end
+
+        local mapID = select(8, GetInstanceInfo())
+        if mapID ~= 603 then return end
+
+        PatchUlduarAutoLootShard()
+
+        local cfg = BG.autoLoot.info[603] and BG.autoLoot.info[603][1]
+        if not cfg then return end
+
+        local detectedID
+        if GetNumLootItems and GetLootSlotLink then
+            local numItems = GetNumLootItems() or 0
+            for li = 1, numItems do
+                if LootSlotHasItem and LootSlotHasItem(li) then
+                    local link = GetLootSlotLink(li)
+                    if link then
+                        local id = link:match("item:(%d+)") or link:match("Hitem:(%d+)")
+                        id = id and tonumber(id)
+                        if id == 270187 or id == 45038 then
+                            detectedID = id
+                            break
+                        end
+                    end
+                end
+            end
+        end
+
+        if detectedID then
+            cfg.itemID = detectedID
+        else
+            cfg.itemID = (BG.IsTitan and 270187) or 45038
+        end
+
+        -- 若拾取框和 SPbutton 已处于可见状态，安全触发刷新以确保老板文字与目标 ID 一致
+        if BG.autoLootButton and BG.autoLootButton.IsShown and BG.autoLootButton:IsShown() then
+            if BG.autoLootButton.SPbutton and BG.autoLootButton.SPbutton.Update then
+                BG.autoLootButton.SPbutton:Update()
+            end
+        end
+    end)
+end
+
+-- 立即执行初次修复与注入
+FixAndPatchUlduarLoot()
+PatchUlduarAutoLootShard()
+
+-- 注册 BG.Init2 确保在 BGLite 原版 Init2 初始化之后自动补全
+if BG and BG.Init2 then
+    BG.Init2(function()
+        PatchUlduarAutoLootShard()
+    end)
+end
+
+-- 并在生命周期事件中进行安全防御修补与掉落动态感知
 local f = CreateFrame("Frame")
 f:RegisterEvent("PLAYER_LOGIN")
 f:RegisterEvent("PLAYER_ENTERING_WORLD")
+f:RegisterEvent("ZONE_CHANGED_NEW_AREA")
+f:RegisterEvent("LOOT_OPENED")
 f:SetScript("OnEvent", function(self, event)
-    FixAndPatchUlduarLoot()
+    if event == "LOOT_OPENED" then
+        OnLootOpenedAdaptShard()
+    else
+        FixAndPatchUlduarLoot()
+        PatchUlduarAutoLootShard()
+    end
 end)
 
