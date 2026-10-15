@@ -1633,11 +1633,11 @@ function ns.InitAuctionPresetModule()
             -- 当 BG.StartAucitonFrame 弹出且有装备时，确保手动修改具有最高绝对优先级
             local f = BG.StartAucitonFrame
             if f and f:IsVisible() and f.Edit2 then
-                -- 核心防御机制：为输入框与开始按钮安装双重防御，确保团长手动输入的价格永远凌驾于任何预设之上
+                -- 核心防御机制：为输入框、开始按钮与快捷价格条安装三重防御，确保团长手动输入/快捷选择的价格永远具有最高优先级
                 if not f._bgliteManualPriceSecured then
                     f._bgliteManualPriceSecured = true
 
-                    -- 防线 A：输入框实时同步（键盘手输、退格、快捷价格按钮点击时，立即更新 bt.money 与全局配置）
+                    -- 防线 A：输入框实时同步（键盘手输、退格时，立即更新 bt.money 与全局配置）
                     f.Edit2:HookScript("OnTextChanged", function(self)
                         local val = tonumber(self:GetText())
                         if f.bt then
@@ -1647,6 +1647,21 @@ function ns.InitAuctionPresetModule()
                             BiaoGe.Auction.money = val
                         end
                     end)
+
+                    -- 防线 A2：输入框回车拦截（按回车瞬间强制以输入框当前文本为准）
+                    local orig_OnEnterPressed = f.Edit2:GetScript("OnEnterPressed")
+                    if orig_OnEnterPressed then
+                        f.Edit2:SetScript("OnEnterPressed", function(self, ...)
+                            local val = tonumber(self:GetText())
+                            if f.bt then
+                                f.bt.money = (val and val > 0) and val or nil
+                            end
+                            if val and val > 0 then
+                                BiaoGe.Auction.money = val
+                            end
+                            orig_OnEnterPressed(self, ...)
+                        end)
+                    end
 
                     -- 防线 B：开始拍卖按钮前置拦截（点击瞬间强制从 Edit2 提取文本，以当前视觉看到的数字为最终绝对基准）
                     if f.bt then
@@ -1662,6 +1677,32 @@ function ns.InitAuctionPresetModule()
                                 end
                                 orig_OnClick(btn, ...)
                             end)
+                        end
+                    end
+
+                    -- 防线 C：快捷价格按钮拦截（点击 100/300/500 等数字条时，前置强制同步 bt.money 与 Edit2，杜绝被旧底价覆盖）
+                    if f.fastMoneyFrame then
+                        local children = { f.fastMoneyFrame:GetChildren() }
+                        for _, fastBtn in ipairs(children) do
+                            if fastBtn.money and not fastBtn._hasHookedPlusFastMoney then
+                                fastBtn._hasHookedPlusFastMoney = true
+                                local orig_FastClick = fastBtn:GetScript("OnClick")
+                                if orig_FastClick then
+                                    fastBtn:SetScript("OnClick", function(btn, ...)
+                                        local targetMoney = tonumber(btn.money)
+                                        if targetMoney and targetMoney > 0 then
+                                            if f.bt then
+                                                f.bt.money = targetMoney
+                                            end
+                                            BiaoGe.Auction.money = targetMoney
+                                            if f.Edit2 then
+                                                f.Edit2:SetText(tostring(targetMoney))
+                                            end
+                                        end
+                                        orig_FastClick(btn, ...)
+                                    end)
+                                end
+                            end
                         end
                     end
                 end

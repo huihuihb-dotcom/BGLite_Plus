@@ -221,14 +221,79 @@ local function OnLootOpenedAdaptShard()
     end)
 end
 
+-- ==============================================================================
+-- 5. 热修复奥杜尔杂项 (boss 15，共 52 格) 清空残留问题
+--    (上游 BGLite 原版 ClearBiaoGeByIndex 循环写死 BG.Maxi + 10 = 50，导致 51 与 52 格漏清)
+-- ==============================================================================
+local function ClearSingleItem(FB, b, i)
+    -- 1. 表格主 UI
+    local bossFrame = BG.Frame and BG.Frame[FB] and BG.Frame[FB]["boss" .. b]
+    if bossFrame and bossFrame["zhuangbei" .. i] then
+        bossFrame["zhuangbei" .. i]:SetText("")
+        bossFrame["maijia" .. i]:SetText("")
+        bossFrame["jine" .. i]:SetText("")
+        if bossFrame["qiankuan" .. i] then
+            bossFrame["qiankuan" .. i]:Hide()
+        end
+        if bossFrame["guanzhu" .. i] then
+            bossFrame["guanzhu" .. i]:Hide()
+        end
+    end
+
+    -- 2. 数据存档
+    local bossData = BiaoGe and BiaoGe[FB] and BiaoGe[FB]["boss" .. b]
+    if bossData then
+        bossData["zhuangbei" .. i] = nil
+        bossData["maijia" .. i] = nil
+        bossData["jine" .. i] = nil
+        bossData["qiankuan" .. i] = nil
+        bossData["guanzhu" .. i] = nil
+        bossData["loot" .. i] = nil
+        bossData["itemLevel" .. i] = nil
+        bossData["bindOnEquip" .. i] = nil
+        if BG.playerClass then
+            for k in pairs(BG.playerClass) do
+                bossData[k .. i] = nil
+            end
+        end
+    end
+
+    -- 3. 对账 UI
+    local dzBoss = BG.DuiZhangFrame and BG.DuiZhangFrame[FB] and BG.DuiZhangFrame[FB]["boss" .. b]
+    if dzBoss and dzBoss["zhuangbei" .. i] then
+        dzBoss["zhuangbei" .. i]:SetText("")
+        dzBoss["myjine" .. i]:SetText("")
+    end
+end
+
+local function PatchUlduarClearBiaoGe()
+    if not (BG and BG.ClearBiaoGeByIndex) then return end
+    if BG._hasHookedClearBiaoGePlus then return end
+    BG._hasHookedClearBiaoGePlus = true
+
+    local orig_ClearBiaoGeByIndex = BG.ClearBiaoGeByIndex
+    BG.ClearBiaoGeByIndex = function(FB, b)
+        orig_ClearBiaoGeByIndex(FB, b)
+
+        -- 针对奥杜尔杂项 (boss 15，共 52 格)，补齐第 51、52 格清理
+        if (FB == "ULDtitan" or FB == "ULD") and b == 15 then
+            for i = 51, 52 do
+                ClearSingleItem(FB, b, i)
+            end
+        end
+    end
+end
+
 -- 立即执行初次修复与注入
 FixAndPatchUlduarLoot()
 PatchUlduarAutoLootShard()
+PatchUlduarClearBiaoGe()
 
 -- 注册 BG.Init2 确保在 BGLite 原版 Init2 初始化之后自动补全
 if BG and BG.Init2 then
     BG.Init2(function()
         PatchUlduarAutoLootShard()
+        PatchUlduarClearBiaoGe()
     end)
 end
 
@@ -244,6 +309,8 @@ f:SetScript("OnEvent", function(self, event)
     else
         FixAndPatchUlduarLoot()
         PatchUlduarAutoLootShard()
+        PatchUlduarClearBiaoGe()
     end
 end)
+
 
