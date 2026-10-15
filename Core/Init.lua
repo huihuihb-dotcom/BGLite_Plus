@@ -30,6 +30,8 @@ local function HookMinimap()
     if not ldb then return end
     local plugin = ldb:GetDataObjectByName("BGLite") or ldb:GetDataObjectByName("BiaoGe")
     if not plugin then return end
+    if plugin._hasHookedPlusMinimap then return end
+    plugin._hasHookedPlusMinimap = true
 
     plugin.OnEnter = function(self)
         -- 检查开关：若玩家关闭了小地图悬停预览，仅显示快捷操作说明 Tooltip

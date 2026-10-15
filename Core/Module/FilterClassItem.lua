@@ -1218,16 +1218,25 @@ do
         bt:SetAlpha(alpha_yes)
     end
 
-    function BG.UpdateFilter(bt, link)
+    function BG.UpdateFilter(bt, link, customDB, customNum)
         if not bt then return end
         local link = link or (bt.GetText and bt:GetText())
-        if not (link and type(link) == "string") then
+        -- 快速短路：若无装备链接或空格子直接恢复高亮返回，避免数十上百次无效正则与查库
+        if not (link and type(link) == "string" and link:find("item:")) then
+            bt:SetAlpha(alpha_yes)
+            return
+        end
+        local db = customDB
+        local num = customNum
+        if not db then
+            db, num = BG.GetFilterClassItemDB()
+        end
+        if not (num and db and db[num]) then
             bt:SetAlpha(alpha_yes)
             return
         end
         local itemID = GetItemID(link)
-        local db, num = BG.GetFilterClassItemDB()
-        if not (link:find("item:") and itemID and num and db and db[num]) then
+        if not itemID then
             bt:SetAlpha(alpha_yes)
             return
         end
@@ -1252,9 +1261,13 @@ do
         end)
     end
 
-    function BG.UpdateAllFilter()
+    local updateFilterTimer = nil
+    local function DoUpdateAllFilter()
         local FB = BG.FB1
         if not FB then return end
+
+        local db, num = BG.GetFilterClassItemDB()
+        local hasFilter = (num and db and db[num])
 
         -- 1. 当前表格
         if BG.Frame and BG.Frame[FB] and Maxb and Maxb[FB] then
@@ -1264,7 +1277,11 @@ do
                     if BG.Frame[FB]["boss" .. b] then
                         local bt = BG.Frame[FB]["boss" .. b]["zhuangbei" .. i]
                         if bt then
-                            BG.UpdateFilter(bt)
+                            if hasFilter then
+                                BG.UpdateFilter(bt, nil, db, num)
+                            else
+                                bt:SetAlpha(alpha_yes)
+                            end
                         end
                     end
                 end
@@ -1279,7 +1296,11 @@ do
                     if BG.HistoryFrame[FB]["boss" .. b] then
                         local bt = BG.HistoryFrame[FB]["boss" .. b]["zhuangbei" .. i]
                         if bt then
-                            BG.UpdateFilter(bt)
+                            if hasFilter then
+                                BG.UpdateFilter(bt, nil, db, num)
+                            else
+                                bt:SetAlpha(alpha_yes)
+                            end
                         end
                     end
                 end
@@ -1295,7 +1316,11 @@ do
                             for i = 1, (HopeMaxi or 7) do
                                 local bt = BG.HopeFrame[FB]["nandu" .. n]["boss" .. b]["zhuangbei" .. i]
                                 if bt then
-                                    BG.UpdateFilter(bt)
+                                    if hasFilter then
+                                        BG.UpdateFilter(bt, nil, db, num)
+                                    else
+                                        bt:SetAlpha(alpha_yes)
+                                    end
                                 end
                             end
                         end
@@ -1309,7 +1334,11 @@ do
             local i = 1
             while BG.ZhuangbeiList["button" .. i] do
                 local bt = BG.ZhuangbeiList["button" .. i]
-                BG.UpdateFilter(bt)
+                if hasFilter then
+                    BG.UpdateFilter(bt, nil, db, num)
+                else
+                    bt:SetAlpha(alpha_yes)
+                end
                 i = i + 1
             end
         end
@@ -1317,7 +1346,11 @@ do
         -- 5. 装备过期列表
         if BG.itemGuoQiFrame and BG.itemGuoQiFrame:IsVisible() and BG.itemGuoQiFrame.buttons then
             for i, bt in ipairs(BG.itemGuoQiFrame.buttons) do
-                BG.UpdateFilter(bt, bt.link)
+                if hasFilter then
+                    BG.UpdateFilter(bt, bt.link, db, num)
+                else
+                    bt:SetAlpha(alpha_yes)
+                end
             end
         end
 
@@ -1325,7 +1358,11 @@ do
         if BG.auctionLogFrame and BG.auctionLogFrame:IsVisible() and BG.auctionLogFrame.buttons then
             for i, bt in ipairs(BG.auctionLogFrame.buttons) do
                 if bt.frame then
-                    BG.UpdateFilter(bt.frame, bt.link)
+                    if hasFilter then
+                        BG.UpdateFilter(bt.frame, bt.link, db, num)
+                    else
+                        bt.frame:SetAlpha(alpha_yes)
+                    end
                 end
             end
         end
@@ -1334,7 +1371,11 @@ do
         if BG.ItemLibMainFrame and BG.ItemLibMainFrame.Hope then
             for k, bt in pairs(BG.ItemLibMainFrame.Hope) do
                 if type(bt) == "table" and bt.EquipLoc then
-                    BG.UpdateFilter(bt)
+                    if hasFilter then
+                        BG.UpdateFilter(bt, nil, db, num)
+                    else
+                        bt:SetAlpha(alpha_yes)
+                    end
                 end
             end
         end
@@ -1354,7 +1395,6 @@ do
 
         -- 9. BGA 光环高亮 (如安装)
         if BGA and BGA.Frames then
-            local db, num = BG.GetFilterClassItemDB()
             for _, f in ipairs(BGA.Frames) do
                 f.filter = nil
                 if f.player and (f.player == BG.playerName or (f.playerID and f.player == f.playerID)) then
@@ -1377,5 +1417,22 @@ do
                 end
             end
         end
+    end
+
+    function BG.UpdateAllFilter(immediate)
+        if immediate then
+            if updateFilterTimer then
+                updateFilterTimer:Cancel()
+                updateFilterTimer = nil
+            end
+            DoUpdateAllFilter()
+            return
+        end
+
+        if updateFilterTimer then return end
+        updateFilterTimer = C_Timer.NewTimer(0.05, function()
+            updateFilterTimer = nil
+            DoUpdateAllFilter()
+        end)
     end
 end
